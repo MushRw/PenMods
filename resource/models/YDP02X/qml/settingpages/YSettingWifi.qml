@@ -11,6 +11,13 @@ YSettingItemPage {
 
     readonly property bool wifiManagerOnoff: wifiManager.onoff
 
+    property int currentKeyboardState: 0
+
+    function shortUrl(url) {
+        if (url.length === 0) return "[未配置]";
+        return url.length > 28 ? url.substring(0, 28) + "…" : url;
+    }
+
     function tryScan() {
         id_delay_empty_show_timer.stop()
         if (wifiManagerOnoff) {
@@ -223,9 +230,55 @@ YSettingItemPage {
                 }
             }
 
-            footer: YSpacing {
+            footer: Column {
                 width: id_setting_wifi_view.width
-                height: 8
+                spacing: 8
+
+                YText {
+                    width: parent.width
+                    font.pixelSize: 16
+                    font.italic: true
+                    color: YColors.grayText
+                    leftPadding: 10
+                    topPadding: 8
+                    text: "VPN"
+                }
+
+                DescribedSwitchItem {
+                    width: parent.width
+                    implicitHeight: 54
+                    title: "启用 VPN"
+                    description: "开启后，笔上应用的联网流量走本地代理。"
+                    describeItem.wrapMode: Text.WrapAnywhere
+                    switchOn: vpnManager.enabled
+                    interval: 0
+                    onTimerTriggered: {
+                        vpnManager.enabled = switchOn
+                    }
+                }
+
+                DescribedClickableTextBox {
+                    width: parent.width
+                    title: "订阅链接"
+                    describe: id_setting_wifi.shortUrl(vpnManager.subscriptionUrl)
+                    describeItem.wrapMode: Text.WrapAnywhere
+                    opacityChangableWhenPressed: false
+                    onClicked: {
+                        requestKeyboard("", 1)
+                    }
+                }
+
+                YText {
+                    width: parent.width
+                    font.pixelSize: 14
+                    color: vpnManager.running ? YColors.green : YColors.grayText
+                    leftPadding: 10
+                    text: vpnManager.running ? "VPN 已连接" : "VPN 未连接"
+                }
+
+                YSpacing {
+                    implicitHeight: 8
+                }
             }
         }
 
@@ -324,16 +377,21 @@ YSettingItemPage {
                 incubatorObject.todoDestroy()
                 incubatorObject = null
             })
-            incubatorObject.inputFinished.connect(function(pwd){
-                wifiManager.tryConnect(id_page_pop_helper.ssid, pwd)
-                id_setting_wifi_view.positionViewAtBeginning()
+            incubatorObject.inputFinished.connect(function(content){
+                if (id_setting_wifi.currentKeyboardState === 1) {
+                    vpnManager.subscriptionUrl = content
+                } else {
+                    wifiManager.tryConnect(id_page_pop_helper.ssid, content)
+                    id_setting_wifi_view.positionViewAtBeginning()
+                }
             })
             incubatorObject.show()
             qmlGlobal.inputPageShowing = true
         }
     }
 
-    function requestKeyboard(ssid) {
+    function requestKeyboard(ssid, keyboardState) {
+        currentKeyboardState = (keyboardState === undefined ? 0 : keyboardState);
         let component = qmlCreateComponent("YInputPage")
         if (Component.Ready === component.status) {
 

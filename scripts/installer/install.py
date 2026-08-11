@@ -148,6 +148,9 @@ def main():
     if "libPenMods.so" not in r.stdout:
         fail("校验失败：主程序未包含 libPenMods.so 依赖")
 
+    log("清除 QML 缓存（确保新界面生效）...")
+    adb("shell", "rm -rf /.cache/NeteaseYoudao/YoudaoDictPen/qmlcache")
+
     log("唤醒触摸并重启设备...")
     adb("shell", "echo 0 > /sys/kernel/debug/touchscreen/suspend")
     adb("shell", "sync")
