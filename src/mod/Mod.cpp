@@ -34,6 +34,10 @@ Mod::Mod() {
     connect(&Event::getInstance(), &Event::beforeUiInitialization, [this](QQuickView& view, QQmlContext* context) {
         mCaptureWindow = &view;
         spdlog::info("[Mod] beforeUiInitialization, window={}", fmt::ptr(&view));
+        // 定时器必须在事件循环就绪后启动（构造函数阶段 start 会失败）
+        if (!mCaptureTimer->isActive()) {
+            mCaptureTimer->start();
+        }
         context->setContextProperty("mod", this);
         qmlRegisterUncreatableType<PageIndex>(
             QML_PACKAGE_NAME,
@@ -56,7 +60,6 @@ Mod::Mod() {
     mCaptureTimer = new QTimer(this);
     mCaptureTimer->setInterval(500);
     connect(mCaptureTimer, &QTimer::timeout, this, &Mod::onCaptureTick);
-    mCaptureTimer->start();
     spdlog::info("[Mod] 构造函数完成, capture timer={}", fmt::ptr(mCaptureTimer));
 }
 
