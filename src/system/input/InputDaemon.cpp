@@ -32,7 +32,7 @@ bool InputDaemon::setScreenOff(uint32 sec) {
 }
 
 bool InputDaemon::setSystemSuspend(uint32 sec) {
-    if (mSystemSuspend <= mBackLightDown && mSystemSuspend != 0) {
+    if (sec <= mBackLightDown && sec != 0) {
         return false;
     }
     mSystemSuspend = sec;

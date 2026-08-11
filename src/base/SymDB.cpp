@@ -67,23 +67,24 @@ SymDB::SymDB() : Logger("SymDB") {
             && !name.starts_with("_ZSt")    // standard library
             && !name.starts_with("_ZGV")) { // guard variable
             // warn("sym: {} - {:#x}", name, value);
-            mDatabase.insert(H(name.c_str()), value);
+            mDatabase.insert(QString::fromUtf8(name.c_str()), value);
         }
     }
     info("{} symbols loaded.", count());
 }
 
 void* SymDB::query(const std::string& name) {
-    void* ret  = nullptr;
-    auto  hash = H(name.c_str());
-    if (mDatabase.contains(hash)) {
-        ret = reinterpret_cast<void*>(mDatabase.value(hash));
+    void* ret = nullptr;
+    auto  key = QString::fromUtf8(name.c_str());
+    auto  it  = mDatabase.constFind(key);
+    if (it != mDatabase.constEnd()) {
+        ret = reinterpret_cast<void*>(it.value());
     } else {
         ret = DobbySymbolResolver(nullptr, name.c_str());
         if (!ret) {
             warn("{} not found in memory.", name);
         } else {
-            mDatabase.insert(hash, reinterpret_cast<uint64>(ret));
+            mDatabase.insert(key, reinterpret_cast<uint64>(ret));
         }
     }
     return ret;

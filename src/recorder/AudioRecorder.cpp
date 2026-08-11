@@ -152,7 +152,10 @@ bool AudioRecorder::stop() {
     }
     auto error = mInputAudio->error();
 
-    disconnect(this, nullptr, nullptr, nullptr);
+    // 只断开录音相关的信号连接（这些是 functor 连接，需按 sender 整体断开），
+    // 避免切断 QML 对 audioRecorder 属性的绑定
+    if (mInputDevice) mInputDevice->disconnect();
+    mInputAudio->disconnect();
 
     // 录音结束，释放音频输出引用
     AudioDaemon::getInstance().release(AudioSource::SYSTEM);
@@ -161,6 +164,8 @@ bool AudioRecorder::stop() {
     exec("amixer cset numid=2 0");
     InputDaemon::getInstance().reset();
     mInputAudio->stop();
+    // stateChanged 连接已在上面断开，这里显式同步停止状态，避免 UI 停留在录制中
+    setState(QAudio::StoppedState);
     lame_close(mLame);
     mOutputFile.rename(mSavePath);
     mOutputFile.close();
@@ -170,6 +175,7 @@ bool AudioRecorder::stop() {
     delete[] mMp3Data;
     mLame       = nullptr;
     mInputAudio = nullptr;
+    mInputDevice = nullptr;
 
     switch (error) {
     case QAudio::OpenError:

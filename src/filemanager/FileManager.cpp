@@ -68,8 +68,8 @@ QVariant FileManager::data(const QModelIndex& index, int role) const {
         return {};
     }
 
-    const size_t row = index.row();
-    if (row < 0 || row > (size_t)mProxyCount - 1) {
+    const size_t row = static_cast<size_t>(index.row());
+    if (row >= static_cast<size_t>(mProxyCount)) {
         return {};
     }
 
@@ -306,10 +306,14 @@ void FileManager::remove(const QString& fileName) {
         } else {
             mCurrentPath.remove(fileName);
         }
-        mEntities.erase(mEntities.begin() + idx);
-        beginRemoveRows(QModelIndex(), idx, idx);
-        mProxyCount--;
-        endRemoveRows();
+        if (idx < mProxyCount) {
+            beginRemoveRows(QModelIndex(), idx, idx);
+            mEntities.erase(mEntities.begin() + idx);
+            mProxyCount--;
+            endRemoveRows();
+        } else {
+            mEntities.erase(mEntities.begin() + idx);
+        }
         markSuspendDirChangedNotifier();
         emit hasMoreChanged();
         break;

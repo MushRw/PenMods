@@ -274,7 +274,7 @@ void ChatBot::ensureCurrentSession() {
 QString ChatBot::sessionsFilePath() {
     if (m_sessionsPath.isEmpty()) {
         m_sessionsPath =
-            QString::fromStdString((mod::util::getModuleFileInfo().absolutePath() + "sessions.json").toStdString());
+            QString::fromStdString((mod::util::getModuleFileInfo().absolutePath() + "/sessions.json").toStdString());
     }
     return m_sessionsPath;
 }
@@ -1453,8 +1453,7 @@ void ChatBot::setIsStreaming(bool streaming) {
     auto& config  = mod::Config::getInstance();
     json  aiCfg   = config.read("ai");
     if (aiCfg.is_null()) aiCfg = json::object();
-    if (!aiCfg.contains("chatbot")) aiCfg["chatbot"] = json::object();
-    aiCfg["chatbot"]["streaming"] = streaming;
+    aiCfg["streaming"] = streaming;
     config.write("ai", aiCfg, true);
     emit isStreamingChanged();
 }
@@ -2291,8 +2290,13 @@ bool ChatBot::isCommandBlocked(const QString& command) {
 }
 
 QString ChatBot::truncateOutput(const QString& output, int maxBytes) {
-    if (output.toUtf8().size() <= maxBytes) return output;
-    QByteArray truncated = output.toUtf8().left(maxBytes);
+    if (maxBytes <= 0) return QString();
+    QByteArray utf8 = output.toUtf8();
+    if (utf8.size() <= maxBytes) return output;
+    QByteArray truncated = utf8.left(maxBytes);
+    // 避免在 UTF-8 多字节字符中间截断
+    while (!truncated.isEmpty() && (truncated.back() & 0xC0) == 0x80) truncated.chop(1);
+    if (!truncated.isEmpty() && (truncated.back() & 0xC0) == 0xC0) truncated.chop(1);
     return QString::fromUtf8(truncated) + "\n... [输出已截断]";
 }
 

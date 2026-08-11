@@ -14,6 +14,7 @@
 #include "system/sound/AudioDaemon.h"
 
 #include <QFile>
+#include <QHash>
 #include <QQmlContext>
 #include <QRandomGenerator>
 
@@ -63,7 +64,7 @@ struct YColumnMediaEntity : public YMediaEntity {
 static_assert(sizeof(YColumnMediaEntity) == 0x68);
 
 void MusicPlayer::play(size_t idx) {
-    if (idx > mPlayList.size() - 1) return;
+    if (mPlayList.empty() || idx > mPlayList.size() - 1) return;
     auto file = mPlayList.at(idx);
     if (!mCurrentPlaying.mIsEnd && mCurrentPlaying.mFile == file) {
         PEN_CALL(void*, "_ZN7YGlobal15showAudioPlayerEv", void*)(YPointer<YGlobal>::getInstance());
@@ -84,9 +85,9 @@ void MusicPlayer::_play(const std::shared_ptr<QFileInfo>& file) {
     PEN_CALL(void, "_ZN19YMediaPlayerManager8wipeDataEv", void*)(YPointer<YMediaPlayerManager>::getInstance());
     PEN_CALL(bool, "_ZN7YGlobal23setAudioPlayingColomnIdERK7QString", void*, QString const&)
     (YPointer<YGlobal>::getInstance(), "myimport");
-    auto memory = new char[sizeof(YColumnMediaEntity)];
-    PEN_CALL(void, "_ZN18YColumnMediaEntityC2EP7QObject", void*, void*)(memory, nullptr);
-    auto       entity  = reinterpret_cast<YColumnMediaEntity*>(memory);
+    auto*      memory  = new char[sizeof(YColumnMediaEntity)];
+    auto*      entity  = reinterpret_cast<YColumnMediaEntity*>(memory);
+    PEN_CALL(void, "_ZN18YColumnMediaEntityC2EP7QObject", void*, void*)(entity, nullptr);
     bool       hasLrc  = false;
     static int mediaId = 0;
     mediaId--;
@@ -131,7 +132,8 @@ void MusicPlayer::_play(const std::shared_ptr<QFileInfo>& file) {
     PEN_CALL(void*, "_ZN13YMediaManager9playAudioERK18YColumnMediaEntityb", void*, YColumnMediaEntity*, bool)
     (YPointer<YMediaManager>::getInstance(), entity, true);
     PEN_CALL(void*, "_ZN7YGlobal15showAudioPlayerEv", void*)(YPointer<YGlobal>::getInstance());
-    delete entity;
+    entity->~YColumnMediaEntity();
+    delete[] memory;
     entity = nullptr; // entity is copied.
     if (*(PlayState*)((uintptr_t*)YPointer<YMediaPlayerManager>::getInstance() + 168) != PlayState::PLAYING) {
         PEN_CALL(void, "_ZN19YMediaPlayerManager13onClickedPlayEv", void*)
@@ -150,7 +152,8 @@ QString MusicPlayer::createTempSymlinks(const PlayFile& file, QString& outLrcPat
     }
     // 生成唯一的临时文件名（基于原文件绝对路径的哈希）
     const QString baseName     = file->completeBaseName();
-    const QString tmpAudioPath = QString("/tmp/%1.mp3").arg(baseName);
+    // 使用路径哈希避免不同目录下的同名歌曲互相覆盖临时软链接
+    const QString tmpAudioPath = QString("/tmp/%1_%2.mp3").arg(baseName, QString::number(qHash(file->absoluteFilePath()), 16));
     // 创建音频文件的 .mp3 软链接
     QFile::remove(tmpAudioPath);
     if (QFile::link(file->absoluteFilePath(), tmpAudioPath)) {

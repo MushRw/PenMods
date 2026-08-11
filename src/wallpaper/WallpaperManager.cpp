@@ -13,6 +13,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QFileInfo>
+#include <QRandomGenerator>
 
 namespace mod {
 
@@ -155,7 +156,7 @@ void WallpaperManager::nextWallpaper() {
     }
 
     // 随机选择
-    mCurrentIndex = rand() % mCachedImages.size();
+    mCurrentIndex = QRandomGenerator::global()->bounded(static_cast<int>(mCachedImages.size()));
     applyWallpaper(mCachedImages.at(mCurrentIndex));
 }
 

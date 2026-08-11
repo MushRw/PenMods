@@ -115,7 +115,7 @@ void NetworkSettings::_refreshApplicationProxy() {
     }());
     proxy.setHostName(mProxyHostName);
     proxy.setPort(mProxyPort);
-    if (mProxyUserName.isEmpty()) {
+    if (!mProxyUserName.isEmpty()) {
         proxy.setUser(mProxyUserName);
         proxy.setPassword(mProxyPassword);
     }

@@ -61,8 +61,8 @@ void WordBookTweaks::doExport() {
     // see xrefs for: YWordbookDB::loadAllWords()
     // line 41~45
     // set queryId.
-    *(byte*)(YPointer<YWordBookManager>::getInstance() + 128) = 1;
-    *(uint64*)(YPointer<YWordBookManager>::getInstance() + 136) =
+    *(byte*)((byte*)YPointer<YWordBookManager>::getInstance() + 128) = 1;
+    *(uint64*)((byte*)YPointer<YWordBookManager>::getInstance() + 136) =
         PEN_CALL(uint64, "_ZNK11YWordbookDB12loadAllWordsEN12YEnumWrapper9ItemStateE", void*, uint32)(
             YPointer<YWordbookDB>::getInstance(),
             1
@@ -81,9 +81,13 @@ bool WordBookTweaks::exportFromQueryResult(uint64 queryResult) {
     int index       = -1;
     mExportProgress = 0;
     auto count      = PEN_CALL(int, "_ZNK8Database16AsyncQueryResult5countEv", uint64)(queryResult);
+    if (count <= 0) {
+        showToast("单词本为空");
+        return true;
+    }
     while (count > index) {
         index++;
-        mExportProgress += (index / (double)count) * 100.0;
+        mExportProgress = static_cast<int>((index + 1.0) / count * 100.0);
         emit exportProgressChanged();
         auto qv = PEN_CALL(QVariant, "_ZNK8Database16AsyncQueryResult5valueEiRK7QString", uint64, int, QString)(
             queryResult,

@@ -30,7 +30,9 @@ std::string exec(const char* cmd) {
         throw;
     }
     pclose(pipe);
-    return result.substr(0, result.length() - 1);
+    if (!result.empty() && result.back() == '\n') result.pop_back();
+    if (!result.empty() && result.back() == '\r') result.pop_back();
+    return result;
 }
 
 // 12.333 -> 12.3, if n=1
@@ -38,7 +40,9 @@ double dec(double d, uint16 n) { return round(d * pow(10, n)) / pow(10, n); }
 
 std::string readFileNoLast(const char* path) {
     auto str = readFile(path);
-    return str.substr(0, str.length() - 1);
+    if (!str.empty() && str.back() == '\n') str.pop_back();
+    if (!str.empty() && str.back() == '\r') str.pop_back();
+    return str;
 }
 
 std::string readFile(const char* path) {

@@ -45,7 +45,7 @@ bool ServiceManager::getAdbStatus() const {
     return readFileNoLast("/tmp/.usb_config").find("usb_adb_en") != std::string::npos;
 }
 
-bool ServiceManager::getSshStatus() const { return exec("ps | grep ssh").find("sshd") != std::string::npos; }
+bool ServiceManager::getSshStatus() const { return exec("ps | grep [s]sh").find("sshd") != std::string::npos; }
 
 bool ServiceManager::startAdb(bool dontShowToast) {
     PEN_CALL(uint64, "adb_onoff", char)(1);

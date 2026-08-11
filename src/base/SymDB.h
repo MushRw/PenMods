@@ -10,6 +10,7 @@
 #include "common/service/Singleton.h"
 
 #include <QHash>
+#include <QString>
 
 namespace mod {
 
@@ -25,7 +26,7 @@ private:
 
     uint64 _getImageBase(const std::string& module);
 
-    QHash<uint32, uint64> mDatabase;
+    QHash<QString, uint64> mDatabase;
 };
 
 } // namespace mod

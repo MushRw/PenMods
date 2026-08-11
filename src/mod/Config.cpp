@@ -18,7 +18,7 @@ namespace fs = std::filesystem;
 
 namespace mod {
 
-std::string get_config_path() { return (util::getModuleFileInfo().absolutePath() + "config.json").toStdString(); }
+std::string get_config_path() { return (util::getModuleFileInfo().absolutePath() + "/config.json").toStdString(); }
 
 Config::Config() : Logger("Config") {
 
