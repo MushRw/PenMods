@@ -6,6 +6,9 @@
 
 #pragma once
 
+#include <QQuickWindow>
+#include <QTimer>
+
 namespace mod {
 
 struct PageIndex {
@@ -48,11 +51,18 @@ public:
 
     Q_INVOKABLE void reboot();
 
+private slots:
+
+    void onCaptureTick();
+
 private:
     friend Singleton<Mod>;
     explicit Mod();
 
     std::string mClassName = "mod";
+
+    QTimer*       mCaptureTimer;
+    QQuickWindow* mCaptureWindow;
 };
 
 } // namespace mod

@@ -20,6 +20,7 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
+#include <QImage>
 #include <QProcessEnvironment>
 #include <QQmlContext>
 #include <QQuickView>
@@ -30,6 +31,7 @@ Mod::Mod() {
 
     connect(&Event::getInstance(), &Event::uiCompleted, this, &Mod::onUiCompleted);
     connect(&Event::getInstance(), &Event::beforeUiInitialization, [this](QQuickView& view, QQmlContext* context) {
+        mCaptureWindow = &view;
         context->setContextProperty("mod", this);
         qmlRegisterUncreatableType<PageIndex>(
             QML_PACKAGE_NAME,
@@ -47,6 +49,12 @@ Mod::Mod() {
         emit cachedSymCountChanged();
         emit buildInfoChanged();
     });
+
+    // 调试截图：touch /tmp/penmods_screencap 触发，输出 /tmp/penmods_screen.png
+    mCaptureTimer = new QTimer(this);
+    mCaptureTimer->setInterval(500);
+    connect(mCaptureTimer, &QTimer::timeout, this, &Mod::onCaptureTick);
+    mCaptureTimer->start();
 }
 
 bool Mod::isTrustedDevice() const { return true; }
@@ -86,6 +94,19 @@ void Mod::uninstall() {
 void Mod::softReboot() { std::terminate(); }
 
 void Mod::reboot() { exec("sync && reboot"); }
+
+void Mod::onCaptureTick() {
+    if (!mCaptureWindow || !QFile::exists("/tmp/penmods_screencap")) {
+        return;
+    }
+    QFile::remove("/tmp/penmods_screencap");
+    QImage image = mCaptureWindow->grabWindow();
+    if (image.save("/tmp/penmods_screen.png", "PNG")) {
+        spdlog::info("[ScreenCapture] saved /tmp/penmods_screen.png ({}x{})", image.width(), image.height());
+    } else {
+        spdlog::error("[ScreenCapture] failed to save screenshot");
+    }
+}
 
 void Mod::onUiCompleted() const {
 
