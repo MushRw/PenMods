@@ -142,6 +142,11 @@ jobs:
           mkdir -p build/linux/arm64-v8a
           cp resource/player/player.zip build/linux/arm64-v8a/player.zip
 
+      - name: 打包 Rime 输入法数据
+        run: |
+          mkdir -p build/linux/arm64-v8a
+          cp resource/rime/rime.zip build/linux/arm64-v8a/rime.zip
+
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:

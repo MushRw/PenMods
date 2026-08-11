@@ -169,6 +169,10 @@ void Mod::onUiCompleted() const {
     // Ensure the bundled external player (mpv) is installed.
 
     ensurePlayerInstalled();
+
+    // Ensure the bundled Rime input method data is installed.
+
+    ensureRimeInstalled();
 }
 
 } // namespace mod

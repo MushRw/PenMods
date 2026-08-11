@@ -21,6 +21,8 @@ constexpr const char* kPlayerMarker  = "/userdisk/mpv/mpv";
 constexpr const char* kPlayerArchive = "/userdata/PenMods/player.zip";
 constexpr const char* kVideoPlayer   = "/userdisk/VideoPlayer";
 constexpr const char* kPlayerWrapper = "/userdisk/mpv/mpv";
+constexpr const char* kRimeMarker    = "/userdisk/Music/Rime/luna_pinyin.schema.yaml";
+constexpr const char* kRimeArchive   = "/userdata/PenMods/rime.zip";
 
 void repairVideoPlayerLink() {
     QFileInfo info(kVideoPlayer);
@@ -67,6 +69,33 @@ void ensurePlayerInstalled() {
     }
     spdlog::info("[PlayerInstaller] 播放器部署完成");
     repairVideoPlayerLink();
+}
+
+void ensureRimeInstalled() {
+    if (QFile::exists(kRimeMarker)) {
+        // 已安装（或用户已放置自定义方案），不覆盖
+        return;
+    }
+
+    if (!QFile::exists(kRimeArchive)) {
+        spdlog::warn("[PlayerInstaller] Rime 数据缺失，且未找到安装包 {}", kRimeArchive);
+        return;
+    }
+
+    spdlog::info("[PlayerInstaller] Rime 数据缺失，从 {} 部署...", kRimeArchive);
+    exec("rm -rf /tmp/rime_install && mkdir -p /tmp/rime_install");
+    exec(QString("unzip -q -o \"%1\" -d /tmp/rime_install").arg(kRimeArchive));
+    if (!QFile::exists("/tmp/rime_install/luna_pinyin.schema.yaml")) {
+        spdlog::error("[PlayerInstaller] rime.zip 内容不完整（缺少 luna_pinyin.schema.yaml）");
+        return;
+    }
+
+    exec("mkdir -p /userdisk/Music/Rime && cp -f /tmp/rime_install/* /userdisk/Music/Rime/");
+    if (QFile::exists(kRimeMarker)) {
+        spdlog::info("[PlayerInstaller] Rime 数据部署完成");
+    } else {
+        spdlog::error("[PlayerInstaller] 部署后仍缺少 {}", kRimeMarker);
+    }
 }
 
 } // namespace mod
