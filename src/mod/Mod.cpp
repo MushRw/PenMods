@@ -29,9 +29,11 @@ namespace mod {
 
 Mod::Mod() {
 
+    spdlog::info("[Mod] 构造函数开始");
     connect(&Event::getInstance(), &Event::uiCompleted, this, &Mod::onUiCompleted);
     connect(&Event::getInstance(), &Event::beforeUiInitialization, [this](QQuickView& view, QQmlContext* context) {
         mCaptureWindow = &view;
+        spdlog::info("[Mod] beforeUiInitialization, window={}", fmt::ptr(&view));
         context->setContextProperty("mod", this);
         qmlRegisterUncreatableType<PageIndex>(
             QML_PACKAGE_NAME,
@@ -55,6 +57,7 @@ Mod::Mod() {
     mCaptureTimer->setInterval(500);
     connect(mCaptureTimer, &QTimer::timeout, this, &Mod::onCaptureTick);
     mCaptureTimer->start();
+    spdlog::info("[Mod] 构造函数完成, capture timer={}", fmt::ptr(mCaptureTimer));
 }
 
 bool Mod::isTrustedDevice() const { return true; }
@@ -96,11 +99,21 @@ void Mod::softReboot() { std::terminate(); }
 void Mod::reboot() { exec("sync && reboot"); }
 
 void Mod::onCaptureTick() {
-    if (!mCaptureWindow || !QFile::exists("/tmp/penmods_screencap")) {
+    if (!mCaptureWindow) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            spdlog::warn("[Mod] capture tick: mCaptureWindow 为空");
+        }
         return;
     }
+    if (!QFile::exists("/tmp/penmods_screencap")) {
+        return;
+    }
+    spdlog::info("[Mod] 检测到截图标志，开始抓取");
     QFile::remove("/tmp/penmods_screencap");
     QImage image = mCaptureWindow->grabWindow();
+    spdlog::info("[Mod] grabWindow 完成: {}x{}", image.width(), image.height());
     if (image.save("/tmp/penmods_screen.png", "PNG")) {
         spdlog::info("[ScreenCapture] saved /tmp/penmods_screen.png ({}x{})", image.width(), image.height());
     } else {
