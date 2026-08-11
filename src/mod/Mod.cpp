@@ -6,6 +6,7 @@
 
 #include "mod/Mod.h"
 #include "mod/PlayerInstaller.h"
+#include "helper/VpnManager.h"
 
 #include "wallpaper/WallpaperManager.h"
 
@@ -221,7 +222,6 @@ PEN_HOOK(bool, license_verify) { return true; }
 #include "helper/DeveloperSettings.h"
 #include "helper/NetworkSettings.h"
 #include "helper/ServiceManager.h"
-#include "helper/VpnManager.h"
 
 #include "locker/Locker.h"
 
