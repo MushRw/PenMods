@@ -23,6 +23,12 @@ YSettingItemPage {
         }
     }
 
+    function shortUrl(url) {
+        // 订阅链接较长，显示时截断，避免超出框体
+        if (url.length === 0) return "[未配置]";
+        return url.length > 28 ? url.substring(0, 28) + "…" : url;
+    }
+
     Flickable {
         id: id_setting_item_view
         anchors.fill: parent
@@ -158,7 +164,7 @@ YSettingItemPage {
 
             DescribedClickableTextBox {
                 title: "订阅链接"
-                describe: vpnManager.subscriptionUrl.length != 0 ? vpnManager.subscriptionUrl : "[未配置]"
+                describe: shortUrl(vpnManager.subscriptionUrl)
                 opacityChangableWhenPressed: false
                 onClicked: {
                     requestKeyboard();

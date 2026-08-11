@@ -13,6 +13,8 @@
 #include <QDir>
 #include <QFile>
 #include <QNetworkProxy>
+#include <QQmlContext>
+#include <QQuickView>
 #include <QThread>
 
 #include <spdlog/spdlog.h>
@@ -43,6 +45,11 @@ VpnManager::VpnManager() : mEnabled(false), mRunning(false), mProcess(nullptr) {
         if (mEnabled) {
             start();
         }
+    });
+
+    connect(&Event::getInstance(), &Event::beforeUiInitialization, [this](QQuickView& view, QQmlContext* context) {
+        Q_UNUSED(view);
+        context->setContextProperty("vpnManager", this);
     });
 }
 

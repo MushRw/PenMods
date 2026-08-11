@@ -28,8 +28,8 @@ Item {
         sourceSize: Qt.size(30, 30)
         defaultIconSource: "image://icons/portrait.png"
 
-        // 使用不透明边框，圆环会盖住方形图片的四角，恢复圆形头像
-        borderColor: YColors.black
+        // 头像图片已由 penavatar 提供器裁成圆形，无需边框
+        borderColor: "transparent"
 
         YMouseArea {
             anchors.fill: parent

@@ -16,8 +16,10 @@ Item {
         id: id_portrait_image
         anchors.fill: parent
         asynchronous: true
-        source: (loginManager.iconPath.length > 0) && qmlGlobal.fileExists(loginManager.iconPath)
-                ? loginManager.iconPath.toLoadFileUrl() : defaultIconSource
+        // 经 penavatar 提供器做圆形裁剪（CPU 处理，不依赖着色器）
+        source: "image://penavatar/" + encodeURIComponent(
+                    (loginManager.iconPath.length > 0) && qmlGlobal.fileExists(loginManager.iconPath)
+                        ? loginManager.iconPath.toLoadFileUrl() : defaultIconSource)
         fillMode: Image.PreserveAspectCrop
     }
 

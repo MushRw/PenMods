@@ -7,6 +7,7 @@
 #include "mod/Mod.h"
 #include "mod/PlayerInstaller.h"
 #include "helper/VpnManager.h"
+#include "helper/AvatarProvider.h"
 
 #include "wallpaper/WallpaperManager.h"
 
@@ -35,6 +36,7 @@ Mod::Mod() {
     connect(&Event::getInstance(), &Event::beforeUiInitialization, [this](QQuickView& view, QQmlContext* context) {
         mCaptureWindow = &view;
         spdlog::info("[Mod] beforeUiInitialization, window={}", fmt::ptr(&view));
+        view.engine()->addImageProvider("penavatar", new AvatarProvider(view.engine()));
         // 定时器必须在事件循环就绪后启动（构造函数阶段 start 会失败）
         if (!mCaptureTimer->isActive()) {
             mCaptureTimer->start();
