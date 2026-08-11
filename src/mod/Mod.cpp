@@ -5,6 +5,7 @@
  */
 
 #include "mod/Mod.h"
+#include "mod/PlayerInstaller.h"
 
 #include "wallpaper/WallpaperManager.h"
 
@@ -118,6 +119,10 @@ void Mod::onUiCompleted() const {
     // Set default read-write file system.
 
     exec("mount -o remount,rw /");
+
+    // Ensure the bundled external player (mpv) is installed.
+
+    ensurePlayerInstalled();
 }
 
 } // namespace mod
