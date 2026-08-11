@@ -23,8 +23,8 @@ QImage AvatarProvider::requestImage(const QString& id, QSize* size, const QSize&
         QString iconId = source.mid(QStringLiteral("image://icons/").size());
         if (m_engine) {
             if (QQmlImageProviderBase* base = m_engine->imageProvider("icons")) {
-                auto* prov = qobject_cast<QQuickImageProvider*>(base);
-                if (!prov) return image;
+                // engine->imageProvider() 对图片提供器返回的必是 QQuickImageProvider 派生
+                auto* prov = static_cast<QQuickImageProvider*>(base);
                 QSize providerSize;
                 image = prov->requestImage(iconId, &providerSize, requestedSize);
             }
