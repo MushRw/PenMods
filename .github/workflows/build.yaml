@@ -43,7 +43,12 @@ jobs:
     steps:
       - name: 更新系统 & 安装基础依赖
         run: |
-          pacman -Syu --noconfirm
+          pacman -Syy --noconfirm
+          for i in 1 2 3; do
+            pacman -Syu --noconfirm && break
+            echo "pacman -Syu 第 $i 次失败，重试..."
+            sleep 10
+          done
           pacman -S --noconfirm \
             base-devel git zig wget curl zip \
             python3 ninja cmake nasm libxcrypt lame opencc qt5-tools qt5-base
