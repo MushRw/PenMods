@@ -100,6 +100,16 @@ YSettingItemPage {
                 }
             }
 
+            DescribedSwitchItem {
+                title: "锁屏（待机时钟）"
+                description: "主页空闲 15 秒后显示待机时钟。关闭后不再进入该锁屏，系统自动息屏仍可单独设置。"
+                switchOn: screenManager.lockScreen
+                interval: 0
+                onTimerTriggered: {
+                    screenManager.lockScreen = switchOn
+                }
+            }
+
         }
 
     }

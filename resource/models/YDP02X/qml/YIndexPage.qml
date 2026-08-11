@@ -47,6 +47,7 @@ YBackground {
         repeat: false
 
         running: !isLocked && Qt.application.active && (qmlGlobal.currentPageIndex === YEnum.PageIndex.NonePage)
+                 && screenManager.lockScreen
 
         onTriggered: {
             if (qmlGlobal.currentPageIndex !== YEnum.PageIndex.NonePage) {

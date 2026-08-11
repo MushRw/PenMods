@@ -25,6 +25,7 @@ ScreenManager::ScreenManager() {
     mAutoSleepDuration    = mCfg["sleep_duration"];
     mIntelSleep           = mCfg["intel_sleep"];
     mIntelSleepAudioLock  = mCfg["intel_sleep_audio_lock"];
+    mLockScreen           = mCfg.value("lock_screen", true);
 
     connect(&Event::getInstance(), &Event::beforeUiInitialization, [this](QQuickView& view, QQmlContext* context) {
         context->setContextProperty("screenManager", this);
@@ -119,6 +120,8 @@ void ScreenManager::setIntelSleep(bool val) {
 
 bool ScreenManager::getIntelSleepAudioLock() const { return mIntelSleepAudioLock; }
 
+bool ScreenManager::getLockScreen() const { return mLockScreen; }
+
 void ScreenManager::setIntelSleepAudioLock(bool val) {
     if (mIntelSleepAudioLock != val) {
         mIntelSleepAudioLock         = val;
@@ -126,6 +129,15 @@ void ScreenManager::setIntelSleepAudioLock(bool val) {
         WRITE_CFG;
         emit intelSleepAudioLockChanged();
         onAudioDaemonStateChanged();
+    }
+}
+
+void ScreenManager::setLockScreen(bool val) {
+    if (mLockScreen != val) {
+        mLockScreen         = val;
+        mCfg["lock_screen"] = val;
+        WRITE_CFG;
+        emit lockScreenChanged();
     }
 }
 

@@ -22,6 +22,7 @@ class ScreenManager : public QObject, public Singleton<ScreenManager> {
     Q_PROPERTY(int intelSleep READ getIntelSleep WRITE setIntelSleep NOTIFY intelSleepChanged);
     Q_PROPERTY(bool intelSleepAudioLock READ getIntelSleepAudioLock WRITE setIntelSleepAudioLock NOTIFY
                    intelSleepAudioLockChanged);
+    Q_PROPERTY(bool lockScreen READ getLockScreen WRITE setLockScreen NOTIFY lockScreenChanged);
 
 public:
     QString getAutoSleepDurationStr() const;
@@ -32,6 +33,8 @@ public:
 
     bool getIntelSleepAudioLock() const;
 
+    bool getLockScreen() const;
+
     void setAutoSleepDurationStr(const QString&);
 
     void setAutoSleepDuration(int);
@@ -39,6 +42,8 @@ public:
     void setIntelSleep(bool);
 
     void setIntelSleepAudioLock(bool);
+
+    void setLockScreen(bool);
 
     Q_INVOKABLE void reportAction(const QString&);
 
@@ -61,6 +66,8 @@ signals:
 
     void intelSleepAudioLockChanged();
 
+    void lockScreenChanged();
+
 private:
     friend Singleton<ScreenManager>;
     explicit ScreenManager();
@@ -71,6 +78,7 @@ private:
     int  mAutoSleepDuration;
     bool mIntelSleep;
     bool mIntelSleepAudioLock;
+    bool mLockScreen;
     bool mAudioLockActive = false;
 
     // Tmp saving;
