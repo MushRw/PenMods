@@ -28,8 +28,8 @@ Item {
         sourceSize: Qt.size(30, 30)
         defaultIconSource: "image://icons/portrait.png"
 
-        // 将颜色设为透明以去除边框
-        borderColor: "transparent"
+        // 使用不透明边框，圆环会盖住方形图片的四角，恢复圆形头像
+        borderColor: YColors.black
 
         YMouseArea {
             anchors.fill: parent

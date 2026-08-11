@@ -1,11 +1,9 @@
 import QtQuick 2.12
-import QtGraphicalEffects 1.14
 
 import "../commons"
 
-// 圆形头像：图片本体用 OpacityMask 裁成圆形，
-// 边框颜色为 transparent 时不显示边框（主页标题栏），
-// 需要圆形边框的地方设置 borderColor 即可（如设置页的黑圈）。
+// 圆形头像：不依赖 QtGraphicalEffects 的 OpacityMask（在部分设备上不渲染），
+// 而是用不透明边框的圆环盖住方形图片的四角，达到圆形效果（与原版 YRoundedImage 一致）。
 Item {
     id: id_portrait_root
 
@@ -21,28 +19,17 @@ Item {
         source: (loginManager.iconPath.length > 0) && qmlGlobal.fileExists(loginManager.iconPath)
                 ? loginManager.iconPath.toLoadFileUrl() : defaultIconSource
         fillMode: Image.PreserveAspectCrop
-        visible: false
     }
 
+    // 圆形边框环：边框宽度 9、外扩 9，边框带覆盖方形图片的四角。
+    // 边框颜色为 transparent 时头像会显示为方形，请调用方设置不透明颜色。
     Rectangle {
-        id: id_portrait_mask
+        id: id_ring
         anchors.fill: parent
-        radius: Math.min(width, height) / 2
-        visible: false
-    }
-
-    OpacityMask {
-        anchors.fill: parent
-        source: id_portrait_image
-        maskSource: id_portrait_mask
-    }
-
-    // 圆形边框（transparent 时不显示）
-    Rectangle {
-        anchors.fill: parent
+        anchors.margins: -9
         color: "transparent"
-        border.width: 1
+        border.width: 9
         border.color: borderColor
-        radius: Math.min(width, height) / 2
+        radius: width / 2
     }
 }
