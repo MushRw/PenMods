@@ -147,6 +147,11 @@ jobs:
           mkdir -p build/linux/arm64-v8a
           cp resource/rime/rime.zip build/linux/arm64-v8a/rime.zip
 
+      - name: 打包 mihomo 内核
+        run: |
+          mkdir -p build/linux/arm64-v8a
+          cp resource/vpn/mihomo.gz build/linux/arm64-v8a/mihomo.gz
+
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
