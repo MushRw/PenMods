@@ -45,7 +45,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm \
-            base-devel git zig wget curl \
+            base-devel git zig wget curl zip \
             python3 ninja cmake nasm libxcrypt lame opencc qt5-tools qt5-base
 
       - name: 安装 aarch64-linux-gnu 工具链
