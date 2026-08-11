@@ -25,6 +25,7 @@
 发布包内置 `player.zip`：
 
 - **mpv 0.36.0 + FFmpeg 6.0**（基于 [ffmpeg-rockchip](https://github.com/nyanmisaka/ffmpeg-rockchip)，带 Rockchip MPP 硬解），含配置、字体、触摸控制脚本与屏幕守护
+  - mpv 播放器由 **Bsgmwszb** 提供
 - 结构：`mpv/` 目录（`mpv` 包装脚本、`bin/mpv`、`lib/`、`config/`、`screen_watchdog`）
 - 部署位置：`/userdisk/mpv`；`/userdisk/VideoPlayer` 为软链，指向 `/userdisk/mpv/mpv`
 - mod 启动时若 `/userdisk/mpv/mpv` 缺失，会从 `/userdata/PenMods/player.zip` 自动解压部署并修复软链（见 `src/mod/PlayerInstaller.cpp`）
@@ -119,4 +120,5 @@ YDP02x | 🟢 | 2.0.7 / 2.0.8（实测 2.1.2 可运行） | 老系统请先刷�
 ## 许可与致谢
 
 - 本仓库 GPL-3.0-only；随包的播放器二进制来自社区构建（mpv / FFmpeg，见 `resource/player/README.md`）
+- 随包的 mpv 播放器由 **Bsgmwszb** 提供
 - Credits: [Dobby](https://github.com/jmpews/Dobby)、[Qt Project](https://www.qt.io/)、[injector](https://github.com/kubo/injector)、[ffmpeg-rockchip](https://github.com/nyanmisaka/ffmpeg-rockchip)
