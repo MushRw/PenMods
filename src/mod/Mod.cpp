@@ -80,17 +80,35 @@ void Mod::changeSlot() { exec("update_engine --misc=other --reboot"); }
 
 void Mod::uninstall() {
     try {
-        QFile modLibrary(util::getModuleFileInfo().absoluteFilePath());
-        QFile mainProcess(util::getApplicationFileInfo().absoluteFilePath());
         QString appDir = util::getApplicationFileInfo().absolutePath();
-        QFile mainProcessBak(appDir + "/YoudaoDictPen.original_bak");
-        if (!mainProcessBak.exists()) {
-            mainProcessBak.setFileName(appDir + "/YoudaoDictPen.bak");
+        QString mainPath = appDir + "/YoudaoDictPen";
+        QString tmpPath  = appDir + "/YoudaoDictPen.uninstall_bak";
+        QString bakPath  = appDir + "/YoudaoDictPen.original_bak";
+        if (!QFile::exists(bakPath)) {
+            bakPath = appDir + "/YoudaoDictPen.bak";
         }
-        if (!mainProcessBak.exists()) throw std::runtime_error("无法还原主程序, 因为备份已丢失");
-        if (!mainProcess.remove() || !mainProcessBak.rename("YoudaoDictPen"))
+        if (!QFile::exists(bakPath)) throw std::runtime_error("无法还原主程序, 因为备份已丢失");
+
+        // 安全还原：先把当前主程序改名保留，再把备份改回主程序。
+        // 任意时刻磁盘上都有可用的主程序文件，避免"先删后改"导致主程序丢失。
+        QFile::remove(tmpPath);
+        if (QFile::exists(mainPath) && !QFile::rename(mainPath, tmpPath)) {
+            throw std::runtime_error("无法备份当前主程序");
+        }
+        if (!QFile::rename(bakPath, mainPath)) {
+            if (QFile::exists(tmpPath)) QFile::rename(tmpPath, mainPath); // 尽力恢复
             throw std::runtime_error("无法还原主程序");
-        if (!modLibrary.remove()) throw std::runtime_error("无法删除 Mod 动态库，但主程序已还原");
+        }
+        QFile::remove(tmpPath);
+
+        // 清理 mod 自身文件（尽力而为，失败不阻断卸载）
+        VpnManager::getInstance().stop();                            // 停止 VPN 并恢复应用代理
+        QFile::remove(util::getModuleFileInfo().absoluteFilePath()); // libPenMods.so
+        QDir("/userdata/PenMods").removeRecursively();               // 资源库/配置/安装包
+        QDir("/userdisk/mpv").removeRecursively();                   // 随包播放器
+        QFile::remove("/userdisk/VideoPlayer");                      // 播放器软链
+        // 注：/userdisk/PenMods（插件）、/userdisk/Music/Rime（输入法数据）属于用户数据，保留
+
         softReboot();
     } catch (const std::exception& e) {
         showToast(e.what(), "#E9900C");
@@ -203,6 +221,7 @@ PEN_HOOK(bool, license_verify) { return true; }
 #include "helper/DeveloperSettings.h"
 #include "helper/NetworkSettings.h"
 #include "helper/ServiceManager.h"
+#include "helper/VpnManager.h"
 
 #include "locker/Locker.h"
 
@@ -281,6 +300,7 @@ __attribute__((constructor)) static void BeforeMain() {
     INSTANCE(DeveloperSettings);
     INSTANCE(NetworkSettings);
     INSTANCE(ServiceManager);
+    INSTANCE(VpnManager);
 
     // locker
     INSTANCE(Locker);

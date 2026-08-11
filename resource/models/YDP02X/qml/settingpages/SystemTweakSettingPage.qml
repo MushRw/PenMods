@@ -9,6 +9,20 @@ YSettingItemPage {
     id: id_setting_item
     objectName: "YPage===SystemTweakSettingPage.qml"
 
+    function requestKeyboard() {
+        let component = qmlCreateComponent("YInputPage");
+        if (Component.Ready === component.status) {
+            var incubator = component.incubateObject(id_page_pop_helper.containerItem);
+            if (incubator.status !== Component.Ready)
+                incubator.onStatusChanged = function(status) {
+                    if (status === Component.Ready)
+                        id_page_pop_helper.inputPageCreated(incubator.object);
+                };
+            else
+                id_page_pop_helper.inputPageCreated(incubator.object);
+        }
+    }
+
     Flickable {
         id: id_setting_item_view
         anchors.fill: parent
@@ -117,10 +131,72 @@ YSettingItemPage {
                 }
             }
 
+            // ======================================
+
+            YText {
+                id: id_title_vpn
+                font.pixelSize: 16
+                font.italic: true
+                color: YColors.grayText
+                wrapMode: YText.Wrap
+                lineHeightMode: YTextBase.FixedHeight
+                lineHeight: 24
+                width: parent.width
+                text: "VPN"
+            }
+
+            DescribedSwitchItem {
+                implicitHeight: 54
+                title: "启用 VPN"
+                description: "使用订阅链接启动本地代理，笔上应用的联网流量将走代理。"
+                switchOn: vpnManager.enabled
+                interval: 0
+                onTimerTriggered: {
+                    vpnManager.enabled = switchOn
+                }
+            }
+
+            DescribedClickableTextBox {
+                title: "订阅链接"
+                describe: vpnManager.subscriptionUrl.length != 0 ? vpnManager.subscriptionUrl : "[未配置]"
+                opacityChangableWhenPressed: false
+                onClicked: {
+                    requestKeyboard();
+                }
+            }
+
+            YText {
+                font.pixelSize: 14
+                color: vpnManager.running ? YColors.green : YColors.grayText
+                width: parent.width
+                text: vpnManager.running ? "VPN 已连接" : "VPN 未连接"
+            }
+
             YSpacingForColumn {
                 implicitHeight: 16
             }
         }
 
+    }
+
+    YPagePopHelper {
+        id: id_page_pop_helper
+
+        function inputPageCreated(keyboardPage) {
+            keyboardPage.backButtonClicked.connect(function() {
+                qmlGlobal.inputPageShowing = false;
+                keyboardPage.todoDestroy();
+                keyboardPage = null;
+            });
+            keyboardPage.inputFinished.connect(function(content) {
+                vpnManager.subscriptionUrl = content;
+            });
+            keyboardPage.show();
+            keyboardPage.enterText(vpnManager.subscriptionUrl);
+            qmlGlobal.inputPageShowing = true;
+        }
+
+        isShowing: qmlGlobal.inputPageShowing
+        objectName: "from_SystemTweakSettingPage"
     }
 }
