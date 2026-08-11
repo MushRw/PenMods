@@ -1,0 +1,13 @@
+import QtQuick 2.12
+
+import "../commons"
+import "../i18n"
+
+YDictTypeBase {
+    id: id_dt_sat
+    title: YTranslateText.dtSAT
+
+    YDictTypeDtEnglistTest {}
+
+}
+
