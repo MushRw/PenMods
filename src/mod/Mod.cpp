@@ -99,6 +99,15 @@ void Mod::softReboot() { std::terminate(); }
 void Mod::reboot() { exec("sync && reboot"); }
 
 void Mod::onCaptureTick() {
+    // 兜底：Engine 在 initUi 钩子开头就会设置 YPointer<QQuickView>，
+    // 不依赖 beforeUiInitialization 的连接是否生效。
+    if (!mCaptureWindow) {
+        auto* view = YPointer<QQuickView>::getInstance();
+        if (view) {
+            mCaptureWindow = view;
+            spdlog::info("[Mod] 通过 YPointer 取得窗口: {}", fmt::ptr(view));
+        }
+    }
     if (!mCaptureWindow) {
         static bool warned = false;
         if (!warned) {
