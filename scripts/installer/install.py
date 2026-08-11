@@ -129,7 +129,11 @@ def main():
 
     for f in REQUIRED_FILES:
         log("推送 %s ..." % f)
-        push(f, "/userdata/PenMods/" + f)
+        if f == "mihomo.gz":
+            # mihomo 由 VpnManager 从 /userdata/PenMods/vpn/mihomo.gz 自愈部署
+            push(f, "/userdata/PenMods/vpn/mihomo.gz")
+        else:
+            push(f, "/userdata/PenMods/" + f)
 
     adb("shell", "chmod +x /userdata/PenMods/misc/init.sh /userdata/PenMods/misc/patchelf /userdata/PenMods/patch.sh")
 
