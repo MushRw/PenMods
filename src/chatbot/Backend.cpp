@@ -225,8 +225,30 @@ QJsonArray ChatBot::buildApiMessages(const QVector<MessageData>& history,
     sysMsg["content"] = m_defaultPrompt;
     messages.append(sysMsg);
 
-    // history
-    for (const auto& msg : history) {
+    // history（按模型 context 上限做粗略 token 估算，丢弃过旧消息，防止超限报错）
+    QVector<MessageData> historyToSend = history;
+    if (m_maxContextSize > 0) {
+        auto estTokens = [](const QString& s) { return (s.size() + 1) / 2; }; // 粗略估算，偏保守
+        int  budget    = m_maxContextSize;
+        int  used      = estTokens(m_defaultPrompt);
+        for (const auto& p : userParts) {
+            used += estTokens(p.text) + estTokens(p.url) + estTokens(p.data);
+        }
+        used += estTokens(userText);
+
+        QVector<MessageData> kept;
+        for (auto it = history.crbegin(); it != history.crend(); ++it) {
+            int est = estTokens(it->content) + estTokens(it->toolCallsJson);
+            for (const auto& p : it->parts) {
+                est += estTokens(p.text) + estTokens(p.url) + estTokens(p.data);
+            }
+            if (used + est > budget) break;
+            used += est;
+            kept.prepend(*it);
+        }
+        historyToSend = kept;
+    }
+    for (const auto& msg : historyToSend) {
         messages.append(messageToJson(msg));
     }
 
@@ -465,6 +487,7 @@ bool ChatBot::isAvailable() { return !m_apiKey.isEmpty(); }
 // -----------------------------------------------------------------------
 
 void ChatBot::sendMessage(const QString& message, const QString& fileRefs) {
+    m_retryCount = 0;
     QVector<MessagePart> extraParts;
 
     // 文件引用转文本 part（保持原有行为）
@@ -513,6 +536,7 @@ void ChatBot::sendMessage(const QString& message, const QString& fileRefs) {
 
 void ChatBot::sendMessageWithMedia(const QString& message, const QString& mediaParts) {
     m_cancelled = false;
+    m_retryCount = 0;
 
     static constexpr int MAX_MEDIA_JSON_SIZE = 12 * 1024 * 1024;
     if (mediaParts.size() > MAX_MEDIA_JSON_SIZE) {
@@ -920,6 +944,9 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
 
     m_cancelled = false;
 
+    // 记录本次请求体，供瞬时错误（429/5xx）自动重试使用
+    m_lastRequestMessages = messages;
+
     if (m_apiKey.isEmpty()) {
         emit errorOccurred("API 密钥未设置\n请进入「设置」页面配置有效的 API 密钥后重试");
         return;
@@ -958,6 +985,8 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
     request.setRawHeader("Authorization", QString("Bearer %1").arg(m_apiKey).toUtf8());
     request.setRawHeader("Content-Type", "application/json");
     request.setRawHeader("User-Agent", "PenMods ChatBot/1.0");
+    // 请求超时（120s），避免 API 卡住时界面永远等待
+    request.setTransferTimeout(120000);
 
     QNetworkReply* reply = m_networkManager->post(request, requestData);
     m_activeReplies.append(reply);
@@ -965,6 +994,7 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
     if (m_isStreaming) {
         m_currentStreamBuffer.clear();
         m_responseBuffer.clear();
+        m_sseBuffer.clear();
         m_toolCallsBuffer.clear();
         emit streamStart();
     }
@@ -978,14 +1008,14 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
     if (m_isStreaming) {
         connect(reply, &QNetworkReply::readyRead, this, [this, reply, seq]() {
             if (seq != m_requestSeq) return;
-            QByteArray data = reply->readAll();
-            if (data.isEmpty()) return;
-
-            m_responseBuffer  += QString::fromUtf8(data);
-            QStringList lines  = m_responseBuffer.split("\n", Qt::SkipEmptyParts);
-
-            for (const QString& line : lines) {
-                QString trimmedLine = line.trimmed();
+            // 字节级缓冲 + 按 '\n' 切行：\n 不会出现在 UTF-8 多字节字符内部，
+            // 因此整行用 fromUtf8 解码不会产生乱码，跨包的行也不会被拆断丢弃。
+            m_sseBuffer.append(reply->readAll());
+            int nl;
+            while ((nl = m_sseBuffer.indexOf('\n')) >= 0) {
+                QByteArray lineBytes = m_sseBuffer.left(nl);
+                m_sseBuffer.remove(0, nl + 1);
+                QString trimmedLine = QString::fromUtf8(lineBytes).trimmed();
                 if (!trimmedLine.startsWith("data: ")) continue;
 
                 QString jsonData = trimmedLine.mid(6);
@@ -1076,14 +1106,6 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
                 }
             }
 
-            if (m_responseBuffer.endsWith("\n")) {
-                m_responseBuffer.clear();
-            } else {
-                int lastNewline = m_responseBuffer.lastIndexOf("\n");
-                if (lastNewline != -1 && lastNewline < m_responseBuffer.length() - 1)
-                    m_responseBuffer = m_responseBuffer.mid(lastNewline + 1);
-                else m_responseBuffer.clear();
-            }
         });
     }
 }
@@ -1094,6 +1116,7 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
 
 void ChatBot::handleNetworkReply(QNetworkReply* reply, bool isStream) {
     if (reply->error() == QNetworkReply::NoError) {
+        m_retryCount = 0;
         if (isStream) {
             if (!m_toolCallsBuffer.isEmpty()) {
                 json tcArr = json::array();
@@ -1210,6 +1233,24 @@ void ChatBot::handleNetworkReply(QNetworkReply* reply, bool isStream) {
                  || reply->error() == QNetworkReply::HostNotFoundError || reply->error() == QNetworkReply::TimeoutError)
             suggestion = "无法连接到 AI 服务，请检查网络连接";
         else suggestion = reply->errorString();
+
+        // 瞬时错误自动重试（429/5xx，最多 2 次；用户取消后不再重试）
+        if (!m_cancelled && !m_retrying && m_retryCount < 2
+            && (httpStatus == 429 || (httpStatus >= 500 && httpStatus <= 504))) {
+            m_retrying   = true;
+            m_retryCount++;
+            QJsonArray retryMessages = m_lastRequestMessages;
+            int        delayMs       = 1500 * m_retryCount;
+            debug("API 瞬时错误(HTTP {})，{}ms 后重试（第 {} 次）", httpStatus, delayMs, m_retryCount);
+            QTimer::singleShot(delayMs, this, [this, retryMessages]() {
+                m_retrying = false;
+                if (m_cancelled) return;
+                makeApiRequest(retryMessages);
+            });
+            m_activeReplies.removeAll(reply);
+            reply->deleteLater();
+            return;
+        }
 
         QStringList parts;
         if (httpStatus > 0) parts << QString("状态码: %1").arg(httpStatus);

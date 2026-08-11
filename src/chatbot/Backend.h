@@ -280,8 +280,14 @@ private:
 
     QString m_currentStreamBuffer;
     QString m_responseBuffer;
+    QByteArray m_sseBuffer; // 流式响应字节缓冲（按行解码，避免 UTF-8/分包问题）
     // 流式 tool_calls 累积缓冲（按 index 存储各工具调用的片段）
     QMap<int, json> m_toolCallsBuffer;
+
+    // 请求重试（429/5xx 等瞬时错误）
+    QJsonArray m_lastRequestMessages;
+    int        m_retryCount = 0;
+    bool       m_retrying   = false;
 
     // 多模型管理
     json m_modelsData;
