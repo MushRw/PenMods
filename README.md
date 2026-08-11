@@ -70,7 +70,9 @@ P5/X5 | 🔴 | N/A | N/A | -
    - 可引用本地文件
  - 增强文件管理器功能
    - 添加图片查看器（另外添加 Webp 图像查看支持，包括动图）
-   - 添加外部的视频播放器支持（执行 /userdisk/VideoPlayer \[视频文件路径\] 打开播放器）
+   - 添加外部的视频播放器支持（随包附带 mpv + Rockchip 硬解播放器，详见「外部播放器」）
+     - 文件管理器点开视频后先显示 bili 风格播放页，点击播放才启动播放器
+     - 退出键会真正停止播放器，不会残留后台播放
    - 支持查看隐藏文件（可被安全锁功能保护）
    - 支持自然排序（按数字大小排序）
  - 简单的插件系统
@@ -87,6 +89,19 @@ P5/X5 | 🔴 | N/A | N/A | -
  - 音频守护进程
    - 接管有道主程序原生输出管理机制，可以在 /tmp 目录下创建音频唤醒锁避免输出关闭
  - Github Action CI 自动构建配置
+
+### 外部播放器（视频）
+ - 发布包内置 `player.zip`：mpv 0.36.0 + FFmpeg 6.0（基于 [ffmpeg-rockchip](https://github.com/nyanmisaka/ffmpeg-rockchip)，带 Rockchip MPP 硬解），
+   含 mpv 配置、字体、触摸控制等脚本和屏幕守护程序
+ - 安装器/安装脚本会把 `player.zip` 放到 `/userdata/PenMods/`
+ - mod 启动时若 `/userdisk/mpv` 缺失会自动解压部署，并确保 `/userdisk/VideoPlayer` 软链指向 `/userdisk/mpv/mpv`
+ - 播放器内容、来源与许可说明：见 [resource/player/README.md](resource/player/README.md)
+
+### Features (2.0.1)
+ - 外部播放器随包分发，启动时自动部署/自愈（mpv + Rockchip MPP 硬解）
+ - 文件管理器视频播放改为 bili 风格播放页
+ - 修复播放器退出键：退出页面时真正停止播放器，不再后台播放
+ - 修复主页头像显示为方形的问题，恢复圆形头像
 
 ### Features (1.2.0)
  - 增强 AI 助手
@@ -139,6 +154,7 @@ P5/X5 | 🔴 | N/A | N/A | -
 
 ### Installation
  - 请移步 [Installer](https://github.com/PenUniverse/Installer)
+ - 播放器已随包分发：把 `player.zip` 放到 `/userdata/PenMods/`，mod 启动时会自动安装到 `/userdisk/mpv`
 
 ### Contact Us
  - [官方社区](https://github.com/orgs/PenUniverse/discussions)
