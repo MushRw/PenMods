@@ -12,7 +12,19 @@
 #include <QQmlEngine>
 #include <QUrl>
 
+#include <spdlog/spdlog.h>
+
 namespace mod {
+
+AvatarProvider::AvatarProvider(QQmlEngine* engine)
+    : QQuickImageProvider(QQuickImageProvider::Image), m_iconsProvider(nullptr) {
+    if (engine) {
+        m_iconsProvider = engine->imageProvider("icons");
+    }
+    if (!m_iconsProvider) {
+        spdlog::warn("[AvatarProvider] 应用 icons 图片提供器未注册，默认头像可能无法加载");
+    }
+}
 
 QImage AvatarProvider::requestImage(const QString& id, QSize* size, const QSize& requestedSize) {
     QString source = QUrl::fromPercentEncoding(id.toUtf8());
@@ -21,13 +33,11 @@ QImage AvatarProvider::requestImage(const QString& id, QSize* size, const QSize&
     if (source.startsWith("image://icons/")) {
         // 应用自己的图标提供器，转调其 requestImage 取原图
         QString iconId = source.mid(QStringLiteral("image://icons/").size());
-        if (m_engine) {
-            if (QQmlImageProviderBase* base = m_engine->imageProvider("icons")) {
-                // engine->imageProvider() 对图片提供器返回的必是 QQuickImageProvider 派生
-                auto* prov = static_cast<QQuickImageProvider*>(base);
-                QSize providerSize;
-                image = prov->requestImage(iconId, &providerSize, requestedSize);
-            }
+        if (m_iconsProvider) {
+            // 图片提供器必然是 QQuickImageProvider 派生
+            auto* prov = static_cast<QQuickImageProvider*>(m_iconsProvider);
+            QSize providerSize;
+            image = prov->requestImage(iconId, &providerSize, requestedSize);
         }
     } else {
         QImageReader reader(source);
@@ -37,6 +47,7 @@ QImage AvatarProvider::requestImage(const QString& id, QSize* size, const QSize&
     }
 
     if (image.isNull()) {
+        spdlog::warn("[AvatarProvider] 无法加载头像源: {}", source.toStdString());
         return image;
     }
 

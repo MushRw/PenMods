@@ -16,13 +16,14 @@ namespace mod {
 // 居中裁切成圆形。纯 CPU 处理，不依赖着色器，保证在低性能设备上正常渲染。
 class AvatarProvider : public QQuickImageProvider {
 public:
-    explicit AvatarProvider(QQmlEngine* engine)
-        : QQuickImageProvider(QQuickImageProvider::Image), m_engine(engine) {}
+    explicit AvatarProvider(QQmlEngine* engine);
 
     QImage requestImage(const QString& id, QSize* size, const QSize& requestedSize) override;
 
 private:
-    QQmlEngine* m_engine;
+    // 在 GUI 线程构造时解析并缓存（图片提供器 requestImage 运行在图片线程，
+    // 不能直接访问 QQmlEngine）
+    QQmlImageProviderBase* m_iconsProvider;
 };
 
 } // namespace mod
