@@ -40,7 +40,14 @@ QImage AvatarProvider::requestImage(const QString& id, QSize* size, const QSize&
             image = prov->requestImage(iconId, &providerSize, requestedSize);
         }
     } else {
-        QImageReader reader(source);
+        // QImageReader 只接受本地路径：file:// 需转成路径，qrc:/ 需去掉 qrc 前缀
+        QString path = source;
+        if (source.startsWith("file://")) {
+            path = QUrl(source).toLocalFile();
+        } else if (source.startsWith("qrc:/")) {
+            path = source.mid(3); // qrc:/xxx -> :/xxx
+        }
+        QImageReader reader(path);
         if (reader.canRead()) {
             image = reader.read();
         }
