@@ -44,6 +44,13 @@ option('force-debug-log')
     set_description('Enable PL_DEBUG define even in release builds (force debug logging).')
 option_end()
 
+option('ai-tools')
+    set_default(false)
+    set_showmenu(true)
+    set_description('Enable AI tool calling (Tavily web search + shell execution). Disabled by default.')
+    add_defines('PL_AI_TOOLS')
+option_end()
+
 --- global configs
 
 set_license('GPL-3.0-only')

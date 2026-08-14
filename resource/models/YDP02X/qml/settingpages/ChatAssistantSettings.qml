@@ -134,11 +134,13 @@ YBackButtonPage {
 
             YSettingItemTitle {
                 title: "网络搜索 (Tavily)"
+                visible: chatbot.toolsEnabled
             }
 
             DescribedSwitchItem {
                 title: "启用网络搜索"
                 description: chatbot.tavilyConfigured ? "已配置 API Key" : "请先配置 Tavily API Key"
+                visible: chatbot.toolsEnabled
                 switchOn: chatbot.tavilyEnabled && chatbot.tavilyConfigured
                 interval: 0
                 enabled: chatbot.tavilyConfigured
@@ -150,6 +152,7 @@ YBackButtonPage {
             YSettingAboutClickableItem {
                 title: "密钥"
                 value: chatbot.tavilyConfigured ? "已配置" : "未配置"
+                visible: chatbot.toolsEnabled
                 imageName: "settings/info_more_arrow"
                 onClicked: {
                     openKeyboard("输入 Tavily API Key...", "", function(apiKey) {
@@ -164,11 +167,13 @@ YBackButtonPage {
 
             YSettingItemTitle {
                 title: "Shell 工具"
+                visible: chatbot.toolsEnabled
             }
 
             DescribedSwitchItem {
                 title: "启用 Shell 执行"
                 description: "允许 AI 提出 shell 命令（需手动确认）"
+                visible: chatbot.toolsEnabled
                 switchOn: chatbot.shellToolEnabled
                 interval: 0
                 onTimerTriggered: {
@@ -179,6 +184,7 @@ YBackButtonPage {
             YSettingAboutClickableItem {
                 id: shellTimeoutItem
                 title: "超时时间"
+                visible: chatbot.toolsEnabled
                 imageName: "settings/info_more_arrow"
                 onClicked: {
                     var cfg = JSON.parse(chatbot.getShellToolConfig());
@@ -195,6 +201,7 @@ YBackButtonPage {
             YSettingAboutClickableItem {
                 id: shellOutputItem
                 title: "最大输出"
+                visible: chatbot.toolsEnabled
                 imageName: "settings/info_more_arrow"
                 onClicked: {
                     var cfg = JSON.parse(chatbot.getShellToolConfig());

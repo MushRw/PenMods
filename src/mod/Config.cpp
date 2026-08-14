@@ -152,7 +152,9 @@ Config::Config() : Logger("Config") {
                         {"text",      true},
                         {"vision",    false},
                         {"audio",     false},
+#ifdef PL_AI_TOOLS
                         {"toolCall",  false},
+#endif
                         {"reasoning", false}
                     }},
                     {"extraParams", ""},
@@ -169,6 +171,7 @@ Config::Config() : Logger("Config") {
                 }
             })},
             {"activePromptId", "default"},
+#ifdef PL_AI_TOOLS
             {"tavily", {
                 {"api_key",      ""},
                 {"search_depth", "advanced"},
@@ -181,6 +184,7 @@ Config::Config() : Logger("Config") {
                 {"max_output_bytes", 4096},
                 {"blocklist", json::array()}
             }},
+#endif
             {"math_render", {
                 {"enabled",     false},
                 {"server_path", ""}

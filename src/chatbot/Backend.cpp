@@ -76,8 +76,10 @@ ChatBot::ChatBot()
 
     initModels();
     initPrompts();
+#ifdef PL_AI_TOOLS
     initTavily();
     initShellTool();
+#endif
     initMathRender();
     initSessions();
 }
@@ -120,8 +122,10 @@ void ChatBot::reloadConfig() {
 
     initModels();
     initPrompts();
+#ifdef PL_AI_TOOLS
     initTavily();
     initShellTool();
+#endif
     initMathRender();
 
     emit apiKeyChanged();
@@ -149,8 +153,10 @@ void ChatBot::sanitizeConfig() {
 
     initModels();
     initPrompts();
+#ifdef PL_AI_TOOLS
     initTavily();
     initShellTool();
+#endif
     initMathRender();
 
     emit apiKeyChanged();
@@ -481,6 +487,14 @@ void ChatBot::initSessions() {
 }
 
 bool ChatBot::isAvailable() { return !m_apiKey.isEmpty(); }
+
+bool ChatBot::isToolsEnabled() const {
+#ifdef PL_AI_TOOLS
+    return true;
+#else
+    return false;
+#endif
+}
 
 // -----------------------------------------------------------------------
 // sendMessage（纯文本，兼容旧接口）
@@ -845,6 +859,7 @@ void ChatBot::callVisionProxy(const QString&              message,
     });
 }
 
+#ifdef PL_AI_TOOLS
 // -----------------------------------------------------------------------
 // submitToolResult：将工具调用结果提交给模型
 // -----------------------------------------------------------------------
@@ -920,6 +935,15 @@ void ChatBot::tryFlushToolBatch() {
     makeApiRequest(apiMessages);
 }
 
+#else
+
+// 工具调用功能默认不编译（xmake f --ai-tools=y 开启），保留空实现以维持 QML 接口稳定
+void ChatBot::submitToolResult(const QString&, const QString&, const QString&) {}
+void ChatBot::submitToolResultBatched(const QString&, const QString&, const QString&) {}
+void ChatBot::tryFlushToolBatch() {}
+
+#endif
+
 // -----------------------------------------------------------------------
 // makeApiRequest：构建请求体并发送
 // -----------------------------------------------------------------------
@@ -967,10 +991,12 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
         }
     }
 
+#ifdef PL_AI_TOOLS
     // 注入工具定义
     if (m_capToolCall && ((m_tavilyEnabled && !m_tavilyApiKey.isEmpty()) || m_shellToolEnabled)) {
         injectToolDefinitions(requestBody);
     }
+#endif
 
     QJsonDocument requestDoc(requestBody);
     QByteArray    requestData = requestDoc.toJson(QJsonDocument::Compact);
@@ -995,7 +1021,9 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
         m_currentStreamBuffer.clear();
         m_responseBuffer.clear();
         m_sseBuffer.clear();
+#ifdef PL_AI_TOOLS
         m_toolCallsBuffer.clear();
+#endif
         emit streamStart();
     }
 
@@ -1023,6 +1051,7 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
                     // 在 finished 信号之前就把响应写入历史，
                     // 防止 regenerateMessage 在 streamEnd 后 finished 前被调用时因索引越界空转
                     if (!m_cancelled) {
+#ifdef PL_AI_TOOLS
                         if (!m_toolCallsBuffer.isEmpty()) {
                             json tcArr = json::array();
                             for (auto it = m_toolCallsBuffer.constBegin(); it != m_toolCallsBuffer.constEnd(); ++it)
@@ -1038,7 +1067,9 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
                             saveSessions();
                             emit messagesChanged();
                             dispatchToolCalls(toolCallsJson);
-                        } else if (!m_currentStreamBuffer.isEmpty()) {
+                        } else
+#endif
+                        if (!m_currentStreamBuffer.isEmpty()) {
                             MessageData assistantMsg;
                             assistantMsg.role    = "assistant";
                             assistantMsg.content = m_currentStreamBuffer;
@@ -1051,7 +1082,9 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
                     }
                     // 清空 buffer 防止 handleNetworkReply 重复保存
                     m_currentStreamBuffer.clear();
+#ifdef PL_AI_TOOLS
                     m_toolCallsBuffer.clear();
+#endif
                     emit streamEnd();
                     continue;
                 }
@@ -1077,6 +1110,7 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
                     }
                 }
 
+#ifdef PL_AI_TOOLS
                 if (delta.contains("tool_calls") && delta["tool_calls"].isArray()) {
                     for (const auto& tcVal : delta["tool_calls"].toArray()) {
                         QJsonObject tc    = tcVal.toObject();
@@ -1104,6 +1138,7 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
                         }
                     }
                 }
+#endif
             }
 
         });
@@ -1118,6 +1153,7 @@ void ChatBot::handleNetworkReply(QNetworkReply* reply, bool isStream) {
     if (reply->error() == QNetworkReply::NoError) {
         m_retryCount = 0;
         if (isStream) {
+#ifdef PL_AI_TOOLS
             if (!m_toolCallsBuffer.isEmpty()) {
                 json tcArr = json::array();
                 for (auto it = m_toolCallsBuffer.constBegin(); it != m_toolCallsBuffer.constEnd(); ++it)
@@ -1135,7 +1171,9 @@ void ChatBot::handleNetworkReply(QNetworkReply* reply, bool isStream) {
                     emit messagesChanged();
                 }
                 dispatchToolCalls(toolCallsJson);
-            } else if (!m_currentStreamBuffer.isEmpty()) {
+            } else
+#endif
+            if (!m_currentStreamBuffer.isEmpty()) {
                 if (!m_cancelled) {
                     MessageData assistantMsg;
                     assistantMsg.role    = "assistant";
@@ -1173,6 +1211,7 @@ void ChatBot::handleNetworkReply(QNetworkReply* reply, bool isStream) {
             QJsonObject choice  = choices.first().toObject();
             QJsonObject message = choice["message"].toObject();
 
+#ifdef PL_AI_TOOLS
             if (message.contains("tool_calls") && message["tool_calls"].isArray()) {
                 QJsonDocument tcDoc(message["tool_calls"].toArray());
                 QString       toolCallsJson = QString(tcDoc.toJson(QJsonDocument::Compact));
@@ -1188,7 +1227,9 @@ void ChatBot::handleNetworkReply(QNetworkReply* reply, bool isStream) {
                     emit messagesChanged();
                 }
                 dispatchToolCalls(toolCallsJson);
-            } else if (message.contains("content") && message["content"].isString()) {
+            } else
+#endif
+            if (message.contains("content") && message["content"].isString()) {
                 QString     content = message["content"].toString();
                 if (!m_cancelled) {
                     MessageData assistantMsg;
@@ -1362,6 +1403,7 @@ void ChatBot::cancelRequest() {
     ++m_requestSeq;
     abortActiveReplies();
 
+#ifdef PL_AI_TOOLS
     QStringList shellKeys;
     for (auto it = m_activeShellExecs.constBegin(); it != m_activeShellExecs.constEnd(); ++it)
         shellKeys.append(it.key());
@@ -1372,11 +1414,14 @@ void ChatBot::cancelRequest() {
         auto pending = m_pendingShellExecs.takeFirst();
         emit shellCommandFinished(pending.toolCallId, false, "用户取消了请求", pending.command);
     }
+#endif
 
     m_currentStreamBuffer.clear();
     m_responseBuffer.clear();
+#ifdef PL_AI_TOOLS
     m_toolCallsBuffer.clear();
     m_toolCallBatch.clear();
+#endif
 
     emit requestCancelled();
 }
@@ -1578,14 +1623,18 @@ void ChatBot::applyModelConfig(const json& modelObj) {
     m_capText      = true;
     m_capVision    = false;
     m_capAudio     = false;
+#ifdef PL_AI_TOOLS
     m_capToolCall  = false;
+#endif
     m_capReasoning = false;
     if (modelObj.contains("capabilities") && modelObj["capabilities"].is_object()) {
         const auto& cap = modelObj["capabilities"];
         m_capText       = cap.value("text", true);
         m_capVision     = cap.value("vision", false);
         m_capAudio      = cap.value("audio", false);
+#ifdef PL_AI_TOOLS
         m_capToolCall   = cap.value("toolCall", false);
+#endif
         m_capReasoning  = cap.value("reasoning", false);
     }
     emit activeModelCapabilitiesChanged();
@@ -1623,14 +1672,18 @@ bool ChatBot::addModel(const QString& modelJson) {
         cap["text"]      = true;
         cap["vision"]    = false;
         cap["audio"]     = false;
+#ifdef PL_AI_TOOLS
         cap["toolCall"]  = false;
+#endif
         cap["reasoning"] = false;
         if (input.contains("capabilities") && input["capabilities"].isObject()) {
             const auto qcap = input["capabilities"].toObject();
             if (qcap.contains("text")) cap["text"] = qcap["text"].toBool(true);
             if (qcap.contains("vision")) cap["vision"] = qcap["vision"].toBool(false);
             if (qcap.contains("audio")) cap["audio"] = qcap["audio"].toBool(false);
+#ifdef PL_AI_TOOLS
             if (qcap.contains("toolCall")) cap["toolCall"] = qcap["toolCall"].toBool(false);
+#endif
             if (qcap.contains("reasoning")) cap["reasoning"] = qcap["reasoning"].toBool(false);
         }
         newModel["capabilities"] = cap;
@@ -1984,8 +2037,10 @@ QVariantList ChatBot::getSessionMessages(const QString& sessionId) {
     return messageList;
 }
 
+#ifdef PL_AI_TOOLS
 // -----------------------------------------------------------------------
-// Tavily 网络搜索
+// Tavily 网络搜索 / Shell 工具
+// 此部分仅在 xmake f --ai-tools=y 时编译；默认构建不包含工具调用功能。
 // -----------------------------------------------------------------------
 
 void ChatBot::initTavily() {
@@ -2533,6 +2588,31 @@ void ChatBot::cleanupShellExec(const QString& toolCallId) {
 
     delete e;
 }
+
+#else
+
+// ---- 工具调用未启用时的空实现（保留以维持 QML 接口稳定）----
+void ChatBot::initTavily() {}
+void ChatBot::setTavilyEnabled(bool) {}
+QString ChatBot::getTavilyConfig() { return "{}"; }
+void ChatBot::setTavilyConfig(const QString&) {}
+void ChatBot::injectToolDefinitions(QJsonObject&) {}
+void ChatBot::dispatchToolCalls(const QString&) {}
+void ChatBot::executeTavilySearch(const QString&, const QString&) {}
+void ChatBot::initShellTool() {}
+void ChatBot::setShellToolEnabled(bool) {}
+QString ChatBot::getShellToolConfig() {
+    return "{\"enabled\":false,\"timeout_ms\":10000,\"max_output_bytes\":4096,\"blocklist\":[]}";
+}
+void ChatBot::setShellToolConfig(const QString&) {}
+bool ChatBot::isCommandBlocked(const QString&) { return false; }
+QString ChatBot::truncateOutput(const QString& output, int) { return output; }
+void ChatBot::approveShellCommand(const QString&) {}
+void ChatBot::denyShellCommand(const QString&) {}
+void ChatBot::executeShellCommand(const QString&, const QString&) {}
+void ChatBot::cleanupShellExec(const QString&) {}
+
+#endif
 
 // -----------------------------------------------------------------------
 // 数学公式渲染

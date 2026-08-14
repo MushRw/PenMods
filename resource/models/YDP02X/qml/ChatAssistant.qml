@@ -1124,9 +1124,11 @@ YPage {
         MoreMenuPopup {
             id: id_more_menu
             fontFamily: qmlGlobal.fontFamilyZhCn
-            tavilyEnabled: chatbot.tavilyEnabled
-            tavilyConfigured: chatbot.tavilyConfigured
+            tavilyEnabled: chatbot.toolsEnabled && chatbot.tavilyEnabled
+            tavilyConfigured: chatbot.toolsEnabled && chatbot.tavilyConfigured
             onWebSearchToggled: {
+                if (!chatbot.toolsEnabled)
+                    return;
                 if (!chatbot.tavilyConfigured) {
                     toastBanner.warning("请先在设置中配置 Tavily API Key");
                     return;

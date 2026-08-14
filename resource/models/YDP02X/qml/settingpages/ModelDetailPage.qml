@@ -332,6 +332,7 @@ YBackButtonPage {
             DescribedSwitchItem {
                 title: "工具使用（Tool Call）"
                 description: "支持函数调用"
+                visible: chatbot.toolsEnabled
                 switchOn: fd.capToolCall
                 interval: 0
                 onTimerTriggered: { fd.capToolCall = switchOn; fd = fd; }

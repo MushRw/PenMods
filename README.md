@@ -6,7 +6,7 @@
 
 - **重新实现的 AI 助手**
   - 兼容 OpenAI 格式 API，可配置多个模型与提示词
-  - 支持 Tool Call（shell 命令执行、Tavily 网络搜索）
+  - Tool Call（shell 命令执行、Tavily 网络搜索）代码保留，但**默认构建不启用**（见下文）
   - 数学公式渲染（需自建 MathJax 服务器）、本地文件引用
 - **增强文件管理器**
   - 图片查看器（含 WebP 动图）、外部视频播放器
@@ -79,6 +79,20 @@ xmake f \
   -c
 xmake build
 ```
+
+### AI 工具调用（默认关闭）
+
+AI 助手的 Tool Call 功能（Tavily 网络搜索、Shell 命令执行）代码保留在仓库中，
+但**默认构建不编译、运行时不生效**：
+
+- 默认产物不会向模型注入任何工具定义，AI 不会发起工具调用；
+- QML 中相关设置项与入口按 `chatbot.toolsEnabled`（编译开关决定）自动隐藏；
+- 需要启用时，在本地构建时加选项（CI 默认构建即关闭）：
+  ```shell
+  xmake f --ai-tools=y
+  xmake build
+  ```
+- 启用后功能入口：AI 助手工具栏的“网络搜索”、设置 → AI 助手 → 网络搜索 (Tavily) / Shell 工具。
 
 ### 修改 QML
 

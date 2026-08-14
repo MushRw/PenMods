@@ -68,6 +68,10 @@ class ChatBot : public QObject, public Singleton<ChatBot>, private Logger {
     Q_PROPERTY(QVariantList messages READ getMessages NOTIFY messagesChanged)
     Q_PROPERTY(QString currentSessionId READ getCurrentSessionId NOTIFY sessionSwitched)
 
+    // AI 工具调用（Tavily 搜索 / Shell 执行）编译开关：
+    // 默认构建不启用（xmake f --ai-tools=y 开启），代码保留但不会编译进产物。
+    Q_PROPERTY(bool toolsEnabled READ isToolsEnabled CONSTANT)
+
     // 当前活动模型的能力标志（只读，随模型切换更新）
     Q_PROPERTY(bool capText READ getCapText NOTIFY activeModelCapabilitiesChanged)
     Q_PROPERTY(bool capVision READ getCapVision NOTIFY activeModelCapabilitiesChanged)
@@ -92,6 +96,7 @@ public:
     Q_INVOKABLE void    sendMessage(const QString& message, const QString& fileRefs = QString());
     Q_INVOKABLE void    sendMessageWithMedia(const QString& message, const QString& mediaParts);
     Q_INVOKABLE bool    isAvailable();
+    bool                isToolsEnabled() const;
     Q_INVOKABLE void    reloadConfig();
     Q_INVOKABLE void    sanitizeConfig();
     Q_INVOKABLE void    clearHistory();
