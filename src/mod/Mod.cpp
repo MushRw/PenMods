@@ -6,7 +6,6 @@
 
 #include "mod/Mod.h"
 #include "mod/PlayerInstaller.h"
-#include "helper/VpnManager.h"
 #include "helper/AvatarProvider.h"
 
 #include "wallpaper/WallpaperManager.h"
@@ -105,7 +104,6 @@ void Mod::uninstall() {
         QFile::remove(tmpPath);
 
         // 清理 mod 自身文件（尽力而为，失败不阻断卸载）
-        VpnManager::getInstance().stop();                            // 停止 VPN 并恢复应用代理
         QFile::remove(util::getModuleFileInfo().absoluteFilePath()); // libPenMods.so
         QDir("/userdata/PenMods").removeRecursively();               // 资源库/配置/安装包
         QDir("/userdisk/mpv").removeRecursively();                   // 随包播放器
@@ -302,7 +300,6 @@ __attribute__((constructor)) static void BeforeMain() {
     INSTANCE(DeveloperSettings);
     INSTANCE(NetworkSettings);
     INSTANCE(ServiceManager);
-    INSTANCE(VpnManager);
 
     // locker
     INSTANCE(Locker);

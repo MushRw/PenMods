@@ -23,7 +23,6 @@ REQUIRED_FILES = [
     "libPenModsResources.so",
     "player.zip",
     "rime.zip",
-    "mihomo.gz",
     "patch.sh",
     "misc/init.sh",
     "misc/patchelf",
@@ -109,7 +108,7 @@ def main():
     else:
         log("全新安装，将安装 patchelf 并给主程序打补丁")
 
-    adb("shell", "mkdir -p /userdata/PenMods/misc /userdata/PenMods/vpn")
+    adb("shell", "mkdir -p /userdata/PenMods/misc")
 
     def push(local, remote):
         local_path = os.path.join(pkg_dir, local)
@@ -129,11 +128,7 @@ def main():
 
     for f in REQUIRED_FILES:
         log("推送 %s ..." % f)
-        if f == "mihomo.gz":
-            # mihomo 由 VpnManager 从 /userdata/PenMods/vpn/mihomo.gz 自愈部署
-            push(f, "/userdata/PenMods/vpn/mihomo.gz")
-        else:
-            push(f, "/userdata/PenMods/" + f)
+        push(f, "/userdata/PenMods/" + f)
 
     adb("shell", "chmod +x /userdata/PenMods/misc/init.sh /userdata/PenMods/misc/patchelf /userdata/PenMods/patch.sh")
 
@@ -158,7 +153,7 @@ def main():
     adb("shell", "sync")
     adb("shell", "reboot")
 
-    log("完成！设备正在重启，开机后即可使用 PenMods（含播放器、输入法、VPN 内核均已就位）。")
+    log("完成！设备正在重启，开机后即可使用 PenMods（含播放器、输入法）。")
 
 
 if __name__ == "__main__":

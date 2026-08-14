@@ -230,56 +230,6 @@ YSettingItemPage {
                 }
             }
 
-            footer: Column {
-                width: id_setting_wifi_view.width
-                spacing: 8
-
-                YText {
-                    width: parent.width
-                    font.pixelSize: 16
-                    font.italic: true
-                    color: YColors.grayText
-                    leftPadding: 10
-                    topPadding: 8
-                    text: "VPN"
-                }
-
-                DescribedSwitchItem {
-                    width: parent.width
-                    implicitHeight: 54
-                    title: "启用 VPN"
-                    description: "开启后，笔上应用的联网流量走本地代理。"
-                    describeItem.wrapMode: Text.WrapAnywhere
-                    switchOn: vpnManager.enabled
-                    interval: 0
-                    onTimerTriggered: {
-                        vpnManager.enabled = switchOn
-                    }
-                }
-
-                DescribedClickableTextBox {
-                    width: parent.width
-                    title: "订阅链接"
-                    describe: id_setting_wifi.shortUrl(vpnManager.subscriptionUrl)
-                    describeItem.wrapMode: Text.WrapAnywhere
-                    opacityChangableWhenPressed: false
-                    onClicked: {
-                        requestKeyboard("", 1)
-                    }
-                }
-
-                YText {
-                    width: parent.width
-                    font.pixelSize: 14
-                    color: vpnManager.running ? YColors.green : YColors.grayText
-                    leftPadding: 10
-                    text: vpnManager.running ? "VPN 已连接" : "VPN 未连接"
-                }
-
-                YSpacing {
-                    implicitHeight: 8
-                }
-            }
         }
 
         YText {
@@ -378,12 +328,8 @@ YSettingItemPage {
                 incubatorObject = null
             })
             incubatorObject.inputFinished.connect(function(content){
-                if (id_setting_wifi.currentKeyboardState === 1) {
-                    vpnManager.subscriptionUrl = content
-                } else {
-                    wifiManager.tryConnect(id_page_pop_helper.ssid, content)
-                    id_setting_wifi_view.positionViewAtBeginning()
-                }
+                wifiManager.tryConnect(id_page_pop_helper.ssid, content)
+                id_setting_wifi_view.positionViewAtBeginning()
             })
             incubatorObject.show()
             qmlGlobal.inputPageShowing = true

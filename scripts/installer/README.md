@@ -6,7 +6,7 @@
 - Windows：双击 `start.cmd`
 - 其它系统：`python install.py`
 
-程序会自动完成：解锁 -> 挂载可写 -> 推送 mod/播放器/输入法/VPN 内核 ->
+程序会自动完成：解锁 -> 挂载可写 -> 推送 mod/播放器/输入法 ->
 （全新安装时）安装 patchelf 并打补丁 -> 校验 -> 重启。
 
 已装过 PenMods 的笔按**升级**处理，只替换文件、不重复打补丁。
@@ -16,6 +16,6 @@
 ```text
 install.py / start.cmd
 libPenMods.so / libPenModsResources.so
-player.zip / rime.zip / mihomo.gz
+player.zip / rime.zip
 patch.sh / misc/init.sh / misc/patchelf
 ```

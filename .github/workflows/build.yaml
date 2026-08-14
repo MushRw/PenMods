@@ -152,17 +152,12 @@ jobs:
           mkdir -p build/linux/arm64-v8a
           cp resource/rime/rime.zip build/linux/arm64-v8a/rime.zip
 
-      - name: 打包 mihomo 内核
-        run: |
-          mkdir -p build/linux/arm64-v8a
-          cp resource/vpn/mihomo.gz build/linux/arm64-v8a/mihomo.gz
-
       - name: 组装一键安装包
         run: |
           mkdir -p release
           cp build/linux/arm64-v8a/release/libPenMods.so release/
           cp build/linux/arm64-v8a/release/libPenModsResources.so release/
-          cp build/linux/arm64-v8a/player.zip build/linux/arm64-v8a/rime.zip build/linux/arm64-v8a/mihomo.gz release/
+          cp build/linux/arm64-v8a/player.zip build/linux/arm64-v8a/rime.zip release/
           cp scripts/installer/install.py scripts/installer/start.cmd scripts/installer/README.md release/
           cp scripts/patch.sh release/patch.sh
           cp -r scripts/installer/misc release/misc
