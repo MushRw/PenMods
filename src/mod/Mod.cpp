@@ -173,11 +173,24 @@ void Mod::onUiCompleted() const {
 #endif
     };
 
-    for (auto i : list) {
-        if (exec(QString("vendor_storage -r %1 -t %2").arg(i.mName, i.mType)).find("vendor read error -1")
-            != std::string::npos) {
-            spdlog::warn("Automatically repairing vendor_storage: {}", i.mName.toStdString());
-            exec(QString("vendor_storage -w %1 -t %2 -i %3").arg(i.mName, i.mType, i.mDefaultValue));
+    // 只在首次启动尝试修复，避免每次开机反复读取失败并刷屏。
+    // 注意 vendor_storage 的错误输出在 stderr，必须 2>&1 合并后才能检测到。
+    if (!QFile::exists("/userdata/PenMods/.vendor_repaired")) {
+        bool repaired = false;
+        for (auto i : list) {
+            if (exec(QString("vendor_storage -r %1 -t %2 2>&1").arg(i.mName, i.mType)).find("vendor read error -1")
+                != std::string::npos) {
+                spdlog::warn("Automatically repairing vendor_storage: {}", i.mName.toStdString());
+                if (exec(QString("vendor_storage -w %1 -t %2 -i %3 2>&1").arg(i.mName, i.mType, i.mDefaultValue))
+                        .find("vendor write error") == std::string::npos) {
+                    repaired = true;
+                }
+            }
+        }
+        QFile repairedFlag("/userdata/PenMods/.vendor_repaired");
+        if (repairedFlag.open(QIODevice::WriteOnly)) {
+            repairedFlag.write(repaired ? "ok" : "failed");
+            repairedFlag.close();
         }
     }
 

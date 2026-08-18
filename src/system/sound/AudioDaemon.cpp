@@ -379,7 +379,7 @@ void AudioDaemon::_onInotifyReady(int fd) {
 
 void AudioDaemon::_onWakeLockChange(bool refreshExternalOutput) {
     int fileLocks = _countWakeLocks();
-    info("wake lock 目录变更: fileLocks={}, refCount={}, state={}",
+    debug("wake lock 目录变更: fileLocks={}, refCount={}, state={}",
           fileLocks, mRefCount, stateToString(mState));
 
     if (fileLocks > 0 || mRefCount > 0) {

@@ -12,13 +12,26 @@
 #include "common/Event.h"
 #include "common/Utils.h"
 
+#include <QDateTime>
+
+#include <sstream>
+#include <unistd.h>
+#include <vector>
+
 namespace mod {
 
 InputDaemon::InputDaemon() : Logger("InputDaemon") {
+    mWatchdogTimer = new QTimer(this);
+    mWatchdogTimer->setInterval(60 * 1000);
+    connect(mWatchdogTimer, &QTimer::timeout, this, &InputDaemon::onWatchdogTick);
     connect(&Event::getInstance(), &Event::uiCompleted, this, &InputDaemon::onUiCompleted);
 }
 
-void InputDaemon::onUiCompleted() { reset(); }
+void InputDaemon::onUiCompleted() {
+    reset();
+    // 看门狗在 UI 就绪后再启动（事件循环已运行）
+    mWatchdogTimer->start();
+}
 
 bool InputDaemon::setScreenOff(uint32 sec) {
     mScreenOff = sec;
@@ -231,6 +244,102 @@ InputDaemon::Config InputDaemon::_getConfig() {
     }
     warn("Unable to find a matching input-event-daemon configuration file for this pcba({}).", pcba);
     return {"/etc/input-event-daemon_V0.conf", _getRawConfigure("V0")};
+}
+
+void InputDaemon::onWatchdogTick() {
+    if (mWatchdogDisabled) {
+        return;
+    }
+
+    auto pidStr = exec("pidof input-event-daemon");
+    pid_t pid   = -1;
+    try {
+        pid = std::stoi(pidStr);
+    } catch (...) {
+        pid = -1;
+    }
+
+    if (pid <= 0) {
+        // daemon 已退出，直接拉起
+        warn("input-event-daemon 未在运行，看门狗拉起");
+        _restartDaemon();
+        return;
+    }
+
+    bool   ok    = false;
+    uint64 ticks = _readDaemonTicks(pid, ok);
+    if (!ok) {
+        mWatchdogPid = -1;
+        return;
+    }
+
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (mWatchdogPid == pid && mWatchdogLastTimeMs > 0 && ticks >= mWatchdogLastTicks) {
+        double dt = (now - mWatchdogLastTimeMs) / 1000.0;
+        if (dt > 0) {
+            double usage =
+                double(ticks - mWatchdogLastTicks) / (double(sysconf(_SC_CLK_TCK)) * dt);
+            if (usage > 0.15) {
+                mWatchdogBusyCount++;
+                warn("input-event-daemon CPU {:.0f}%（第 {} 次连续偏高）", usage * 100.0, mWatchdogBusyCount);
+                if (mWatchdogBusyCount >= 3) {
+                    warn("input-event-daemon 疑似忙循环，看门狗重启...");
+                    _restartDaemon();
+                    mWatchdogBusyCount = 0;
+                    mWatchdogPid       = -1;
+                    mWatchdogLastTimeMs = 0;
+                }
+            } else {
+                mWatchdogBusyCount = 0;
+            }
+        }
+    }
+
+    mWatchdogPid        = pid;
+    mWatchdogLastTicks  = ticks;
+    mWatchdogLastTimeMs = now;
+}
+
+bool InputDaemon::_restartDaemon() {
+    mWatchdogRestarts++;
+    if (mWatchdogRestarts >= 3) {
+        mWatchdogDisabled = true;
+        warn("input-event-daemon 重启多次仍异常，看门狗已停用");
+        return false;
+    }
+    exec("killall input-event-daemon 2>/dev/null");
+    exec("input-event-daemon");
+    info("input-event-daemon 已由看门狗重启");
+    return true;
+}
+
+uint64 InputDaemon::_readDaemonTicks(pid_t pid, bool& ok) {
+    ok = false;
+    auto s = readFile(("/proc/" + std::to_string(pid) + "/stat").c_str());
+    auto closeParen = s.rfind(')');
+    // /proc/pid/stat: "pid (comm) state ppid ... utime stime ..."
+    if (closeParen == std::string::npos || closeParen + 2 >= s.size()) {
+        return 0;
+    }
+    std::string rest = s.substr(closeParen + 2);
+    std::vector<std::string> fields;
+    std::istringstream iss(rest);
+    std::string token;
+    while (iss >> token) {
+        fields.push_back(token);
+    }
+    // fields[0]=state, fields[1]=ppid, ..., fields[11]=utime, fields[12]=stime
+    if (fields.size() < 13) {
+        return 0;
+    }
+    try {
+        uint64 utime = std::stoull(fields[11]);
+        uint64 stime = std::stoull(fields[12]);
+        ok           = true;
+        return utime + stime;
+    } catch (...) {
+        return 0;
+    }
 }
 
 } // namespace mod
