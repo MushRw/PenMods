@@ -12,6 +12,7 @@
 #include <QQmlContext>
 #include <QQuickView>
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
