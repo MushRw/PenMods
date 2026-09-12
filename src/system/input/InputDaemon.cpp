@@ -67,7 +67,8 @@ bool InputDaemon::_resetConfig() {
     auto cfg = _getConfig();
     // 目标是 rootfs 上的 /etc/input-event-daemon_<model>.conf：只在真正写文件的
     // 这段时间把 / 临时放开为可写，写完还原（原来是开机就整段会话保持 rw）。
-    const bool wasWritable = util::setRootFileSystemWritable(true);
+    const bool wasWritable = util::isRootFileSystemWritable();
+    util::setRootFileSystemWritable(true);
     std::ofstream ofile(cfg.mPath);
     if (!ofile.good()) {
         util::setRootFileSystemWritable(wasWritable);

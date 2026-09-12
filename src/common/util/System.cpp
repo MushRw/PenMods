@@ -15,10 +15,8 @@
 
 namespace mod::util {
 
-namespace {
-
 // 直接看 /proc/mounts，避免依赖 mount 命令的输出格式。
-bool rootFileSystemIsWritable() {
+bool isRootFileSystemWritable() {
     QFile mounts("/proc/mounts");
     if (!mounts.open(QIODevice::ReadOnly)) {
         return false;
@@ -34,8 +32,6 @@ bool rootFileSystemIsWritable() {
     return false;
 }
 
-} // namespace
-
 QFileInfo getModuleFileInfo() {
     Dl_info info;
     if (dladdr((void*)getModuleFileInfo, &info) == 0) return {};
@@ -49,11 +45,11 @@ QFileInfo getApplicationFileInfo() {
 }
 
 bool setRootFileSystemWritable(bool writable) {
-    if (rootFileSystemIsWritable() == writable) {
+    if (isRootFileSystemWritable() == writable) {
         return true;
     }
     exec(QString("mount -o remount,%1 /").arg(writable ? "rw" : "ro"));
-    return rootFileSystemIsWritable() == writable;
+    return isRootFileSystemWritable() == writable;
 }
 
 } // namespace mod::util

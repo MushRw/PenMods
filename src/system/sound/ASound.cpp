@@ -36,7 +36,8 @@ bool ASound::_resetConfig() {
                        .toStdString();
     // cfg.mPath 是 rootfs 上的 /etc/asound.conf.<model>：只在真正写文件的这段
     // 时间把 / 临时放开为可写，写完还原（原来是开机就整段会话保持 rw）。
-    const bool wasWritable = util::setRootFileSystemWritable(true);
+    const bool wasWritable = util::isRootFileSystemWritable();
+    util::setRootFileSystemWritable(true);
     std::ofstream ofile(cfg.mPath);
     if (!ofile.good()) {
         util::setRootFileSystemWritable(wasWritable);
