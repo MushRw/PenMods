@@ -36,8 +36,6 @@ public:
 
     std::shared_ptr<spdlog::logger>& getLogging();
 
-    bool isNativeLoggingDisabled();
-
     /// 检查日志消息中的分类标签是否被过滤
     /// 解析格式: [timestamp] [native] [level] [tag] ... → 匹配 [tag] 是否在过滤列表中
     bool isTagFiltered(const std::string& message);

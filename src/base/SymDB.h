@@ -10,6 +10,7 @@
 #include "common/service/Singleton.h"
 
 #include <QHash>
+#include <QSet>
 #include <QString>
 
 namespace mod {
@@ -27,6 +28,7 @@ private:
     uint64 _getImageBase(const std::string& module);
 
     QHash<QString, uint64> mDatabase;
+    QSet<QString>          mMissing; // 查不到的符号记在这里，避免重复解析和刷屏
 };
 
 } // namespace mod

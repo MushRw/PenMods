@@ -192,7 +192,7 @@ bool AudioDaemon::shouldCloseAudioOutput() {
     switch (mState) {
     case AudioDaemonState::IDLE:
         // 已经是空闲，无需关闭
-        info("抑制 closeAudioOutput（已在 IDLE 状态）");
+        debug("抑制 closeAudioOutput（已在 IDLE 状态）");
         return false;
 
     case AudioDaemonState::PLAYING:
@@ -205,9 +205,9 @@ bool AudioDaemon::shouldCloseAudioOutput() {
                 return false;
             }
             // 有外部文件锁占用，无需关闭
-            info("抑制 closeAudioOutput（refCount=0, fileLocks={}）", fileLocks);
+            debug("抑制 closeAudioOutput（refCount=0, fileLocks={}）", fileLocks);
         } else {
-            info("抑制 closeAudioOutput（refCount={}）", mRefCount);
+            debug("抑制 closeAudioOutput（refCount={}）", mRefCount);
         }
         return false;
 
@@ -220,7 +220,7 @@ bool AudioDaemon::shouldCloseAudioOutput() {
 
 void AudioDaemon::notifyCloseDone() {
     mTotalCloseCalls++;
-    info("closeAudioOutput 完成（累计={}）", mTotalCloseCalls);
+    debug("closeAudioOutput 完成（累计={}）", mTotalCloseCalls);
     _transitionTo(AudioDaemonState::IDLE);
 }
 

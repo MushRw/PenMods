@@ -158,6 +158,22 @@ def emit_array(name, blob):
     return "\n".join(lines)
 
 
+TEXT_SUFFIXES = (".qml", ".js", ".json", ".md", ".txt")
+
+
+def normalize_text_bytes(rel, raw):
+    """行尾归一。
+
+    Windows 检出（core.autocrlf=true）出来的 QML 是 CRLF，直接打包会让产物与
+    Linux/CI 出包字节不一致，也会让 diff-factory-vs-penmods.py 把上百个文件
+    误报成"改过"。文本资源统一按 LF 打包，pack / verify 两侧都用这个函数，
+    保证结论一致。
+    """
+    if rel.endswith(TEXT_SUFFIXES):
+        return raw.replace(b"\r\n", b"\n")
+    return raw
+
+
 def pack(header_path, srcdir, output_path):
     data, names, tree = parse_header(header_path)
     resources = extract_resources(data, tree, names)
@@ -168,7 +184,8 @@ def pack(header_path, srcdir, output_path):
         for fn in files:
             full = os.path.join(root, fn)
             rel = os.path.relpath(full, srcdir).replace("\\", "/")
-            overlay[rel] = open(full, "rb").read()
+            raw = normalize_text_bytes(rel, open(full, "rb").read())
+            overlay[rel] = raw
 
     nodes = parse_tree(tree)
     # order leaves by their current data offset to preserve blob order
@@ -251,7 +268,7 @@ def verify(header_path, srcdir):
             continue
         content = decode_payload(payload, compressed)
         with open(src, "rb") as f:
-            if f.read() != content:
+            if normalize_text_bytes(path, f.read()) != content:
                 print("MISMATCH: %s" % path)
                 bad += 1
     print("verify: %d files, %d mismatches" % (len(resources), bad))

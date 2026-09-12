@@ -6,10 +6,35 @@
 
 #include "System.h"
 
+#include "common/Utils.h"
+
+#include <QFile>
+
 #include <dlfcn.h>
 #include <unistd.h>
 
 namespace mod::util {
+
+namespace {
+
+// 直接看 /proc/mounts，避免依赖 mount 命令的输出格式。
+bool rootFileSystemIsWritable() {
+    QFile mounts("/proc/mounts");
+    if (!mounts.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    const auto lines = QString::fromUtf8(mounts.readAll()).split('\n');
+    for (const auto& line : lines) {
+        const auto parts = line.split(' ');
+        if (parts.size() < 4 || parts[1] != "/") {
+            continue;
+        }
+        return parts[3].split(',').contains("rw");
+    }
+    return false;
+}
+
+} // namespace
 
 QFileInfo getModuleFileInfo() {
     Dl_info info;
@@ -21,6 +46,14 @@ QFileInfo getApplicationFileInfo() {
     char path[4096];
     if (readlink("/proc/self/exe", path, sizeof(path) - 1) == -1) return {};
     return QFileInfo(path);
+}
+
+bool setRootFileSystemWritable(bool writable) {
+    if (rootFileSystemIsWritable() == writable) {
+        return true;
+    }
+    exec(QString("mount -o remount,%1 /").arg(writable ? "rw" : "ro"));
+    return rootFileSystemIsWritable() == writable;
 }
 
 } // namespace mod::util

@@ -28,7 +28,21 @@ bool Locker::getEnabled() const { return mEnabled; }
 
 QString Locker::getPassword() const { return mPassword; }
 
-bool Locker::getScene(const QString& val) const { return getEnabled() && mCfg["scene"][val.toStdString()]; }
+bool Locker::getScene(const QString& val) const {
+    if (!getEnabled()) {
+        return false;
+    }
+    // 不要用 const operator[]：key 不存在时是 UB（QML 可以传任意 scene 名）。
+    auto scene = mCfg.find("scene");
+    if (scene == mCfg.end() || !scene->is_object()) {
+        return false;
+    }
+    auto item = scene->find(val.toStdString());
+    if (item == scene->end() || !item->is_boolean()) {
+        return false;
+    }
+    return item->get<bool>();
+}
 
 void Locker::setEnabled(bool val) {
     if (mEnabled != val) {

@@ -34,7 +34,6 @@ Updater::Updater() : Logger("Updater") {
 }
 
 QString Version::toString() const {
-    spdlog::warn("1.1");
     return QString("%1.%2.%3").arg(QString::number(mMajor), QString::number(mMinor), QString::number(mRevision));
 }
 
@@ -205,8 +204,11 @@ void Updater::_unzip(QString zipPath, QString toWhere) {
 }
 
 void Updater::_cleanupTemp() {
-    util::getModuleFileInfo().absoluteDir().rmdir(UH_TEMP_DIRNAME);
-    QDir(UH_TEMP_PATH).mkpath(".");
+    // rmdir 对非空目录必然失败：旧的 download.temp（OTA 包，可能几十 MB）会一直留着。
+    QDir(UH_TEMP_PATH).removeRecursively();
+    QDir().mkpath(UH_TEMP_PATH);
+    // 历史遗留：早期版本把临时目录放在模块目录下，一并清掉。
+    QDir(util::getModuleFileInfo().absolutePath() + "/" + UH_TEMP_DIRNAME).removeRecursively();
 }
 
 void Updater::_setCurrentVersion(QString verstr) {

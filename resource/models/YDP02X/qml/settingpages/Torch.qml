@@ -57,6 +57,8 @@ YSettingItemPage {
     }
 
     Timer {
+        // 必须给 interval：QML Timer 的默认 interval 是 0，等于让本页以最高频率轮询 C++ 侧状态。
+        interval: 1000
         running: true
         repeat: true
         onTriggered: id_switch.switchOn = torch.switch

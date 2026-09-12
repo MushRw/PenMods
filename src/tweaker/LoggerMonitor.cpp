@@ -94,38 +94,62 @@ bool LoggerMonitor::isTagFiltered(const std::string& message) {
 
 // Local Logging
 
-PEN_HOOK(void, runtime_log, int priority, const char* format, ...) {
-    char    buffer[1024];
-    va_list args;
-    va_start(args, format);
-    vsnprintf(buffer, 1024, format, args);
-    va_end(args);
+namespace {
+
+// 原生日志 hook 的成本控制：release 构建下 native logger 的级别是 info，
+// debug() 一定会被丢弃。所以先问一句 should_log()，避免每条宿主日志都白跑
+// 一次 vsnprintf + 标签匹配（"付费丢弃"）。
+bool nativeCaptureEnabled() {
+    static auto& logger = mod::LoggerMonitor::getInstance().getLogging();
+    return logger && logger->should_log(spdlog::level::debug);
+}
+
+// 统一处理宿主日志：去掉结尾换行，按过滤标签决定是否重发。
+void captureNativeLog(char* buffer) {
     auto len = strlen(buffer);
-    if (len > 0) {
-        if (buffer[len - 1] == '\n') {
-            buffer[len - 1] = '\0';
-        }
-        if (!mod::LoggerMonitor::getInstance().isTagFiltered(buffer)) {
-            mod::LoggerMonitor::getInstance().getLogging()->debug(buffer);
-        }
+    if (len == 0) {
+        return;
+    }
+    if (buffer[len - 1] == '\n') {
+        buffer[len - 1] = '\0';
+    }
+    if (!mod::LoggerMonitor::getInstance().isTagFiltered(buffer)) {
+        mod::LoggerMonitor::getInstance().getLogging()->debug(buffer);
     }
 }
 
-PEN_HOOK(void, DictPen_log, int priority, const char* format, ...) {
+// fprintf 的透传判定：历史上这里拿 __bss_start__ 的地址跟 FILE* 比较，
+// 实际上几乎不可能命中。保留这个语义，但把符号解析缓存一次——原实现每次
+// fprintf 都会走一遍 SymDB 查找（未命中还会刷告警）。
+void* nativePassthroughStream() {
+    static void* const kBssStart = PEN_SYM("__bss_start__");
+    return kBssStart;
+}
+
+} // namespace
+
+PEN_HOOK(void, runtime_log, int priority, const char* format, ...) {
+    if (!nativeCaptureEnabled()) {
+        return;
+    }
     char    buffer[1024];
     va_list args;
     va_start(args, format);
     vsnprintf(buffer, 1024, format, args);
     va_end(args);
-    auto len = strlen(buffer);
-    if (len > 0) {
-        if (buffer[len - 1] == '\n') {
-            buffer[len - 1] = '\0';
-        }
-        if (!mod::LoggerMonitor::getInstance().isTagFiltered(buffer)) {
-            mod::LoggerMonitor::getInstance().getLogging()->debug(buffer);
-        }
+    captureNativeLog(buffer);
+}
+
+PEN_HOOK(void, DictPen_log, int priority, const char* format, ...) {
+    if (!nativeCaptureEnabled()) {
+        return;
     }
+    char    buffer[1024];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, 1024, format, args);
+    va_end(args);
+    captureNativeLog(buffer);
 }
 
 PEN_HOOK(
@@ -140,57 +164,39 @@ PEN_HOOK(
     const char* format,
     ...
 ) {
+    if (!nativeCaptureEnabled()) {
+        return 1;
+    }
     char    buffer[1024];
     va_list args;
     va_start(args, format);
     vsnprintf(buffer, 1024, format, args);
     va_end(args);
-    auto len = strlen(buffer);
-    if (len > 0) {
-        if (buffer[len - 1] == '\n') {
-            buffer[len - 1] = '\0';
-        }
-        if (!mod::LoggerMonitor::getInstance().isTagFiltered(buffer)) {
-            mod::LoggerMonitor::getInstance().getLogging()->debug(buffer);
-        }
-    }
+    captureNativeLog(buffer);
     return 1;
 }
 
 PEN_HOOK(void, printf, const char* format, ...) {
+    if (!nativeCaptureEnabled()) {
+        return;
+    }
     char    buffer[1024];
     va_list args;
     va_start(args, format);
     vsnprintf(buffer, 1024, format, args);
     va_end(args);
-    auto len = strlen(buffer);
-    if (len > 0) {
-        if (buffer[len - 1] == '\n') {
-            buffer[len - 1] = '\0';
-        }
-        if (!mod::LoggerMonitor::getInstance().isTagFiltered(buffer)) {
-            mod::LoggerMonitor::getInstance().getLogging()->debug(buffer);
-        }
-    }
+    captureNativeLog(buffer);
 }
 
 PEN_HOOK(void, fprintf, FILE* stream, const char* format, ...) {
     va_list args;
     va_start(args, format);
-    if ((void*)stream == PEN_SYM("__bss_start__")) {
+    if ((void*)stream == nativePassthroughStream()) {
         vfprintf(stream, format, args);
-    } else {
+    } else if (nativeCaptureEnabled()) {
         char buffer[1024];
         vsnprintf(buffer, 1024, format, args);
-        auto len = strlen(buffer);
-        if (len > 0) {
-            if (buffer[len - 1] == '\n') {
-                buffer[len - 1] = '\0';
-            }
-            if (!mod::LoggerMonitor::getInstance().isTagFiltered(buffer)) {
-                mod::LoggerMonitor::getInstance().getLogging()->debug(buffer);
-            }
-        }
+        captureNativeLog(buffer);
     }
     va_end(args);
 }

@@ -263,6 +263,10 @@ void FileManager::loadMore() { loadMore(1500); }
 void FileManager::loadMore(int amount) {
     // Do not use 'isHasMore()' here!
     auto finalCount = std::min(mProxyCount + amount, (int)mEntities.size());
+    if (finalCount <= mProxyCount) {
+        // 没有更多数据时不要再 beginInsertRows(proxyCount, proxyCount - 1)：那是非法区间。
+        return;
+    }
     beginInsertRows(QModelIndex(), mProxyCount, finalCount - 1);
     mProxyCount = finalCount; // safe: limited by MAX_FILES.
     endInsertRows();
@@ -285,6 +289,9 @@ void FileManager::reset() {
 }
 
 void FileManager::remove(const QString& fileName) {
+    if (!judgeIsLegalFileName(fileName)) {
+        return;
+    }
     if (!mCurrentPath.exists(fileName)) {
         return;
     }
@@ -302,7 +309,8 @@ void FileManager::remove(const QString& fileName) {
             // 如果是软链接，只需删除链接本身，而不删除目标
             mCurrentPath.remove(fileName);
         } else if (i->isDir()) {
-            exec(QString("rm -rf \"%1\"").arg(filePath));
+            // 不要走 shell：路径里的引号/$(...) 会变成命令注入。
+            QDir(filePath).removeRecursively();
         } else {
             mCurrentPath.remove(fileName);
         }
@@ -664,10 +672,13 @@ void FileManager::executeFile(const QString& fileName) {
     }
 
     QProcess* process = new QProcess(this);
+    // 之前启动成功后从不释放：每次执行文件都泄漏一个 QProcess 对象。
+    connect(process, &QProcess::finished, process, &QObject::deleteLater);
+    connect(process, &QProcess::errorOccurred, process, &QObject::deleteLater);
     process->start(filePath);
     if (!process->waitForStarted()) {
         emit exception("启动失败");
-        delete process;
+        process->deleteLater(); // deleteLater 幂等：errorOccurred 那条路可能已经排过
         return;
     }
 }

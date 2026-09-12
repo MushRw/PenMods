@@ -9,6 +9,7 @@
 #include "common/Event.h"
 #include "common/Utils.h"
 
+#include <QFile>
 #include <QQmlContext>
 
 #if PL_BUILD_YDP02X
@@ -23,7 +24,18 @@ Torch::Torch() {
     });
 }
 
-bool Torch::getStatus() { return exec(QString("cat /sys/class/gpio/gpio%1/value").arg(LED_DEFAULT_GPIO_ID)) == "1"; }
+bool Torch::getStatus() {
+#if PL_BUILD_YDP02X
+    // 这是 Q_PROPERTY 的 READ，会被 QML 轮询；不要用 exec()（popen+fork+cat）。
+    QFile value(QString("/sys/class/gpio/gpio%1/value").arg(LED_DEFAULT_GPIO_ID));
+    if (!value.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    return value.readAll().trimmed() == "1";
+#else
+    return false;
+#endif
+}
 
 void Torch::setStatus(bool stat) {
     if (getStatus() != stat) {

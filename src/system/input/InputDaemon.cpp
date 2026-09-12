@@ -11,6 +11,7 @@
 
 #include "common/Event.h"
 #include "common/Utils.h"
+#include "common/util/System.h"
 
 #include <QDateTime>
 
@@ -63,19 +64,23 @@ void InputDaemon::pause() { PEN_CALL(void*, "stop_auto_screen_off")(); }
 void InputDaemon::resume() { PEN_CALL(void*, "start_auto_screen_off")(); }
 
 bool InputDaemon::_resetConfig() {
-    auto          cfg = _getConfig();
+    auto cfg = _getConfig();
+    // 目标是 rootfs 上的 /etc/input-event-daemon_<model>.conf：只在真正写文件的
+    // 这段时间把 / 临时放开为可写，写完还原（原来是开机就整段会话保持 rw）。
+    const bool wasWritable = util::setRootFileSystemWritable(true);
     std::ofstream ofile(cfg.mPath);
-    if (ofile.good()) {
-        exec("killall input-event-daemon");
-        ofile << QString::fromStdString(cfg.mContent)
-                     .replace("{backlight_down}", mBackLightDown ? QString::number(mBackLightDown) : "#")
-                     .replace("{screen_off}", mScreenOff ? QString::number(mScreenOff) : "#")
-                     .replace("{system_suspend}", mSystemSuspend ? QString::number(mSystemSuspend) : "#")
-                     .toStdString();
-    } else {
+    if (!ofile.good()) {
+        util::setRootFileSystemWritable(wasWritable);
         return false;
     }
+    exec("killall input-event-daemon");
+    ofile << QString::fromStdString(cfg.mContent)
+                 .replace("{backlight_down}", mBackLightDown ? QString::number(mBackLightDown) : "#")
+                 .replace("{screen_off}", mScreenOff ? QString::number(mScreenOff) : "#")
+                 .replace("{system_suspend}", mSystemSuspend ? QString::number(mSystemSuspend) : "#")
+                 .toStdString();
     ofile.close();
+    util::setRootFileSystemWritable(wasWritable);
     exec("input-event-daemon");
     return true;
 }

@@ -79,10 +79,14 @@ void* SymDB::query(const std::string& name) {
     auto  it  = mDatabase.constFind(key);
     if (it != mDatabase.constEnd()) {
         ret = reinterpret_cast<void*>(it.value());
+    } else if (mMissing.contains(key)) {
+        // 负数缓存：同一个符号查不到就别再解析+刷告警了（PEN_SYM 在热路径上会被反复调用）。
+        return nullptr;
     } else {
         ret = DobbySymbolResolver(nullptr, name.c_str());
         if (!ret) {
             warn("{} not found in memory.", name);
+            mMissing.insert(key);
         } else {
             mDatabase.insert(key, reinterpret_cast<uint64>(ret));
         }

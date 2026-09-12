@@ -181,5 +181,5 @@ PEN_HOOK(
     mod::ScreenManager ::getInstance().onPlayStateChanged(
         PEN_CALL(PlayState, "_ZNK19YMediaPlayerManager9playStateEv", uint64)(self)
     );
-    return origin(self, a5, a2, a3, a4);
+    return origin(self, a2, a3, a4, a5);
 }

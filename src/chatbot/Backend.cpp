@@ -1965,6 +1965,9 @@ bool ChatBot::switchSession(const QString& sessionId) {
         return false;
     }
     if (m_currentSessionId == sessionId) return true;
+    // 切会话必须在途请求失效：否则 A 会话发出的回复会按「当前会话」追加到 B 里。
+    ++m_requestSeq;
+    abortActiveReplies();
     m_currentSessionId = sessionId;
     saveSessions();
     emit messagesChanged();
@@ -1981,6 +1984,9 @@ QString ChatBot::createSession(const QString& title) {
     session.updatedAt = session.createdAt;
 
     m_sessions.insert(session.id, session);
+    // 同 switchSession：新会话生效前把在途请求作废。
+    ++m_requestSeq;
+    abortActiveReplies();
     m_currentSessionId = session.id;
     saveSessions();
     emit messagesChanged();
@@ -2002,6 +2008,9 @@ bool ChatBot::deleteSession(const QString& sessionId) {
 
     m_sessions.remove(sessionId);
     if (m_currentSessionId == sessionId) {
+        // 删掉的是当前会话：在途回复不能再追加进来。
+        ++m_requestSeq;
+        abortActiveReplies();
         m_currentSessionId = m_sessions.firstKey();
         emit messagesChanged();
         emit sessionSwitched(m_currentSessionId);

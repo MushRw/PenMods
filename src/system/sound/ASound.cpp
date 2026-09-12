@@ -8,6 +8,7 @@
 
 #include "common/Event.h"
 #include "common/Utils.h"
+#include "common/util/System.h"
 
 namespace mod {
 
@@ -33,20 +34,24 @@ bool ASound::_resetConfig() {
                        .replace("{mindb}", QString::number(mVoiceDb.min, 'f', 1))
                        .replace("{maxdb}", QString::number(mVoiceDb.max, 'f', 1))
                        .toStdString();
+    // cfg.mPath 是 rootfs 上的 /etc/asound.conf.<model>：只在真正写文件的这段
+    // 时间把 / 临时放开为可写，写完还原（原来是开机就整段会话保持 rw）。
+    const bool wasWritable = util::setRootFileSystemWritable(true);
     std::ofstream ofile(cfg.mPath);
-    if (ofile.good()) {
-        ofile << content;
-    } else {
+    if (!ofile.good()) {
+        util::setRootFileSystemWritable(wasWritable);
         return false;
     }
+    ofile << content;
     ofile.close();
     ofile.open("/etc/asound.conf");
-    if (ofile.good()) {
-        ofile << content;
-    } else {
+    if (!ofile.good()) {
+        util::setRootFileSystemWritable(wasWritable);
         return false;
     }
+    ofile << content;
     ofile.close();
+    util::setRootFileSystemWritable(wasWritable);
     return true;
 }
 

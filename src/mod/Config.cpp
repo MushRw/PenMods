@@ -12,6 +12,7 @@
 
 #include "Version.h"
 
+#include <fstream>
 #include <set>
 
 namespace fs = std::filesystem;
@@ -345,13 +346,29 @@ bool Config::_load() {
 }
 
 bool Config::_save() {
-    std::ofstream ofile;
-    ofile.open(get_config_path());
-    if (ofile.good()) {
+    const auto path = get_config_path();
+    const auto tmp  = path + ".tmp";
+    {
+        // 先写临时文件再原子改名：设备随时可能掉电，直接覆盖 config.json 会留下
+        // 截断的文件，而 _load() 遇到损坏会重建默认配置 —— API Key 和全部设置就没了。
+        std::ofstream ofile(tmp, std::ios::out | std::ios::trunc);
+        if (!ofile.good()) {
+            return false;
+        }
         ofile << mData.dump(4);
-        return true;
+        ofile.flush();
+        if (!ofile.good()) {
+            return false;
+        }
     }
-    return false;
+    std::error_code ec;
+    fs::rename(tmp, path, ec);
+    if (ec) {
+        warn("配置写入失败: {}", ec.message());
+        fs::remove(tmp, ec);
+        return false;
+    }
+    return true;
 }
 
 // 递归补充 target 中缺失的默认键，保留 target 中已有的值和多余的键

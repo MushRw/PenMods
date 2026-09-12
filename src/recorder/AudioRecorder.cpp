@@ -74,7 +74,13 @@ bool AudioRecorder::start() {
     // Init saving path.
     mSavePath = _getSavePath();
     mOutputFile.setFileName(mSavePath);
-    mOutputFile.open(QIODevice::ReadWrite | QIODevice::Truncate);
+    if (!mOutputFile.open(QIODevice::ReadWrite | QIODevice::Truncate)) {
+        // 打开失败（空间/权限）不能再往下走：否则会一路录到内存里，
+        // 最后还提示"录音保存成功"。
+        warn("无法创建录音文件: {}", mSavePath.toStdString());
+        showToast("无法创建录音文件", "#E9900C");
+        return false;
+    }
 
     // Init audio format.
     QAudioFormat format;
@@ -167,7 +173,7 @@ bool AudioRecorder::stop() {
     // stateChanged 连接已在上面断开，这里显式同步停止状态，避免 UI 停留在录制中
     setState(QAudio::StoppedState);
     lame_close(mLame);
-    mOutputFile.rename(mSavePath);
+    // 注意：不要 rename(mSavePath)——那正是本文件自己的路径，必然失败且无意义。
     mOutputFile.close();
 
     // Free vars.

@@ -1,0 +1,21 @@
+# 统一行尾：这个仓库的 QML/头文件会被打包进 libPenModsResources.so，
+# 如果 Windows 检出（core.autocrlf=true）带出 CRLF，本地打包与 CI（Linux）
+# 出包就会字节不一致，diff-factory-vs-penmods.py 也会把 200+ 个文件误报成"改过"。
+* text=auto eol=lf
+
+# 二进制资源不要做任何转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.zip binary
+*.gz binary
+*.so binary
+*.bin binary
+*.elf binary
+*.qmlc binary
+*.pdf binary

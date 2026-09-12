@@ -66,7 +66,9 @@ PEN_HOOK(
     if (qt.getLowerScan()) {
         what = what.toLower();
     }
-    what.replace(QRegularExpression(QStringLiteral(" {2,}")), QStringLiteral(" "));
+    // 每次扫描结果都构造 QRegularExpression（含正则编译）太贵，提成静态的。
+    static const QRegularExpression kMultiSpace(QStringLiteral(" {2,}"));
+    what.replace(kMultiSpace, QStringLiteral(" "));
     return origin(self, what, a3, a4, a5, a6, a7);
 }
 #endif

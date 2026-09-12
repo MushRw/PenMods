@@ -94,5 +94,5 @@ PEN_HOOK(
     if (shouldBlockScan()) {
         return false;
     }
-    return origin(self, a5, a2, a3, a4);
+    return origin(self, a2, a3, a4, a5);
 }

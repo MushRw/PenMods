@@ -9,7 +9,9 @@
 #include "base/YEnum.h"
 
 #define FEATURE_ENABLE(fea)  (supportFeatures |= 1UL << ((fea) & 0x3F))
-#define FEATURE_DISABLE(fea) (supportFeatures |= 0UL << ((fea) & 0x3F))
+// 原实现是 "|= 0"，等于什么都没做（宏当前没被使用，但语义是错的）。
+// supportFeatures 是 std::bitset，用 set(pos, false) 清位。
+#define FEATURE_DISABLE(fea) (supportFeatures.set((fea) & 0x3F, false))
 #define FEATURE_HAS(fea)     (((1UL << (fea & 0x3F)) & supportFeatures.to_ulong()) != 0)
 
 PEN_HOOK(void, _ZN2FT11InitFeatureEv) {

@@ -82,6 +82,8 @@ void Mod::changeSlot() { exec("update_engine --misc=other --reboot"); }
 
 void Mod::uninstall() {
     try {
+        // 要还原 /oem 下的主程序：出厂 rootfs 是 ro，先确认可写。
+        util::setRootFileSystemWritable(true);
         QString appDir = util::getApplicationFileInfo().absolutePath();
         QString mainPath = appDir + "/YoudaoDictPen";
         QString tmpPath  = appDir + "/YoudaoDictPen.uninstall_bak";
@@ -175,28 +177,37 @@ void Mod::onUiCompleted() const {
 
     // 只在首次启动尝试修复，避免每次开机反复读取失败并刷屏。
     // 注意 vendor_storage 的错误输出在 stderr，必须 2>&1 合并后才能检测到。
+    // 只有「不需要修」或「全部修好」才落 .vendor_repaired 标记：原实现无论成败
+    // 都写标记，一次失败之后就再也不会重试了。
     if (!QFile::exists("/userdata/PenMods/.vendor_repaired")) {
-        bool repaired = false;
+        bool repairNeeded = false;
+        bool allRepaired  = true;
         for (auto i : list) {
             if (exec(QString("vendor_storage -r %1 -t %2 2>&1").arg(i.mName, i.mType)).find("vendor read error -1")
                 != std::string::npos) {
+                repairNeeded = true;
                 spdlog::warn("Automatically repairing vendor_storage: {}", i.mName.toStdString());
                 if (exec(QString("vendor_storage -w %1 -t %2 -i %3 2>&1").arg(i.mName, i.mType, i.mDefaultValue))
-                        .find("vendor write error") == std::string::npos) {
-                    repaired = true;
+                        .find("vendor write error")
+                    != std::string::npos) {
+                    allRepaired = false;
                 }
             }
         }
-        QFile repairedFlag("/userdata/PenMods/.vendor_repaired");
-        if (repairedFlag.open(QIODevice::WriteOnly)) {
-            repairedFlag.write(repaired ? "ok" : "failed");
-            repairedFlag.close();
+        if (!repairNeeded || allRepaired) {
+            QFile repairedFlag("/userdata/PenMods/.vendor_repaired");
+            if (repairedFlag.open(QIODevice::WriteOnly)) {
+                repairedFlag.write("ok");
+                repairedFlag.close();
+            }
+        } else {
+            spdlog::warn("vendor_storage repair did not succeed, will retry on next boot.");
         }
     }
 
-    // Set default read-write file system.
-
-    exec("mount -o remount,rw /");
+    // 这里不再把 / remount 成 rw：需要写 rootfs 的地方（asound /
+    // input-event-daemon 的按机型配置、卸载时还原主程序）各自临时放开再还原，
+    // 避免整段会话都处于可写状态。
 
     // Ensure the bundled external player (mpv) is installed.
 

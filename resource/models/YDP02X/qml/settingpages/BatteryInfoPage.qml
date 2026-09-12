@@ -73,6 +73,8 @@ YSettingItemPage {
     }
 
     Timer {
+        // 必须给 interval：一次 update() 要读一串 sysfs，默认 0 会导致本页常驻高频轮询。
+        interval: 2000
         running: true
         repeat: true
         triggeredOnStart: true
