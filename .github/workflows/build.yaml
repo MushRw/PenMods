@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # 每周一 03:00 UTC 空跑一次。GitHub Actions 的 cache 只要 7 天没被访问
+    # 就会被回收，cache 一没，xmake 就得从源码重装依赖（实测 +9 分钟：
+    # 配置 xmake 从 ~20s 变成 567s，其中 267s 是在装 python 3.14.3）。
+    # 这一条定时任务就是为了让 qt / xmake-packages / xmake-cache / build-objs
+    # 四个缓存一直"活着"。
+    - cron: '0 3 * * 1'
   workflow_dispatch:
     inputs:
       build_platform:
