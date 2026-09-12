@@ -13,8 +13,9 @@
 #include <QAbstractListModel>
 #include <QDir>
 #include <QFileInfo>
-#include <QThread>
-#include <QMutex>
+#include <QHash>
+#include <QSocketNotifier>
+#include <QTimer>
 
 namespace mod::filemanager {
 
@@ -139,10 +140,13 @@ private:
     const QString mRoot{"/userdisk/Music"};
 
     // Inotify variables
-    int mInotifyFd{-1};
-    int mWatchFd{-1};
-    QThread* mInotifyThread{nullptr};
-    mutable QMutex mInotifyMutex;
+    // 走主线程的 QSocketNotifier（不要单开线程 select 轮询）：既能同时监听多个
+    // 目录，也不会出现"批量事件 → 上千次 queued 调用"和退出时 wait() 死锁。
+    int                             mInotifyFd{-1};
+    QHash<int, QString>             mInotifyWatches; // wd -> 目录
+    QSocketNotifier*                mInotifyNotifier{nullptr};
+    QTimer*                         mDirChangedTimer{nullptr}; // 事件合并/去抖
+    QTimer*                         mNotifySuppressTimer{nullptr};
     std::atomic<bool>  mShouldNotifyDirChanged{true};
 
     int  mOrder;
@@ -160,9 +164,8 @@ private:
     // Inotify functions
     void setupInotify();
     void cleanupInotify();
-    void startInotifyThread();
-    void stopInotifyThread();
-    void inotifyLoop();
+    void onInotifyReadyRead();
+    void dispatchDirChanged();
     void addInotifyWatch(const QString& path);
 
     // MusicPlayer

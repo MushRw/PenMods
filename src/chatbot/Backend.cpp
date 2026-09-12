@@ -16,6 +16,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QHash>
 #include <QHttpMultiPart>
 #include <QHttpPart>
 #include <QJsonArray>
@@ -25,6 +26,7 @@
 #include <QProcess>
 #include <QQmlContext>
 #include <QRegularExpression>
+#include <QStringList>
 #include <QTextDocument>
 #include <QTextStream>
 #include <QTimer>
@@ -38,6 +40,20 @@ namespace mod::chatbot {
 // -----------------------------------------------------------------------
 
 QString ChatBot::markdownToHtml(const QString& markdown) {
+    // QTextDocument::setMarkdown + toHtml 是纯 CPU 的重活，而 QML 每条消息每次
+    // 重绘都会调到这里（滚动/切换都会触发）。同一份内容只转换一次，缓存最近
+    // 若干条；流式回复期间每段内容不同会自然淘汰旧条目。
+    static QHash<QString, QString> kHtmlCache;
+    static QStringList             kHtmlCacheOrder;
+    static qint64                  kHtmlCacheBytes = 0;
+    constexpr int                  kMaxEntries     = 16;
+    constexpr qint64               kMaxBytes       = 128 * 1024;
+
+    auto cached = kHtmlCache.constFind(markdown);
+    if (cached != kHtmlCache.constEnd()) {
+        return cached.value();
+    }
+
     QTextDocument doc;
     QFont         defaultFont;
     defaultFont.setPixelSize(12);
@@ -45,7 +61,20 @@ QString ChatBot::markdownToHtml(const QString& markdown) {
     doc.setDefaultFont(defaultFont);
     doc.setDefaultStyleSheet("body { line-height: 1; }");
     doc.setMarkdown(markdown);
-    return doc.toHtml();
+    const QString html = doc.toHtml();
+
+    if (markdown.size() <= kMaxBytes / 4) {
+        kHtmlCache.insert(markdown, html);
+        kHtmlCacheOrder.append(markdown);
+        kHtmlCacheBytes += markdown.size();
+        while (kHtmlCacheOrder.size() > kMaxEntries || kHtmlCacheBytes > kMaxBytes) {
+            const QString victim = kHtmlCacheOrder.takeFirst();
+            if (kHtmlCache.remove(victim) > 0) {
+                kHtmlCacheBytes -= victim.size();
+            }
+        }
+    }
+    return html;
 }
 
 // -----------------------------------------------------------------------
@@ -81,10 +110,21 @@ ChatBot::ChatBot()
     initShellTool();
 #endif
     initMathRender();
+
+    // 合并写的定时器要在 initSessions() 之前建好：之后所有 saveSessions()
+    // 都走"打脏标记 + 至多 800ms 落盘一次"，不再每段流式内容整份重写文件。
+    m_saveTimer = new QTimer(this);
+    m_saveTimer->setSingleShot(true);
+    m_saveTimer->setInterval(800);
+    connect(m_saveTimer, &QTimer::timeout, this, &ChatBot::flushSessions);
+
     initSessions();
 }
 
 ChatBot::~ChatBot() {
+    // 还有没落盘的会话改动就先写掉，别丢最后一条消息。
+    flushSessions();
+
     // 清理所有正在执行的 shell 命令
     for (auto it = m_activeShellExecs.constBegin(); it != m_activeShellExecs.constEnd(); ++it) {
         auto* e = it.value();
@@ -393,6 +433,25 @@ static bool sanitizeMessageHistory(MessageData& msg) {
 // -----------------------------------------------------------------------
 
 void ChatBot::saveSessions() {
+    // 见 Backend.h：合并写。流式回复时每段都调这里，直接整份重写 sessions.json
+    // 会在主线程反复 dump + 写 eMMC（会话带语音时单份可达数百 KB～数 MB）。
+    m_sessionsDirty = true;
+    if (!m_saveTimer) {
+        // 定时器还没建好（构造期/极端早期调用）：退化为同步写，别丢状态。
+        flushSessions();
+        return;
+    }
+    if (!m_saveTimer->isActive()) {
+        m_saveTimer->start();
+    }
+}
+
+void ChatBot::flushSessions() {
+    if (!m_sessionsDirty) {
+        return;
+    }
+    m_sessionsDirty = false;
+
     json root;
     root["activeSessionId"] = m_currentSessionId.toStdString();
     json sessionsArr        = json::array();
@@ -414,9 +473,11 @@ void ChatBot::saveSessions() {
     }
     root["sessions"] = sessionsArr;
 
-    QFile file(sessionsFilePath());
+    // dump() 不带缩进：体积和 CPU 都明显低于 dump(4)，而这个文件只给我们自己读。
+    const std::string payload = root.dump();
+    QFile             file(sessionsFilePath());
     if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        file.write(root.dump(4).c_str());
+        file.write(payload.data(), static_cast<qint64>(payload.size()));
         file.close();
     } else {
         error("无法写入 sessions.json: {}", sessionsFilePath().toStdString());
@@ -1039,10 +1100,13 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
             // 字节级缓冲 + 按 '\n' 切行：\n 不会出现在 UTF-8 多字节字符内部，
             // 因此整行用 fromUtf8 解码不会产生乱码，跨包的行也不会被拆断丢弃。
             m_sseBuffer.append(reply->readAll());
+            // 用游标而不是 remove(0, n)：原来每取一行都把剩余缓冲整体前移，
+            // 长回答是 O(n²)。这里只在循环结束后一次性丢掉已消费的前缀。
+            int cursor = 0;
             int nl;
-            while ((nl = m_sseBuffer.indexOf('\n')) >= 0) {
-                QByteArray lineBytes = m_sseBuffer.left(nl);
-                m_sseBuffer.remove(0, nl + 1);
+            while ((nl = m_sseBuffer.indexOf('\n', cursor)) >= 0) {
+                QByteArray lineBytes = m_sseBuffer.mid(cursor, nl - cursor);
+                cursor               = nl + 1;
                 QString trimmedLine = QString::fromUtf8(lineBytes).trimmed();
                 if (!trimmedLine.startsWith("data: ")) continue;
 
@@ -1139,6 +1203,11 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
                     }
                 }
 #endif
+            }
+
+            // 一次性丢掉已经消费掉的行前缀（见上面的游标说明）
+            if (cursor > 0) {
+                m_sseBuffer.remove(0, cursor);
             }
 
         });

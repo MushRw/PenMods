@@ -242,8 +242,7 @@ bool FileManager::changeDir(const QString& dir) {
         mPathHistory.push_back(nextPath);
     }
 
-    // 更新 inotify 监视
-    QMutexLocker locker(&mInotifyMutex);
+    // 更新 inotify 监视（现在全在主线程，不需要锁）
     addInotifyWatch(mCurrentPath.path());
 
     emit currentTitleChanged();
@@ -368,7 +367,14 @@ void FileManager::negateHiddenAll() {
 
 void FileManager::markSuspendDirChangedNotifier() {
     mShouldNotifyDirChanged = false;
-    QTimer::singleShot(5000, this, [&]() { mShouldNotifyDirChanged = true; });
+    // 复用一个单发定时器：原来每次都新建一个 5s 单发定时器，先到期的那个
+    // 会提前把抑制解除。重复调用 start() 本来就是顺延。
+    if (mNotifySuppressTimer == nullptr) {
+        mNotifySuppressTimer = new QTimer(this);
+        mNotifySuppressTimer->setSingleShot(true);
+        connect(mNotifySuppressTimer, &QTimer::timeout, this, [this]() { mShouldNotifyDirChanged = true; });
+    }
+    mNotifySuppressTimer->start(5000);
 }
 
 void FileManager::setMtpOnoff(bool onoff) {
@@ -627,8 +633,7 @@ void FileManager::playFromView(const QString& fileName) {
         refreshPlayList();
         mCurrentPlayingPath = mCurrentPath;
 
-        // 更新 inotify 监视
-        QMutexLocker locker(&mInotifyMutex);
+        // 更新 inotify 监视（现在全在主线程，不需要锁）
         addInotifyWatch(mCurrentPlayingPath.path());
     }
     size_t idx   = 0;
@@ -761,133 +766,121 @@ void FileManager::setupInotify() {
         return;
     }
 
-    // 监听当前路径
+    // 监听当前路径 + 播放路径：两个都要（旧实现只有一个 watch 槽位，
+    // 播放路径一加就把当前目录顶掉了）
     if (!mCurrentPath.path().isEmpty()) {
         addInotifyWatch(mCurrentPath.path());
     }
-
-    // 同时监听播放路径
     if (!mCurrentPlayingPath.path().isEmpty()) {
         addInotifyWatch(mCurrentPlayingPath.path());
     }
 
-    startInotifyThread();
+    // 事件驱动：fd 可读 → onInotifyReadyRead；再经过 300ms 去抖只发一次信号。
+    // 不再单开线程 + select 1s 轮询（原来退出时 quit() 打断不了 select，
+    // wait() 会死锁；而且每个事件都往主线程排一次 queued 调用）。
+    mInotifyNotifier = new QSocketNotifier(mInotifyFd, QSocketNotifier::Read, this);
+    connect(mInotifyNotifier, &QSocketNotifier::activated, this, &FileManager::onInotifyReadyRead);
+
+    mDirChangedTimer = new QTimer(this);
+    mDirChangedTimer->setSingleShot(true);
+    mDirChangedTimer->setInterval(300);
+    connect(mDirChangedTimer, &QTimer::timeout, this, &FileManager::dispatchDirChanged);
 }
 
 void FileManager::addInotifyWatch(const QString& path) {
-    if (mInotifyFd >= 0) {
-        // 先移除旧的监视
-        if (mWatchFd >= 0) {
-            inotify_rm_watch(mInotifyFd, mWatchFd);
-        }
+    if (mInotifyFd < 0 || path.isEmpty()) {
+        return;
+    }
 
-        // 添加新的监视
-        mWatchFd = inotify_add_watch(mInotifyFd, path.toLocal8Bit().data(),
-                                   IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_MODIFY);
-        if (mWatchFd < 0) {
-            error("Failed to add inotify watch for path {}: {}", path.toStdString(), strerror(errno));
-        } else {
-            debug("Added inotify watch for path: {}", path.toStdString());
+    // 同一个目录不重复添加
+    for (auto it = mInotifyWatches.constBegin(); it != mInotifyWatches.constEnd(); ++it) {
+        if (it.value() == path) {
+            return;
         }
+    }
+
+    // 上限 8 个（当前目录 + 播放目录 + 少量历史），超了先撤掉最早的
+    constexpr int kMaxWatches = 8;
+    while (mInotifyWatches.size() >= kMaxWatches) {
+        const int oldest = mInotifyWatches.constBegin().key();
+        inotify_rm_watch(mInotifyFd, oldest);
+        mInotifyWatches.remove(oldest);
+    }
+
+    // 注意：不再监听 IN_MODIFY —— 写文件期间事件会爆量，而我们要的只是
+    // "目录内容变了"。增删改名才需要刷新列表。
+    const int wd = inotify_add_watch(
+        mInotifyFd,
+        path.toLocal8Bit().data(),
+        IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO
+    );
+    if (wd < 0) {
+        error("Failed to add inotify watch for path {}: {}", path.toStdString(), strerror(errno));
+        return;
+    }
+    mInotifyWatches.insert(wd, path);
+    debug("Added inotify watch for path: {}", path.toStdString());
+}
+
+void FileManager::onInotifyReadyRead() {
+    char buffer[4096];
+    bool relevant = false;
+
+    // 非阻塞 fd：一次把积压的事件读干净
+    while (true) {
+        const ssize_t len = read(mInotifyFd, buffer, sizeof(buffer));
+        if (len <= 0) {
+            if (len < 0 && errno != EAGAIN && errno != EINTR) {
+                error("Read error: {}", strerror(errno));
+            }
+            break;
+        }
+        int i = 0;
+        while (i < static_cast<int>(len)) {
+            auto* event = reinterpret_cast<struct inotify_event*>(&buffer[i]);
+            if (event->mask & (IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO)) {
+                relevant = true;
+            }
+            i += static_cast<int>(sizeof(struct inotify_event) + event->len);
+        }
+    }
+
+    // USB 一次拷入上千个文件也只会触发一次刷新（start() 会顺延已有的计时）
+    if (relevant && mDirChangedTimer != nullptr) {
+        mDirChangedTimer->start();
+    }
+}
+
+void FileManager::dispatchDirChanged() {
+    emit directoryChanged();
+
+    // 如果当前播放路径发生变化，刷新播放列表
+    if (mCurrentPath == mCurrentPlayingPath) {
+        refreshPlayList();
     }
 }
 
 void FileManager::cleanupInotify() {
-    stopInotifyThread();
+    if (mDirChangedTimer != nullptr) {
+        mDirChangedTimer->stop();
+    }
+
+    if (mInotifyNotifier != nullptr) {
+        mInotifyNotifier->setEnabled(false);
+        delete mInotifyNotifier;
+        mInotifyNotifier = nullptr;
+    }
 
     if (mInotifyFd >= 0) {
-        if (mWatchFd >= 0) {
-            inotify_rm_watch(mInotifyFd, mWatchFd);
-            mWatchFd = -1;
+        for (auto it = mInotifyWatches.constBegin(); it != mInotifyWatches.constEnd(); ++it) {
+            inotify_rm_watch(mInotifyFd, it.key());
         }
+        mInotifyWatches.clear();
         close(mInotifyFd);
         mInotifyFd = -1;
     }
 }
 
-void FileManager::startInotifyThread() {
-    if (mInotifyThread == nullptr) {
-        mInotifyThread = new QThread(this);
-        // 创建一个辅助对象来运行 inotify 循环
-        QObject* worker = new QObject();
-        worker->moveToThread(mInotifyThread);
-
-        connect(mInotifyThread, &QThread::started, worker, [this, worker]() {
-            inotifyLoop();
-            worker->deleteLater(); // 确保 worker 对象被删除
-        });
-
-        connect(mInotifyThread, &QThread::finished, worker, []() {
-            // 线程结束时 worker 会被自动删除
-        });
-
-        mInotifyThread->start();
-    }
-}
-
-void FileManager::stopInotifyThread() {
-    if (mInotifyThread != nullptr) {
-        mInotifyThread->quit();
-        mInotifyThread->wait();
-        delete mInotifyThread;
-        mInotifyThread = nullptr;
-    }
-}
-
-void FileManager::inotifyLoop() {
-    char buffer[4096];
-    fd_set readfds;
-
-    while (true) {
-        FD_ZERO(&readfds);
-        FD_SET(mInotifyFd, &readfds);
-
-        // 使用 select 等待事件，超时时间为 1 秒，以便能够响应线程退出信号
-        struct timeval timeout;
-        timeout.tv_sec = 1;
-        timeout.tv_usec = 0;
-
-        int ret = select(mInotifyFd + 1, &readfds, nullptr, nullptr, &timeout);
-
-        if (ret < 0) {
-            if (errno != EINTR) {
-                error("Select error: {}", strerror(errno));
-            }
-            break;
-        } else if (ret > 0 && FD_ISSET(mInotifyFd, &readfds)) {
-            ssize_t len = read(mInotifyFd, buffer, sizeof(buffer));
-
-            if (len > 0) {
-                int i = 0;
-                while (i < len) {
-                    struct inotify_event* event = (struct inotify_event*)&buffer[i];
-
-                    if (event->mask & (IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_MODIFY)) {
-                        // 发出目录更改信号
-                        QMetaObject::invokeMethod(this, [this]() {
-                            emit directoryChanged();
-
-                            // 如果当前播放路径发生变化，刷新播放列表
-                            if (mCurrentPath == mCurrentPlayingPath) {
-                                refreshPlayList();
-                            }
-                        }, Qt::QueuedConnection);
-                    }
-
-                    i += sizeof(struct inotify_event) + event->len;
-                }
-            } else if (len < 0 && errno != EAGAIN) {
-                error("Read error: {}", strerror(errno));
-                break;
-            }
-        }
-
-        // 检查线程是否被要求退出
-        if (QThread::currentThread()->isInterruptionRequested()) {
-            break;
-        }
-    }
-}
 } // namespace mod::filemanager
 
 PEN_HOOK(void, _ZN13YMediaManager13entryMyImportEv, uint64) {}

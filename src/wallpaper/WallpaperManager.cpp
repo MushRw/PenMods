@@ -6,6 +6,7 @@
 
 #include "wallpaper/WallpaperManager.h"
 
+#include "common/Event.h"
 #include "mod/Config.h"
 #include "common/Utils.h"
 #include "common/service/Logger.h"
@@ -13,6 +14,8 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QFileInfo>
+#include <QQmlContext>
+#include <QQuickView>
 #include <QRandomGenerator>
 
 namespace mod {
@@ -24,11 +27,17 @@ WallpaperManager::WallpaperManager(QObject* parent) : QObject(parent) {
 
     loadConfig();
 
-    // 如果循环模式已启用，启动定时器
+    // 如果循环模式已启用，扫描文件夹（定时器要等事件循环起来再启动：构造函数
+    // 是 dlopen 阶段，此时 start() 会静默失败，循环壁纸就不生效了）。
     if (mWallpaperMode == 2 && !mWallpaperFolder.isEmpty()) {
         scanWallpaperFolder();
-        startCycleTimer();
     }
+
+    connect(&Event::getInstance(), &Event::beforeUiInitialization, [this](QQuickView&, QQmlContext*) {
+        if (mWallpaperMode == 2 && mCachedImages.size() > 1) {
+            startCycleTimer();
+        }
+    });
 }
 
 int WallpaperManager::getWallpaperMode() const { return mWallpaperMode; }

@@ -269,8 +269,15 @@ private:
 
     void    initSessions();
     void    saveSessions();
+    /// 真正把 sessions.json 落盘（saveSessions 只打脏标记 + 合并写）
+    void    flushSessions();
     QString sessionsFilePath();
     void    ensureCurrentSession();
+
+    // 写放大控制：流式回复期间每一段都会调 saveSessions()，整份重写太浪费，
+    // 改成"至多每 800ms 落盘一次"。定时器到期时写的是那一刻的最新内容。
+    QTimer* m_saveTimer     = nullptr;
+    bool    m_sessionsDirty = false;
 
     // 将 MessageData 序列化为 OpenAI API 格式的 QJsonObject
     QJsonObject messageToJson(const MessageData& msg) const;

@@ -28,10 +28,15 @@ ExternalPlayer::ExternalPlayer() {
     mPollTimer = new QTimer(this);
     mPollTimer->setInterval(500);
     connect(mPollTimer, &QTimer::timeout, this, &ExternalPlayer::refreshRunning);
-    mPollTimer->start();
 
     connect(&Event::getInstance(), &Event::beforeUiInitialization, [this](QQuickView& view, QQmlContext* context) {
         context->setContextProperty("externalPlayer", this);
+        // 一开始是 500ms 常驻轮询进程状态，代价不小；只在真正打开过之后才需要，
+        // 而且定时器必须在事件循环就绪后启动（构造函数阶段 start 会静默失败）。
+        // 打开时 open() 会自己起一次轮询，所以这里不再无条件 start()。
+        if (mRunning) {
+            refreshRunning();
+        }
     });
 } // namespace mod::filemanager
 
@@ -108,6 +113,16 @@ void ExternalPlayer::refreshRunning() {
     if (running != mRunning) {
         mRunning = running;
         emit runningChanged();
+    }
+    // 播放器已经退出就停掉轮询；还在跑就保证轮询是开着的（open() 之后才需要）。
+    if (mPollTimer != nullptr) {
+        if (running) {
+            if (!mPollTimer->isActive()) {
+                mPollTimer->start();
+            }
+        } else if (mPollTimer->isActive()) {
+            mPollTimer->stop();
+        }
     }
 }
 
