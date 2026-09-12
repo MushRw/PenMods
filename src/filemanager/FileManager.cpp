@@ -673,7 +673,9 @@ void FileManager::executeFile(const QString& fileName) {
 
     QProcess* process = new QProcess(this);
     // 之前启动成功后从不释放：每次执行文件都泄漏一个 QProcess 对象。
-    connect(process, &QProcess::finished, process, &QObject::deleteLater);
+    // 注意 Qt 5.15 的 QProcess::finished 是重载（finished(int) 已废弃），
+    // 必须用 qOverload 消歧义，否则 &QProcess::finished 推导不出模板参数。
+    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), process, &QObject::deleteLater);
     connect(process, &QProcess::errorOccurred, process, &QObject::deleteLater);
     process->start(filePath);
     if (!process->waitForStarted()) {
