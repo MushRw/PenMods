@@ -276,8 +276,10 @@ private:
 
     // 写放大控制：流式回复期间每一段都会调 saveSessions()，整份重写太浪费，
     // 改成"至多每 800ms 落盘一次"。定时器到期时写的是那一刻的最新内容。
+    // m_uiReady 之前（构造函数阶段）事件循环还没起来，必须同步写。
     QTimer* m_saveTimer     = nullptr;
     bool    m_sessionsDirty = false;
+    bool    m_uiReady       = false;
 
     // 将 MessageData 序列化为 OpenAI API 格式的 QJsonObject
     QJsonObject messageToJson(const MessageData& msg) const;

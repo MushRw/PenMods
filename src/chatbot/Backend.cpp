@@ -101,6 +101,10 @@ ChatBot::ChatBot()
 
     connect(&Event::getInstance(), &Event::beforeUiInitialization, [this](QQuickView& view, QQmlContext* context) {
         context->setContextProperty("chatbot", this);
+        // 到这一步事件循环已经起来了，合并写的定时器才能真的生效；
+        // 顺便把启动期间攒下的改动（比如新建会话）补写一次。
+        m_uiReady = true;
+        flushSessions();
     });
 
     initModels();
@@ -436,8 +440,9 @@ void ChatBot::saveSessions() {
     // 见 Backend.h：合并写。流式回复时每段都调这里，直接整份重写 sessions.json
     // 会在主线程反复 dump + 写 eMMC（会话带语音时单份可达数百 KB～数 MB）。
     m_sessionsDirty = true;
-    if (!m_saveTimer) {
-        // 定时器还没建好（构造期/极端早期调用）：退化为同步写，别丢状态。
+    // 事件循环还没起来（构造函数阶段）时 QTimer::start() 不会生效，那次改动就
+    // 永远不会落盘 —— 这种情况必须同步写。
+    if (!m_saveTimer || !m_uiReady) {
         flushSessions();
         return;
     }

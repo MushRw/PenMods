@@ -12,14 +12,66 @@
 #include <QQmlContext>
 #include <QQuickView>
 
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <dlfcn.h>
 
 #include "base/YPointer.h"
 
 #include "common/Event.h"
+#include "common/util/System.h"
+
+namespace {
+
+constexpr const char* kResourceLibPath = "/userdata/PenMods/libPenModsResources.so";
+constexpr const char* kQmlCacheDir     = "/.cache/NeteaseYoudao/YoudaoDictPen/qmlcache";
+constexpr const char* kResourceStamp   = "/userdata/PenMods/.resource_stamp";
+
+// QML 编译缓存（.qmlc/.jsc）在 rootfs 上，而 / 默认只读：以前是靠"开机把 /
+// 挂成 rw"才清得掉。现在只在"资源库/本体确实换了"时临时放开一下。
+// 为什么必须清：rcc 节点里的 mtime 是打包时保留下来的，QML 内容变了 mtime
+// 可能没变，Qt 会继续复用旧的 .qmlc，改了界面却不生效。
+void clearQmlCacheIfResourcesChanged() {
+    QString stamp;
+    for (const auto& path :
+         {QString::fromUtf8(kResourceLibPath), mod::util::getModuleFileInfo().absoluteFilePath()}) {
+        QFileInfo info(path);
+        stamp += QString("%1|%2|%3;")
+                     .arg(info.fileName())
+                     .arg(info.size())
+                     .arg(info.lastModified().toSecsSinceEpoch());
+    }
+
+    QString previous;
+    {
+        QFile in(QString::fromUtf8(kResourceStamp));
+        if (in.open(QIODevice::ReadOnly)) {
+            previous = QString::fromUtf8(in.readAll());
+        }
+    }
+    if (!stamp.isEmpty() && previous == stamp) {
+        return; // 资源没变，什么都不做
+    }
+
+    const bool wasWritable = mod::util::isRootFileSystemWritable();
+    mod::util::setRootFileSystemWritable(true);
+    const bool removed = QDir(QString::fromUtf8(kQmlCacheDir)).removeRecursively();
+    mod::util::setRootFileSystemWritable(wasWritable);
+    spdlog::info("资源已更新，QML 编译缓存已清理（目录存在: {}）", removed);
+
+    QFile out(QString::fromUtf8(kResourceStamp));
+    if (out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        out.write(stamp.toUtf8());
+    }
+}
+
+} // namespace
 
 PEN_HOOK(void, _ZN22YGuiApplicationPrivate6initUiEv, QWindow** self) {
+
+    // 资源/本体换过就先清 QML 缓存，必须在注册资源树之前做。
+    clearQmlCacheIfResourcesChanged();
 
     auto& view    = *(QQuickView*)*self;
     auto* context = view.rootContext();
@@ -29,7 +81,7 @@ PEN_HOOK(void, _ZN22YGuiApplicationPrivate6initUiEv, QWindow** self) {
     emit mod::Event::getInstance().beforeUiInitialization(view, context);
 
     bool                 using_external_resources = false;
-    const char*          ResourceLibPath          = "/userdata/PenMods/libPenModsResources.so";
+    const char*          ResourceLibPath          = kResourceLibPath;
     const unsigned char* new_qt_resource_struct;
     const unsigned char* new_qt_resource_data;
     const unsigned char* new_qt_resource_name;
