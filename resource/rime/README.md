@@ -15,14 +15,17 @@
 
 所以本包做了三件事：
 
-1. **词库按词频截取**：`cn_dicts/base.dict.yaml` 只保留权重 ≥ 10000 的词条（76,874 条），
-   加上 `8105` 单字表（8,757 条）与 `others`，合计约 8.6 万条；
+1. **词库按词频截取**：`cn_dicts/base.dict.yaml` 只保留权重 ≥ 1000 的词条（240,311 条），
+   加上 `8105` 单字表（8,757 条）与 `others`，合计约 25 万条（原版雾凇 54 万条
+   在笔上编译需要 240MB+ 内存，会 OOM）；
 2. **删掉 Lua / OpenCC / 拆字组件**：`rime_ice.schema.yaml` 的 `engine` 只保留
    `ascii_composer / recognizer / key_binder / speller / punctuator / selector /
    navigator / express_editor`，翻译器只留 `punct_translator / script_translator /
    table_translator@custom_phrase / @melt_eng / @cn_en`，过滤器只留 `uniquifier`；
 3. **不带 `essay.txt`**：雾凇拼音的词频写在词库里，不需要 `use_preset_vocabulary`
-   （原明月拼音方案靠 5.9MB 的 essay.txt，编译出的 `table.bin` 反而是 13MB）。
+   （原明月拼音方案靠 5.9MB 的 essay.txt，编译出的 `table.bin` 反而是 13MB）；
+4. **候选词数量**：`default.yaml` 的 `menu.page_size` 从上游默认 5 调到 **20**
+   （键盘候选栏是横向可滑动的 ListView，一屏多给一些候选更好挑）。
 
 保留下来的是：**雾凇拼音的词库与词频、模糊音（speller/algebra）、自定义短语、英文与中英混输**。
 
@@ -42,8 +45,9 @@ en_dicts/en.dict.yaml / en_ext.dict.yaml  英文词库
 en_dicts/cn_en.txt      中英混合词汇
 ```
 
-真机实测（YDP02X，固件 2.1.2）：编译 < 30s，内存无明显波动，产物
-`rime_ice.table.bin` 约 2.4MB（对比明月拼音方案的 13MB）。
+真机实测（YDP02X，固件 2.1.2）：编译 < 1 分钟、内存无明显波动，产物
+`rime_ice.table.bin` 约 7.1MB（明月拼音方案 13MB —— 本包词条数是它的 8 倍，
+产物反而更小，因为不背 5.9MB 的 essay 预设词库）。
 
 ## 部署
 
@@ -65,7 +69,10 @@ en_dicts/cn_en.txt      中英混合词汇
 curl -L https://github.com/iDvel/rime-ice/archive/refs/heads/main.zip -o rime-ice.zip
 unzip -q rime-ice.zip -d third-party/
 
-# 2) 生成数据包（--weight-min 控制规模：10000 ≈ 7.7 万条 / 约 1.2MB 包）
+# 2) 生成数据包
+#    --weight-min 控制词库规模：1000 ≈ 24 万条 / 约 2.9MB 包（当前默认）
+#                                10000 ≈ 7.7 万条 / 约 1.2MB 包
+#    --page-size  控制每页候选词数量（当前 20）
 python scripts/make_rime_ice_pkg.py \
     --src third-party/rime-ice-main \
     --zip resource/rime/rime.zip

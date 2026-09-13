@@ -4,16 +4,23 @@ import "../../commons"
 
 Flow {
     id: id_input_text_chars_model_base_view
+
+    // 一行 10 个键：10 * 28 + 9 * 2 = 298 <= 300
     width: 300
-    spacing: 5
+    spacing: 2
 
     readonly property alias containerItem: id_input_text_chars_model_base_view
 
-    property bool skipPressedAction: false // 为了能够区别对待小写字母按钮，我们需要一个判断条件（特定于 qml/commons/input/YInputTextLowerChars.qml）
-    function charTriggered(text) {
-        if (!skipPressedAction) {
-            id_input_text_title_area.enterChar(text);
+    // 输入统一交给 YInputPage 处理（拼音模式要经过 Rime），这里只负责转发。
+    signal charEntered(string text)
+    signal keyAction(string action)
+
+    function charTriggered(text, action) {
+        if (action !== undefined && action !== null && action.length > 0) {
+            keyAction(action);
+            return;
         }
+        charEntered(text);
     }
 
     function charPressed(text, posX, posY) {

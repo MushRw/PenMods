@@ -5,16 +5,27 @@ import "../../commons"
 
 YMouseArea {
     id: id_input_text_item
-    width: 56
-    height: 46
+
+    // 紧凑键盘尺寸：原来 56x46 时一行只排得下 5 个键，26 个字母要 6 行（约 301px），
+    // 在 320x170 的屏幕上必须上下滑。现在 28x30，一行 10 个，3 行放完全部字母+功能键。
+    width: keyWidth
+    height: keyHeight
+    property int keyWidth: 28
+    property int keyHeight: 30
+
     objectName: "YInputTextItem.qml_YMouseArea"
 
     property string text: ""
+
+    // 非空表示这是功能键（backspace/space/enter/switchNumber/switchSymbol/switchLetter），
+    // 由 YInputPage 统一处理，不走文本输入。
+    property string action: ""
+
     property bool _isPressAndHoldTriggered: false
     // 标记 onPressed 是否已触发（Flickable 的 pressDelay 可能导致快速点击时 onPressed 被跳过）
     property bool _pressedTriggered: false
 
-    // 用于在快速短按（onPressed 被 pressDelay 跳过）时延迟隐藏高亮
+    // 用于快速短按（onPressed 被 pressDelay 跳过）时延迟隐藏高亮
     Timer {
         id: _hideHighlightTimer
         interval: 150
@@ -28,7 +39,7 @@ YMouseArea {
         var globalPos = id_input_text_item.mapToItem(id_highlight_item.parent, 0, 0)
         id_highlight_item_content.text = btnText
         // 注意：id_highlight_item.width/height 绑定到 visible 属性，
-        // 在此函数调用时绑定的值尚未重新求值（仍为 0），因此直接使用常量
+        // 在此函数被调用时绑定的值尚未重新求值（仍为 0），因此直接使用常量
         id_highlight_item.x = globalPos.x + id_input_text_item.width / 2 - 33
         id_highlight_item.y = globalPos.y + id_input_text_item.height / 2 - 28
     }
@@ -41,6 +52,14 @@ YMouseArea {
     }
     onPressAndHold: {
         _isPressAndHoldTriggered = true
+
+        // 长按退格 = 清空（原来这个功能挂在功能键组的退格上，现在键位并进网格）
+        if (action === "backspace") {
+            charTriggered("", "clear")
+            id_text_item.text = text
+            return
+        }
+
         var switchedText = text
         switch (qmlGlobal.currentInputStatus) {
         case YEnum.InputStatus.Lower:
@@ -57,10 +76,9 @@ YMouseArea {
             id_text_item.text = text
             break
         }
-        // 小写键盘（LowerChars）设置了 skipPressedAction，导致 onReleased 中的 charTriggered 被跳过
-        // 因此长按切换字母后，需要在 pressAndHold 中直接输入
-        if (switchedText !== text && qmlGlobal.currentInputStatus === YEnum.InputStatus.Lower && !id_input_page.isPinyinMode) {
-            id_input_text_title_area.enterChar(switchedText)
+        // 长按切换大小写后直接输入；功能键不做这个处理
+        if (action.length === 0 && switchedText !== text && !id_input_page.isPinyinMode) {
+            charTriggered(switchedText, "")
             id_text_item.text = text
         }
     }
@@ -75,7 +93,7 @@ YMouseArea {
 
         // 只有在没有长按触发的情况下，才调用 charTriggered
         if (!_isPressAndHoldTriggered) {
-            charTriggered(id_text_item.text)
+            charTriggered(id_text_item.text, action)
         }
         id_text_item.text = text
         _isPressAndHoldTriggered = false
@@ -92,13 +110,13 @@ YMouseArea {
     Rectangle {
         id: id_normal_area
         anchors.fill: parent
-        radius: 12
-        color: YColors.grayNormal
+        radius: 8
+        color: id_input_text_item.action.length > 0 ? YColors.grayButton : YColors.grayNormal
     }
 
     YTextMedium {
         id: id_text_item
-        font.pixelSize: 20
+        font.pixelSize: 16
         anchors.centerIn: parent
         text: id_input_text_item.text
     }

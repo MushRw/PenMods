@@ -108,6 +108,7 @@ def main():
     ap.add_argument("--out", default="", help="staging 目录（默认 <zip 同级的 rime-pkg）")
     ap.add_argument("--zip", default="resource/rime/rime.zip", help="输出的数据包路径")
     ap.add_argument("--weight-min", type=int, default=10000, help="base 词库保留的最低词频权重")
+    ap.add_argument("--page-size", type=int, default=20, help="每页候选词数量（键盘 UI 横向滑动查看）")
     args = ap.parse_args()
 
     src = os.path.abspath(args.src)
@@ -155,10 +156,14 @@ def main():
         sys.exit("rime_ice.dict.yaml 的 import_tables 结构与预期不符，请检查上游是否改版")
     write(out, "rime_ice.dict.yaml", text.replace(OLD_IMPORTS, NEW_IMPORTS))
 
-    # 3) default.yaml：方案列表只留 rime_ice
+    # 3) default.yaml：方案列表只留 rime_ice；候选词数量交给 --page-size
     text = read(src, "default.yaml")
     start, end = cut_block(text, "schema_list:")
     text = text[:start] + "schema_list:\n  - schema: rime_ice               # 雾凇拼音（全拼）\n" + text[end:]
+    if "page_size: 5" in text:
+        text = text.replace("page_size: 5", "page_size: %d" % args.page_size)
+    else:
+        sys.exit("default.yaml 里没找到 'page_size: 5'，请检查上游是否改版")
     write(out, "default.yaml", text)
 
     # 4) rime_ice.schema.yaml：裁剪 engine

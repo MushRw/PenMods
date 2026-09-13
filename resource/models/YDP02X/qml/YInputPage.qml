@@ -10,12 +10,20 @@ YPage {
     visible: true
     objectName: "YPage===YInputPage.qml"
 
-    readonly property int bottomMargin: isPinyinMode && id_candidate_view.visible ? 32 : 12
     property alias placeHolderText: id_input_text_title_area.placeHolderText
 
     property bool isPinyinMode: false
 
     property int currentPinyinLen: 0
+
+    // 320x170 一屏放完：
+    // 输入行 34 + 候选行 24(+4) + 键盘 3 行(3*30 + 2*2 = 94) + 底边距 4 ≈ 160
+    // 原来：标题 70 + 候选 64 + 功能键组 46 + 字母网格(56x46 的键、一行 5 个 → 6 行 301px)
+    // ≈ 549px，在 170px 的屏上必须上下滑着找键。
+    readonly property int inputRowHeight: 34
+    readonly property int candidateRowHeight: 24
+    readonly property int gridTopGap: 2
+    readonly property int bottomMargin: 4
 
     RimeWrapper {
         id: id_rime_backend
@@ -83,6 +91,50 @@ YPage {
         }
     }
 
+    // 功能键统一在这里处理（退格/空格/回车/清空/切换键盘页）
+    function handleKeyAction(action) {
+        switch (action) {
+        case "backspace":
+            if (isPinyinMode && currentPinyinLen > 0) {
+                id_input_text_title_area.delChar();
+                currentPinyinLen = Math.max(0, currentPinyinLen - 1);
+                id_rime_backend.processKey("BackSpace");
+            } else {
+                id_input_text_title_area.delChar();
+            }
+            break;
+        case "clear":
+            id_rime_backend.clear();
+            id_candidate_model.clear();
+            currentPinyinLen = 0;
+            id_input_text_title_area.clear();
+            break;
+        case "space":
+            if (isPinyinMode && id_candidate_model.count > 0) {
+                selectCandidate(0, id_candidate_model.get(0).text);
+            } else {
+                id_input_text_title_area.enterChar(' ');
+            }
+            break;
+        case "enter":
+            if (currentPinyinLen > 0) {
+                id_rime_backend.clear();
+                currentPinyinLen = 0;
+            }
+            id_input_text_title_area.enterChar('\n');
+            break;
+        case "switchNumber":
+            qmlGlobal.currentInputStatus = YEnum.InputStatus.Number;
+            break;
+        case "switchSymbol":
+            qmlGlobal.currentInputStatus = YEnum.InputStatus.Symbol;
+            break;
+        case "switchLetter":
+            qmlGlobal.currentInputStatus = YEnum.InputStatus.Lower;
+            break;
+        }
+    }
+
     signal inputFinished(string text)
 
     property Item currentKeyboardItem: {
@@ -105,45 +157,78 @@ YPage {
         anchors.rightMargin: 10
 
         contentWidth: width
-
-        contentHeight: id_top_spacer.height + id_input_text_function_group.height + (id_input_page.currentKeyboardItem ? id_input_page.currentKeyboardItem.height : 0) + bottomMargin + id_input_text_title_area.height + (id_candidate_view.visible ? id_candidate_view.height : 0) + 3 + 5 + (id_candidate_view.visible ? 8 : 0)
+        // 所有按键都在这一页，禁止纵向滚动
+        contentHeight: height
+        interactive: false
 
         clip: true
         pressDelay: 100
         flickDeceleration: 1000
 
         Item {
-            id: id_top_spacer
+            id: id_input_row
             width: parent.width
-            height: 20
-        }
+            height: id_input_page.inputRowHeight
 
-        YInputTextTitleArea {
-            id: id_input_text_title_area
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.top: id_top_spacer.bottom
-            onBacked: {
-                backButtonClicked();
+            anchors.top: parent.top
+
+            YInputTextTitleArea {
+                id: id_input_text_title_area
+                compact: true
+                minHeight: id_input_page.inputRowHeight
+
+                anchors.left: parent.left
+                anchors.right: id_pinyin_toggle.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+
+                onBacked: {
+                    backButtonClicked();
+                }
+                onAccepted: {
+                    inputFinished(id_input_text_title_area.text);
+                    backButtonClicked();
+                }
             }
-            onAccepted: {
-                inputFinished(id_input_text_title_area.text);
-                backButtonClicked();
+
+            // 拼音开关：原来靠“长按 abc 键”，改成一键切换更好找
+            Rectangle {
+                id: id_pinyin_toggle
+                width: 30
+                radius: 6
+                color: id_input_page.isPinyinMode ? YColors.blueRect : YColors.grayButton
+
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+
+                YTextMedium {
+                    anchors.centerIn: parent
+                    text: "拼"
+                    font.pixelSize: 16
+                    color: YColors.white
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: id_input_page.togglePinyinMode()
+                }
             }
         }
 
-        // 候选词视图
+        // 候选词视图（拼音模式）
         Item {
             id: id_candidate_view
             clip: true
 
             visible: isPinyinMode
             width: parent.width
+            height: visible ? id_input_page.candidateRowHeight : 0
 
-            height: isPinyinMode ? 64 : 0
-
-            anchors.top: id_input_text_title_area.bottom
-            anchors.topMargin: 8
+            anchors.top: id_input_row.bottom
+            anchors.topMargin: 4
 
             Rectangle {
                 id: id_bg_rect
@@ -151,10 +236,10 @@ YPage {
                 anchors.right: parent.right
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
-                anchors.bottomMargin: 8
+                anchors.bottomMargin: 4
 
                 color: "#2B2B2B"
-                radius: 12
+                radius: 8
                 border.color: "#3F3F3F"
                 border.width: 1
             }
@@ -163,10 +248,10 @@ YPage {
                 id: id_left_container
                 height: id_bg_rect.height
                 anchors.left: id_bg_rect.left
-                anchors.leftMargin: 12
+                anchors.leftMargin: 8
                 anchors.top: id_bg_rect.top
 
-                width: id_rime_backend.preeditText.length > 0 ? (id_pre_edit.contentWidth + 20) : 0
+                width: id_rime_backend.preeditText.length > 0 ? (id_pre_edit.contentWidth + 14) : 0
                 visible: width > 0
 
                 YTextMedium {
@@ -175,12 +260,12 @@ YPage {
                     anchors.verticalCenter: parent.verticalCenter
                     text: id_rime_backend.preeditText
                     color: "#AAAAAA"
-                    font.pixelSize: 18
+                    font.pixelSize: 14
                 }
 
                 Rectangle {
                     width: 1
-                    height: 24
+                    height: 16
                     color: "#555555"
                     anchors.right: parent.right
                     anchors.rightMargin: 2
@@ -191,9 +276,9 @@ YPage {
             ListView {
                 id: id_list_view
                 anchors.left: id_left_container.right
-                anchors.leftMargin: id_left_container.visible ? 10 : 4
+                anchors.leftMargin: id_left_container.visible ? 8 : 4
                 anchors.right: parent.right
-                anchors.rightMargin: 10
+                anchors.rightMargin: 8
 
                 anchors.top: id_bg_rect.top
                 anchors.bottom: id_bg_rect.bottom
@@ -201,17 +286,17 @@ YPage {
                 orientation: ListView.Horizontal
                 clip: true
                 model: id_candidate_model
-                spacing: 10
+                spacing: 8
 
                 delegate: Item {
-                    width: candidate_text.contentWidth + 24
+                    width: candidate_text.contentWidth + 16
                     height: id_list_view.height
 
                     Rectangle {
                         anchors.centerIn: parent
                         width: parent.width - 4
-                        height: 36
-                        radius: 8
+                        height: 22
+                        radius: 6
                         color: mouse_area.pressed ? "#444444" : "transparent"
                     }
 
@@ -219,7 +304,7 @@ YPage {
                         id: candidate_text
                         anchors.centerIn: parent
                         text: model.text
-                        font.pixelSize: 22
+                        font.pixelSize: 16
                         color: "#FFFFFF"
                     }
 
@@ -233,87 +318,59 @@ YPage {
 
             YTextMedium {
                 anchors.centerIn: id_bg_rect
-                text: "长按 “abc” 键退出"
+                text: "点右侧「拼」切回字母"
                 visible: isPinyinMode && id_rime_backend.preeditText.length === 0
                 color: "#666666"
-                font.pixelSize: 14
-            }
-        }
-
-        YInputTextFunctionGroup {
-            id: id_input_text_function_group
-            anchors.top: id_candidate_view.visible ? id_candidate_view.bottom : id_input_text_title_area.bottom
-            anchors.topMargin: 3
-            anchors.left: parent.left
-            anchors.right: parent.right
-
-            onDelChar: {
-                if (isPinyinMode && currentPinyinLen > 0) {
-                    id_input_text_title_area.delChar();
-                    currentPinyinLen = Math.max(0, currentPinyinLen - 1);
-                    id_rime_backend.processKey("BackSpace");
-                } else {
-                    id_input_text_title_area.delChar();
-                }
-            }
-            onEnterSpace: {
-                if (isPinyinMode && id_candidate_model.count > 0) {
-                    selectCandidate(0, id_candidate_model.get(0).text);
-                } else {
-                    id_input_text_title_area.enterChar(' ');
-                }
-            }
-            onRequestClear: {
-                id_rime_backend.clear();
-                id_candidate_model.clear();
-                currentPinyinLen = 0;
-                id_input_text_title_area.clear();
-            }
-            onNewLine: {
-                if (currentPinyinLen > 0) {
-                    id_rime_backend.clear();
-                    currentPinyinLen = 0;
-                }
-                id_input_text_title_area.enterChar('\n');
-            }
-            onRequestTogglePinyin: {
-                togglePinyinMode();
+                font.pixelSize: 12
             }
         }
 
         YInputTextLowerChars {
             id: id_input_text_lower_chars
             visible: id_input_page.currentKeyboardItem === this
-            anchors.top: id_input_text_function_group.bottom
-            anchors.topMargin: 5
+            anchors.top: id_candidate_view.visible ? id_candidate_view.bottom : id_input_row.bottom
+            anchors.topMargin: id_input_page.gridTopGap
+            anchors.left: parent.left
+            anchors.right: parent.right
 
-            onKeyClicked: {
-                id_input_page.enterText(text);
-            }
+            onCharEntered: id_input_page.enterText(text)
+            onKeyAction: id_input_page.handleKeyAction(action)
         }
 
         YInputTextUpperChars {
             id: id_input_text_upper_chars
             visible: id_input_page.currentKeyboardItem === this
-            anchors.top: id_input_text_function_group.bottom
-            anchors.topMargin: 5
+            anchors.top: id_candidate_view.visible ? id_candidate_view.bottom : id_input_row.bottom
+            anchors.topMargin: id_input_page.gridTopGap
+            anchors.left: parent.left
+            anchors.right: parent.right
+
+            onCharEntered: id_input_page.enterText(text)
+            onKeyAction: id_input_page.handleKeyAction(action)
         }
 
         YInputTextNumberChars {
             id: id_input_text_number_chars
             visible: id_input_page.currentKeyboardItem === this
-            anchors.top: id_input_text_function_group.bottom
-            anchors.topMargin: 5
+            anchors.top: id_candidate_view.visible ? id_candidate_view.bottom : id_input_row.bottom
+            anchors.topMargin: id_input_page.gridTopGap
+            anchors.left: parent.left
+            anchors.right: parent.right
+
+            onCharEntered: id_input_page.enterText(text)
+            onKeyAction: id_input_page.handleKeyAction(action)
         }
 
         YInputTextSymbolChars {
             id: id_input_text_symbol_chars
             visible: id_input_page.currentKeyboardItem === this
-            anchors.top: id_input_text_function_group.bottom
-            anchors.topMargin: 5
-            onEnterSpace: {
-                id_input_text_title_area.enterChar(' ');
-            }
+            anchors.top: id_candidate_view.visible ? id_candidate_view.bottom : id_input_row.bottom
+            anchors.topMargin: id_input_page.gridTopGap
+            anchors.left: parent.left
+            anchors.right: parent.right
+
+            onCharEntered: id_input_page.enterText(text)
+            onKeyAction: id_input_page.handleKeyAction(action)
         }
 
         Rectangle {

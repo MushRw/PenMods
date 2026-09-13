@@ -7,7 +7,10 @@ import "../../i18n"
 Item {
     anchors.left: parent.left
     anchors.right: parent.right
-    height: Math.max(id_input_core_background.contentHeight, 70)
+    // compact 模式供紧凑键盘使用：一行放完输入框 + 确定 + 返回（原来最少要 70px）
+    property bool compact: false
+    property int minHeight: 70
+    height: Math.max(id_input_core_background.contentHeight, minHeight)
 
     readonly property bool acceptabled: id_input_core.length
     property alias text: id_input_core.text
@@ -42,8 +45,10 @@ Item {
         radius: 6
         icon: "ic_back"
         sourceSize: Qt.size(24, 24)
-        anchors.right: parent.right
-        anchors.top: parent.top
+        anchors.right: compact ? id_accepted_button_background.left : parent.right
+        anchors.rightMargin: compact ? 4 : 0
+        anchors.top: compact ? undefined : parent.top
+        anchors.verticalCenter: compact ? parent.verticalCenter : undefined
 
         YBackButtonBase {
             anchors.fill: parent
@@ -57,8 +62,9 @@ Item {
     YIconButton {
         id: id_accepted_button_background
         anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 5
+        anchors.bottom: compact ? undefined : parent.bottom
+        anchors.bottomMargin: compact ? 0 : 5
+        anchors.verticalCenter: compact ? parent.verticalCenter : undefined
         implicitWidth: 30
         implicitHeight: 30
         radius: 6
@@ -76,7 +82,10 @@ Item {
         id: id_input_core_background
         anchors.left: parent.left
         anchors.right: id_back_button_bg.left
-        anchors.topMargin: 8
+        anchors.rightMargin: compact ? 4 : 0
+        anchors.top: compact ? parent.top : undefined
+        anchors.bottom: compact ? parent.bottom : undefined
+        anchors.topMargin: compact ? 0 : 8
         contentHeight: id_input_core.contentHeight
         implicitHeight: 35 + id_input_core.height
         clip: true

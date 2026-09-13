@@ -1,5 +1,6 @@
 import QtQuick 2.12
 
+// 数字/常用符号页：3 行 × 10 列。
 YInputTextCharsModelBase {
     YInputTextItem { text: "1" }
     YInputTextItem { text: "2" }
@@ -11,6 +12,7 @@ YInputTextCharsModelBase {
     YInputTextItem { text: "8" }
     YInputTextItem { text: "9" }
     YInputTextItem { text: "0" }
+
     YInputTextItem { text: "." }
     YInputTextItem { text: "," }
     YInputTextItem { text: "?" }
@@ -21,5 +23,15 @@ YInputTextCharsModelBase {
     YInputTextItem { text: ":" }
     YInputTextItem { text: "(" }
     YInputTextItem { text: ")" }
+
     YInputTextItem { text: "@" }
+    YInputTextItem { text: ";" }
+    YInputTextItem { text: "\"" }
+    YInputTextItem { text: "&" }
+    YInputTextItem { text: "*" }
+    YInputTextItem { text: "⌫"; action: "backspace" }
+    YInputTextItem { text: "空"; action: "space" }
+    YInputTextItem { text: "↵"; action: "enter" }
+    YInputTextItem { text: "abc"; action: "switchLetter" }
+    YInputTextItem { text: "符"; action: "switchSymbol" }
 }

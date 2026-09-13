@@ -1,21 +1,7 @@
 import QtQuick 2.12
-import "qrc:/qml/commons"
 
+// 符号页：3 行 × 10 列（26 个符号 + 退格/空格/回车/回到字母）。
 YInputTextCharsModelBase {
-    signal enterSpace()
-
-    YInputTextFunctionButton {
-        color: YColors.grayNormal
-        onClicked: {
-            enterSpace()
-        }
-        YImage {
-            anchors.centerIn: parent
-            sourceSize: Qt.size(40, 40)
-            imageName: "input/ic_space"
-        }
-    }
-
     YInputTextItem { text: "." }
     YInputTextItem { text: "," }
     YInputTextItem { text: "?" }
@@ -26,6 +12,7 @@ YInputTextCharsModelBase {
     YInputTextItem { text: ":" }
     YInputTextItem { text: ";" }
     YInputTextItem { text: "(" }
+
     YInputTextItem { text: ")" }
     YInputTextItem { text: "$" }
     YInputTextItem { text: "&" }
@@ -36,16 +23,15 @@ YInputTextCharsModelBase {
     YInputTextItem { text: "{" }
     YInputTextItem { text: "}" }
     YInputTextItem { text: "#" }
+
     YInputTextItem { text: "%" }
     YInputTextItem { text: "^" }
     YInputTextItem { text: "*" }
     YInputTextItem { text: "+" }
     YInputTextItem { text: "=" }
     YInputTextItem { text: "_" }
-    YInputTextItem { text: "\\" }
-    YInputTextItem { text: "|" }
-    YInputTextItem { text: "~" }
-    YInputTextItem { text: "<" }
-    YInputTextItem { text: ">" }
-    YInputTextItem { text: "￥" }
+    YInputTextItem { text: "⌫"; action: "backspace" }
+    YInputTextItem { text: "空"; action: "space" }
+    YInputTextItem { text: "↵"; action: "enter" }
+    YInputTextItem { text: "abc"; action: "switchLetter" }
 }
