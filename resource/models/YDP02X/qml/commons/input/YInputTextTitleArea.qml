@@ -14,9 +14,10 @@ Item {
 
     // 输入内容实际需要的高度：YInputPage 用它把输入行按行数撑高（多行输入时能看到换行效果）。
     // 只依赖 TextEdit 的文档高度（由文本和宽度决定），不依赖自身高度，因此不会和 anchors 形成绑定环。
-    // contentHeight 已包含上下 padding（各 3px），所以这里不再额外加余量：空文本时输入框
-    // 正好等于"一行文字 + 上下各 3px"，上下边缘到文字的距离相等。下限 28 兜底。
-    readonly property int neededHeight: Math.max(id_input_core.contentHeight, 28)
+    // 空文本时锁死 30：和右侧三个 30x30 按钮等高对齐；有内容后按文字高度长（至少 30）。
+    readonly property int neededHeight: id_input_core.length === 0
+                                        ? 30
+                                        : Math.max(id_input_core.contentHeight, 30)
 
     readonly property bool acceptabled: id_input_core.length
     property alias text: id_input_core.text
@@ -103,7 +104,10 @@ Item {
         anchors.rightMargin: compact ? 4 : 0
         anchors.top: compact ? parent.top : undefined
         anchors.bottom: compact ? parent.bottom : undefined
-        anchors.topMargin: compact ? 0 : 8
+        // 上下各留 2px：让输入框在紧凑输入行里正好是 30px 高，
+        // 和右边的「返回 / 确定 / 拼」三个 30x30 按钮同顶同底对齐。
+        anchors.topMargin: compact ? 2 : 8
+        anchors.bottomMargin: compact ? 2 : 0
         contentHeight: id_input_core.contentHeight
         implicitHeight: 35 + id_input_core.height
         clip: true

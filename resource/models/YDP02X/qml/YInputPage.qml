@@ -21,11 +21,11 @@ YPage {
     // 原来：标题 70 + 候选 64 + 功能键组 46 + 字母网格(56x46 的键、一行 5 个 → 6 行 301px)
     // ≈ 549px，在 170px 的屏上必须上下滑着找键。
     //
-    // 输入行高度按内容自适应：空/单行 ≈ 28（一行文字 + 上下各 3px 内边距，输入框紧贴文字）；
-    // 换行后跟着内容长高（拼音模式要给候选行留位置，封顶 42；非拼音可以到 68），
+    // 输入行高度按内容自适应：空文本时 34（输入框本体 30，和右侧三个按钮等高对齐 —— 上下各留 2px）；
+    // 有内容后跟着文字行数长高（拼音模式要给候选行留位置，封顶 42；非拼音可以到 70），
     // 再长由输入框自己滚动。
-    readonly property int inputRowHeight: Math.min(isPinyinMode ? 42 : 68,
-                                                   Math.max(28, id_input_text_title_area.neededHeight))
+    readonly property int inputRowHeight: Math.min(isPinyinMode ? 44 : 70,
+                                                   Math.max(30, id_input_text_title_area.neededHeight) + 4)
     readonly property int candidateRowHeight: 24
     readonly property int gridTopGap: 2
     // 底边距：留 2px，让最下面一行按键的圆角不被屏幕边缘切掉（原来贴到 0，看起来像被裁了）
