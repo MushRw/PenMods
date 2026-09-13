@@ -95,43 +95,6 @@ YSettingItemPage {
             // ======================================
 
             YText {
-                id: id_title_sound
-                font.pixelSize: 16
-                font.italic: true
-                color: YColors.grayText
-                wrapMode: YText.Wrap
-                lineHeightMode: YTextBase.FixedHeight
-                lineHeight: 24
-                width: parent.width
-                text: "声音"
-            }
-
-            // 关掉 = 把自带扬声器“卸掉”（asound.conf 里扬声器通路的 Playback Path 由 SPK 改成 OFF），
-            // 任何 App（朗读/音乐/提示音）都推不动扬声器；耳机通路不动，插耳机照常有声。
-            YSettingSwitchItem {
-                implicitHeight: 54
-                title: "自带扬声器"
-                switchOn: aSound.speakerEnabled
-                interval: 0
-                onTimerTriggered: {
-                    aSound.speakerEnabled = switchOn
-                }
-            }
-
-            YText {
-                id: id_speaker_tip
-                font.pixelSize: 14
-                color: YColors.grayText
-                wrapMode: YText.Wrap
-                lineHeightMode: YTextBase.FixedHeight
-                lineHeight: 20
-                width: parent.width
-                text: "关闭后扬声器不会出声（插耳机仍可听），重启后保持；下拉快捷面板里也能一键切换。"
-            }
-
-            // ======================================
-
-            YText {
                 id: id_title_other
                 font.pixelSize: 16
                 font.italic: true

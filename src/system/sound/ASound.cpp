@@ -10,56 +10,16 @@
 #include "common/Utils.h"
 #include "common/util/System.h"
 
-#include "mod/Config.h"
-
-#include <QQmlContext>
-
 namespace mod {
 
 ASound::ASound() : Logger("ASound") {
 
     mVoiceDb = {0.0, -50.0};
 
-    mSpeakerEnabled = mod::Config::getInstance().read("asound").value("speaker_enabled", true);
-
     connect(&Event::getInstance(), &Event::uiCompleted, this, &ASound::onUiCompleted);
-    connect(&Event::getInstance(), &Event::beforeUiInitialization, [this](QQuickView& view, QQmlContext* context) {
-        context->setContextProperty("aSound", this);
-    });
 }
 
 void ASound::onUiCompleted() { setDb(mVoiceDb); }
-
-bool ASound::isSpeakerEnabled() const { return mSpeakerEnabled; }
-
-void ASound::setSpeakerEnabled(bool enabled) {
-    if (mSpeakerEnabled == enabled) {
-        return;
-    }
-    mSpeakerEnabled = enabled;
-
-    auto cfg               = mod::Config::getInstance().read("asound");
-    cfg["speaker_enabled"] = enabled;
-    mod::Config::getInstance().write("asound", cfg);
-
-    // 重写 asound.conf：之后新起的播放流就按新配置走（关闭时扬声器通路是 OFF）
-    _resetConfig();
-
-    if (!enabled) {
-        // 已经在播的流不会重新读 asound.conf，所以额外把当前通路切掉、并停掉提示音进程。
-        // 只在当前通路是扬声器（SPK / RING_SPK / SPK_HP）时才切，避免误伤正在用的耳机通路。
-        auto path = exec("amixer -c 0 sget 'Playback Path' 2>/dev/null | grep Item0");
-        if (path.find("SPK") != std::string::npos) {
-            exec("amixer -c 0 sset 'Playback Path' OFF");
-        }
-        exec("killall SoundPlayer");
-        info("自带扬声器已卸载（Playback Path 走 OFF，耳机不受影响）");
-    } else {
-        info("自带扬声器已加载");
-    }
-
-    emit speakerEnabledChanged();
-}
 
 bool ASound::setDb(VoiceDb val) {
     mVoiceDb = val;
@@ -74,18 +34,6 @@ bool ASound::_resetConfig() {
                        .replace("{mindb}", QString::number(mVoiceDb.min, 'f', 1))
                        .replace("{maxdb}", QString::number(mVoiceDb.max, 'f', 1))
                        .toStdString();
-
-    if (!mSpeakerEnabled) {
-        // asound 的 hooks 插件在打开播放设备时会把 Playback Path 设成 SPK（扬声器通路）：
-        // 改成 OFF 就等于把自带扬声器“卸掉”——任何 App 都推不动它。
-        // 耳机通路在模板里用的是 value "HP"，保持不动。
-        const std::string from = "value \"SPK\"";
-        const std::string to   = "value \"OFF\"";
-        for (size_t pos = content.find(from); pos != std::string::npos; pos = content.find(from, pos + to.size())) {
-            content.replace(pos, from.size(), to);
-        }
-    }
-
     // cfg.mPath 是 rootfs 上的 /etc/asound.conf.<model>：只在真正写文件的这段
     // 时间把 / 临时放开为可写，写完还原（原来是开机就整段会话保持 rw）。
     const bool wasWritable = util::isRootFileSystemWritable();
