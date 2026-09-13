@@ -20,7 +20,7 @@ ASound::ASound() : Logger("ASound") {
 
     mVoiceDb = {0.0, -50.0};
 
-    mSpeakerEnabled = Config::getInstance().read("asound").value("speaker_enabled", true);
+    mSpeakerEnabled = mod::Config::getInstance().read("asound").value("speaker_enabled", true);
 
     connect(&Event::getInstance(), &Event::uiCompleted, this, &ASound::onUiCompleted);
     connect(&Event::getInstance(), &Event::beforeUiInitialization, [this](QQuickView& view, QQmlContext* context) {
@@ -38,9 +38,9 @@ void ASound::setSpeakerEnabled(bool enabled) {
     }
     mSpeakerEnabled = enabled;
 
-    auto cfg               = Config::getInstance().read("asound");
+    auto cfg               = mod::Config::getInstance().read("asound");
     cfg["speaker_enabled"] = enabled;
-    Config::getInstance().write("asound", cfg);
+    mod::Config::getInstance().write("asound", cfg);
 
     // 重写 asound.conf：之后新起的播放流就按新配置走（关闭时扬声器通路是 OFF）
     _resetConfig();
