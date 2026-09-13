@@ -50,9 +50,9 @@ Item {
         height: contentCol.height + 24
         anchors.centerIn: parent
         radius: 16
-        color: "#1C2533"
+        color: "YColors.grayNormal"
         border.width: 1
-        border.color: "#FF6B35"
+        border.color: "YColors.orange"
 
         Column {
             id: contentCol
@@ -68,7 +68,7 @@ Item {
                 text: root.queue.length > 0
                     ? "AI 请求执行命令 (" + (root.queue.length + 1) + ")"
                     : "AI 请求执行命令"
-                color: "#FF6B35"
+                color: "YColors.orange"
                 font.pixelSize: 13
                 font.bold: true
                 font.family: root.fontFamily || ""
@@ -78,9 +78,9 @@ Item {
                 width: parent.width
                 height: Math.min(cmdText.implicitHeight + 12, 60)
                 radius: 8
-                color: "#111922"
+                color: "YColors.grayNormal"
                 border.width: 1
-                border.color: "#2B3A4A"
+                border.color: "#3F3F3F"
                 clip: true
 
                 Flickable {
@@ -93,7 +93,7 @@ Item {
                     Text {
                         id: cmdText
                         text: root.command
-                        color: "#E0E0E0"
+                        color: "YColors.white"
                         font.pixelSize: 11
                         font.family: "monospace"
                         wrapMode: Text.Wrap
@@ -108,12 +108,12 @@ Item {
 
                 Rectangle {
                     width: 100; height: 32; radius: 10
-                    color: "#2E1A1A"
-                    border.width: 1; border.color: "#4A2A2A"
+                    color: "YColors.grayNormal"
+                    border.width: 1; border.color: "YColors.red"
                     Text {
                         anchors.centerIn: parent
                         text: "拒绝"
-                        color: "#FF453A"
+                        color: "YColors.red"
                         font.pixelSize: 13
                         font.family: root.fontFamily || ""
                     }
@@ -128,12 +128,12 @@ Item {
 
                 Rectangle {
                     width: 100; height: 32; radius: 10
-                    color: "#1A2E1A"
-                    border.width: 1; border.color: "#2A4A2A"
+                    color: "YColors.grayNormal"
+                    border.width: 1; border.color: "YColors.green"
                     Text {
                         anchors.centerIn: parent
                         text: "执行"
-                        color: "#4CAF50"
+                        color: "YColors.green"
                         font.pixelSize: 13
                         font.family: root.fontFamily || ""
                     }

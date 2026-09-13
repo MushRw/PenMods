@@ -116,8 +116,8 @@ Column {
             width: root.maxWidth
             height: codeLabel.implicitHeight + 16
             radius: 6
-            color: "#1E1E1E"
-            border.color: "#333333"
+            color: "#1A1B1F"
+            border.color: "#3F3F3F"
             border.width: 1
 
             Text {
@@ -127,7 +127,7 @@ Column {
                 text: parent.mCode
                 textFormat: Text.PlainText
                 wrapMode: Text.Wrap
-                color: "#D4D4D4"
+                color: "#FFFFFF"
                 font.pixelSize: 12
                 font.family: "Courier New, Consolas, monospace"
                 lineHeight: 1.4
@@ -297,8 +297,8 @@ Column {
             width: root.maxWidth
             height: tableText.implicitHeight + 2
             radius: 4
-            color: "#1A1A1A"
-            border.color: "#333333"
+            color: "#1A1B1F"
+            border.color: "#3F3F3F"
             border.width: 1
 
             Text {
@@ -308,23 +308,23 @@ Column {
                 text: _tableHtml()
                 textFormat: Text.RichText
                 wrapMode: Text.Wrap
-                color: "#DDDDDD"
+                color: "#FFFFFF"
                 font.pixelSize: 11
                 font.family: root.fontFamily || ""
                 lineHeight: 1.2
 
                 function _tableHtml() {
                     var html = '<table border="0" cellpadding="3" cellspacing="0" width="100%">';
-                    html += '<tr bgcolor="#2A2A2A">';
+                    html += '<tr bgcolor="#2D2E33">';
                     for (var h = 0; h < mHeaders.length; h++) {
                         html += '<td><font color="#FFFFFF"><b>' + _cellHtml(mHeaders[h]) + '</b></font></td>';
                     }
                     html += '</tr>';
                     for (var r = 0; r < mRows.length; r++) {
-                        var bg = (r % 2 === 0) ? '#1E1E1E' : '#222222';
+                        var bg = (r % 2 === 0) ? '#1A1B1F' : '#2D2E33';
                         html += '<tr bgcolor="' + bg + '">';
                         for (var c = 0; c < mRows[r].length; c++) {
-                            html += '<td><font color="#DDDDDD">' + _cellHtml(mRows[r][c]) + '</font></td>';
+                            html += '<td><font color="#FFFFFF">' + _cellHtml(mRows[r][c]) + '</font></td>';
                         }
                         html += '</tr>';
                     }
@@ -384,7 +384,7 @@ Column {
             font.pixelSize: 14
             font.family: root.fontFamily || ""
             lineHeight: 1.3
-            linkColor: "#62A8EA"
+            linkColor: "#509DEB"
             verticalAlignment: Text.AlignVCenter
         }
     }
@@ -413,12 +413,12 @@ Column {
         var codeSpans = [];
         t = t.replace(/`([^`\n]+?)`/g, function(match, code) {
             var ph = "\x00C" + codeSpans.length + "\x00";
-            codeSpans.push('<code style="background:#3a3a3a;padding:1px 4px;border-radius:3px;font-family:Consolas,monospace;font-size:12px;color:#E8A0BF">' + code + '</code>');
+            codeSpans.push('<code style="background:#3F3F3F;padding:1px 4px;border-radius:3px;font-family:Consolas,monospace;font-size:12px;color:#FF8B20">' + code + '</code>');
             return ph;
         });
 
-        t = t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<a href="$2" style="color:#62A8EA">[$1]</a>');
-        t = t.replace(/\[([^\]]+?)\]\(([^)]+?)\)/g, '<a href="$2" style="color:#62A8EA;text-decoration:none">$1</a>');
+        t = t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<a href="$2" style="color:#509DEB">[$1]</a>');
+        t = t.replace(/\[([^\]]+?)\]\(([^)]+?)\)/g, '<a href="$2" style="color:#509DEB;text-decoration:none">$1</a>');
         t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<b><i>$1</i></b>');
         t = t.replace(/___(.+?)___/g, '<b><i>$1</i></b>');
         t = t.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
@@ -426,7 +426,7 @@ Column {
         t = t.replace(/\*(.+?)\*/g, '<i>$1</i>');
         t = t.replace(/_(.+?)_/g, '<i>$1</i>');
         t = t.replace(/~~(.+?)~~/g, '<s>$1</s>');
-        t = t.replace(/==(.+?)==/g, '<span style="background:#FFFF0033">$1</span>');
+        t = t.replace(/==(.+?)==/g, '<span style="background:#33E9900C">$1</span>');
 
         for (var i = 0; i < codeSpans.length; i++) {
             t = t.replace("\x00C" + i + "\x00", codeSpans[i]);

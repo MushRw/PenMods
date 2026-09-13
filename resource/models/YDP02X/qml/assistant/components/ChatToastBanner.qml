@@ -34,41 +34,41 @@ Rectangle {
 
         property color backgroundColor: {
             switch (type) {
-            case "success": return "#d1e7dd";
-            case "warning": return "#fff3cd";
-            case "info":    return "#cff4fc";
+            case "success": return "YColors.grayNormal";
+            case "warning": return "YColors.grayNormal";
+            case "info":    return "YColors.grayNormal";
             case "error":
-            default:        return "#f8d7da";
+            default:        return "YColors.grayNormal";
             }
         }
 
         property color borderColor: {
             switch (type) {
-            case "success": return "#badbcc";
-            case "warning": return "#ffecb5";
-            case "info":    return "#b6effb";
+            case "success": return "YColors.green";
+            case "warning": return "YColors.yellow";
+            case "info":    return "YColors.blueText";
             case "error":
-            default:        return "#f5c2c7";
+            default:        return "YColors.red";
             }
         }
 
         property color iconColor: {
             switch (type) {
-            case "success": return "#0f5132";
-            case "warning": return "#664d03";
-            case "info":    return "#055160";
+            case "success": return "YColors.green";
+            case "warning": return "YColors.yellow";
+            case "info":    return "YColors.blueText";
             case "error":
-            default:        return "#842029";
+            default:        return "YColors.red";
             }
         }
 
         property color textColor: {
             switch (type) {
-            case "success": return "#0f5132";
-            case "warning": return "#664d03";
-            case "info":    return "#055160";
+            case "success": return "YColors.green";
+            case "warning": return "YColors.yellow";
+            case "info":    return "YColors.blueText";
             case "error":
-            default:        return "#842029";
+            default:        return "YColors.red";
             }
         }
     }

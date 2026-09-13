@@ -9,7 +9,7 @@ Rectangle {
     id: id_root
     width: 0
     height: parent ? parent.height : 170
-    color: "#1A2432"
+    color: "YColors.grayButton"
     clip: true
     z: 100
 
@@ -100,7 +100,7 @@ Rectangle {
 
             Text {
                 text: "对话历史"
-                color: "#FFFFFF"
+                color: "YColors.white"
                 font.pixelSize: 12
                 font.family: qmlGlobal.fontFamilyZhCn
                 font.bold: true
@@ -117,12 +117,12 @@ Rectangle {
                 width: 22
                 height: 22
                 radius: 7
-                color: newSessionMouse.pressed ? "#2B5278" : "#182533"
+                color: newSessionMouse.pressed ? "YColors.blueRect" : "YColors.grayNormal"
                 anchors.verticalCenter: parent.verticalCenter
 
                 Text {
                     text: "+"
-                    color: "#FFFFFF"
+                    color: "YColors.white"
                     font.pixelSize: 15
                     font.family: qmlGlobal.fontFamilyZhCn
                     font.bold: true
@@ -145,7 +145,7 @@ Rectangle {
         Rectangle {
             width: parent.width
             height: 1
-            color: "#2B3A4A"
+            color: "#3F3F3F"
         }
 
         // 会话列表
@@ -163,10 +163,10 @@ Rectangle {
                 radius: 8
                 color: {
                     if (modelData.id === id_root.activeSessionId)
-                        return "#1E3A5F";
+                        return "#3F3F3F";
                     if (sessionMouse.pressed)
-                        return "#253544";
-                    return "#182533";
+                        return "YColors.graySwitchOff";
+                    return "YColors.grayNormal";
                 }
 
                 Behavior on color {
@@ -187,7 +187,7 @@ Rectangle {
 
                     Text {
                         text: modelData.title || "未命名对话"
-                        color: "#FFFFFF"
+                        color: "YColors.white"
                         font.pixelSize: 11
                         font.family: qmlGlobal.fontFamilyZhCn
                         font.bold: modelData.id === id_root.activeSessionId
@@ -197,7 +197,7 @@ Rectangle {
 
                     Text {
                         text: (modelData.messageCount || 0) + " 条消息"
-                        color: "#5A6B7D"
+                        color: "YColors.graySwitchOff"
                         font.pixelSize: 9
                         font.family: qmlGlobal.fontFamilyZhCn
                     }
@@ -214,13 +214,13 @@ Rectangle {
                     width: 20
                     height: 20
                     radius: 5
-                    color: deleteBtnMouse.pressed ? "#44FF453A" : "transparent"
+                    color: deleteBtnMouse.pressed ? "#44F03043" : "transparent"
                     visible: sessionsData.length > 1
                     z: 10
 
                     Text {
                         text: "×"
-                        color: "#FF453A"
+                        color: "YColors.red"
                         font.pixelSize: 14
                         font.family: qmlGlobal.fontFamilyZhCn
                         font.bold: true

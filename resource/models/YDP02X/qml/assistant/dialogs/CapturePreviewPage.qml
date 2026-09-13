@@ -306,11 +306,11 @@ Item {
             Rectangle { x: 0; y: root.cropY * parent.height; width: root.cropX * parent.width; height: root.cropH * parent.height; color: "#75000000" }
             Rectangle { x: (root.cropX + root.cropW) * parent.width; y: root.cropY * parent.height; width: parent.width - x; height: root.cropH * parent.height; color: "#75000000" }
 
-            // 裁剪框边框 (1px 等宽 #4CAF50, Youdao 风格)
+            // 裁剪框边框 (1px 等宽 YColors.green, Youdao 风格)
             Rectangle {
                 x: root.cropX * parent.width; y: root.cropY * parent.height
                 width: root.cropW * parent.width; height: root.cropH * parent.height
-                color: "transparent"; border.width: 1; border.color: "#4CAF50"
+                color: "transparent"; border.width: 1; border.color: "YColors.green"
             }
 
             // 四边拖拽条 (阻止 Flickable 抢手势)
@@ -370,7 +370,7 @@ Item {
             // 四角手柄 (标准 8px radius, Youdao 风格)
             Rectangle {
                 x: root.cropX * parent.width - 8; y: root.cropY * parent.height - 8
-                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: "#2B5278"
+                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: "YColors.blueRect"
                 MouseArea {
                     anchors.fill: parent; anchors.margins: -10; preventStealing: true
                     onPositionChanged: {
@@ -385,7 +385,7 @@ Item {
             }
             Rectangle {
                 x: (root.cropX + root.cropW) * parent.width - 8; y: root.cropY * parent.height - 8
-                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: "#2B5278"
+                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: "YColors.blueRect"
                 MouseArea {
                     anchors.fill: parent; anchors.margins: -10; preventStealing: true
                     onPositionChanged: {
@@ -400,7 +400,7 @@ Item {
             }
             Rectangle {
                 x: root.cropX * parent.width - 8; y: (root.cropY + root.cropH) * parent.height - 8
-                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: "#2B5278"
+                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: "YColors.blueRect"
                 MouseArea {
                     anchors.fill: parent; anchors.margins: -10; preventStealing: true
                     onPositionChanged: {
@@ -414,7 +414,7 @@ Item {
             }
             Rectangle {
                 x: (root.cropX + root.cropW) * parent.width - 8; y: (root.cropY + root.cropH) * parent.height - 8
-                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: "#2B5278"
+                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: "YColors.blueRect"
                 MouseArea {
                     anchors.fill: parent; anchors.margins: -10; preventStealing: true
                     onPositionChanged: {
@@ -433,7 +433,7 @@ Item {
     Rectangle {
         id: id_scan_hint
         anchors { top: parent.top; topMargin: 44; left: parent.left; right: parent.right; bottom: parent.bottom; bottomMargin: 36 }
-        color: "#1C1C1E"
+        color: "YColors.grayNormal"
         visible: phase === phaseWaiting && displaySource === ""
         z: 0
 
@@ -444,7 +444,7 @@ Item {
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: capturedImages.length > 0 ? "已抓取 " + capturedImages.length + " 页，请继续扫描..." : "请扫描以捕获图片..."
-                color: "#8899AA"; font.pixelSize: 11; font.family: qmlGlobal.fontFamilyZhCn
+                color: "YColors.grayText"; font.pixelSize: 11; font.family: qmlGlobal.fontFamilyZhCn
             }
         }
     }
@@ -506,12 +506,12 @@ Item {
                     radius: 14
                     color: "transparent"
                     border.width: 2
-                    border.color: "#55616A"
+                    border.color: "#3F3F3F"
                 }
                 Rectangle {
                     anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: -1 }
                     width: 6; height: 6; radius: 3
-                    color: "#4CAF50"
+                    color: "YColors.green"
                 }
                 NumberAnimation on rotation {
                     from: 0; to: 360; duration: 800; loops: Animation.Infinite; running: processing
@@ -574,8 +574,8 @@ Item {
             Repeater {
                 model: capturedImages
                 Rectangle {
-                    width: 20; height: 14; radius: 1; color: "#333333"
-                    border.width: 1; border.color: index === capturedImages.length - 1 ? "#4CAF50" : "#555555"
+                    width: 20; height: 14; radius: 1; color: "#3F3F3F"
+                    border.width: 1; border.color: index === capturedImages.length - 1 ? "YColors.green" : "#555555"
                     Image {
                         anchors.fill: parent; anchors.margins: 1
                         source: "data:image/jpeg;base64," + modelData
@@ -630,16 +630,16 @@ Item {
 
             YButton {
                 anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
-                width: 50; height: 22; pixelSize: 10; color: "#3A2E2E"
-                border.width: 1; border.color: "#5A3E3E"
-                text: "放弃"; textColor: "#FF453A"
+                width: 50; height: 22; pixelSize: 10; color: "YColors.grayButton"
+                border.width: 1; border.color: "YColors.red"
+                text: "放弃"; textColor: "YColors.red"
                 onClicked: onAbandonCurrent()
             }
 
             Row {
                 anchors.centerIn: parent; spacing: 12
                 Rectangle {
-                    width: 32; height: 20; radius: 10; color: "#2B5278"
+                    width: 32; height: 20; radius: 10; color: "YColors.blueRect"
                     Text { anchors.centerIn: parent; text: "−"; color: "white"; font.pixelSize: 13; font.bold: true }
                     MouseArea { anchors.fill: parent; onClicked: {
                         setZoom(zoomLevel - 0.25);
@@ -647,7 +647,7 @@ Item {
                 }
                 Text { anchors.verticalCenter: parent.verticalCenter; text: Math.round(zoomLevel * 100) + "%"; color: "white"; font.pixelSize: 10; font.family: qmlGlobal.fontFamilyZhCn }
                 Rectangle {
-                    width: 32; height: 20; radius: 10; color: "#2B5278"
+                    width: 32; height: 20; radius: 10; color: "YColors.blueRect"
                     Text { anchors.centerIn: parent; text: "+"; color: "white"; font.pixelSize: 13; font.bold: true }
                     MouseArea { anchors.fill: parent; onClicked: {
                         setZoom(zoomLevel + 0.25);
@@ -657,7 +657,7 @@ Item {
 
             YButton {
                 anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
-                width: 64; height: 22; pixelSize: 10; color: "#2B5278"
+                width: 64; height: 22; pixelSize: 10; color: "YColors.blueRect"
                 border.width: 0
                 text: "确认裁剪 ✓"; textColor: "white"
                 onClicked: onSaveCurrent()
@@ -670,21 +670,21 @@ Item {
             visible: phase === phaseOverview && needsDirection
 
             YButton {
-                width: 64; height: 22; pixelSize: 10; color: "#1A3A5C"
-                border.width: 1; border.color: "#2B5278"
+                width: 64; height: 22; pixelSize: 10; color: "YColors.grayNormal"
+                border.width: 1; border.color: "YColors.blueRect"
                 text: "水平拼接"; textColor: "white"
                 onClicked: onDirectionSelected("horizontal")
             }
             YButton {
-                width: 64; height: 22; pixelSize: 10; color: "#1A3A5C"
-                border.width: 1; border.color: "#2B5278"
+                width: 64; height: 22; pixelSize: 10; color: "YColors.grayNormal"
+                border.width: 1; border.color: "YColors.blueRect"
                 text: "竖直拼接"; textColor: "white"
                 onClicked: onDirectionSelected("vertical")
             }
             YButton {
-                width: 44; height: 22; pixelSize: 10; color: "#2E1A1A"
-                border.width: 1; border.color: "#4A2A2A"
-                text: "清空"; textColor: "#FF453A"
+                width: 44; height: 22; pixelSize: 10; color: "YColors.grayNormal"
+                border.width: 1; border.color: "YColors.red"
+                text: "清空"; textColor: "YColors.red"
                 onClicked: onClear()
             }
         }
@@ -696,15 +696,15 @@ Item {
 
             YButton {
                 anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
-                width: 44; height: 22; pixelSize: 10; color: "#2E1A1A"
-                border.width: 1; border.color: "#4A2A2A"
-                text: "清空"; textColor: "#FF453A"
+                width: 44; height: 22; pixelSize: 10; color: "YColors.grayNormal"
+                border.width: 1; border.color: "YColors.red"
+                text: "清空"; textColor: "YColors.red"
                 onClicked: onClear()
             }
 
             YButton {
                 anchors.centerIn: parent
-                width: 64; height: 22; pixelSize: 10; color: "#2B5278"
+                width: 64; height: 22; pixelSize: 10; color: "YColors.blueRect"
                 border.width: 0
                 text: "继续拍摄"; textColor: "white"
                 enabled: capturedImages.length < maxFrames
@@ -713,7 +713,7 @@ Item {
 
             YButton {
                 anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
-                width: 54; height: 22; pixelSize: 10; color: "#4CAF50"
+                width: 54; height: 22; pixelSize: 10; color: "YColors.green"
                 border.width: 0
                 text: "完成保存"; textColor: "white"
                 onClicked: onFinish()
@@ -727,15 +727,15 @@ Item {
 
             YButton {
                 anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
-                width: 64; height: 22; pixelSize: 10; color: "#1A3A5C"
-                border.width: 1; border.color: "#2B5278"
+                width: 64; height: 22; pixelSize: 10; color: "YColors.grayNormal"
+                border.width: 1; border.color: "YColors.blueRect"
                 text: "返回预览"; textColor: "white"
                 onClicked: onReturnToOverview()
             }
 
             YButton {
                 anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
-                width: 54; height: 22; pixelSize: 10; color: "#4CAF50"
+                width: 54; height: 22; pixelSize: 10; color: "YColors.green"
                 border.width: 0
                 text: "完成保存"; textColor: "white"
                 onClicked: onFinish()

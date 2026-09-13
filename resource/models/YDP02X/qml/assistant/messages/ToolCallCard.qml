@@ -21,26 +21,26 @@ Item {
         radius: root.expanded ? 0 : 10
         color: {
             if (root.toolState === "searching")
-                return "#1A2B3C";
+                return "YColors.grayNormal";
             if (root.toolState === "pending")
-                return "#2B2A1A";
+                return "YColors.grayNormal";
             if (root.toolState === "done")
-                return "#1A2E1A";
+                return "YColors.grayNormal";
             if (root.toolState === "error")
-                return "#2E1A1A";
-            return "#1C2533";
+                return "YColors.grayNormal";
+            return "YColors.grayNormal";
         }
         border.width: 1
         border.color: {
             if (root.toolState === "searching")
-                return "#2B4A6A";
+                return "YColors.grayButton";
             if (root.toolState === "pending")
-                return "#4A4A2A";
+                return "YColors.yellow";
             if (root.toolState === "done")
-                return "#2A4A2A";
+                return "YColors.green";
             if (root.toolState === "error")
-                return "#4A2A2A";
-            return "#2B3A4A";
+                return "YColors.red";
+            return "#3F3F3F";
         }
         clip: true
 
@@ -68,14 +68,14 @@ Item {
 
                 property string iconColor: {
                     if (root.toolState === "searching")
-                        return "#62A8EA";
+                        return "YColors.blueText";
                     if (root.toolState === "pending")
-                        return "#FFA726";
+                        return "YColors.orange";
                     if (root.toolState === "done")
-                        return "#4CAF50";
+                        return "YColors.green";
                     if (root.toolState === "error")
-                        return "#FF453A";
-                    return "#8899AA";
+                        return "YColors.red";
+                    return "YColors.grayText";
                 }
 
                 onPaint: {
@@ -119,14 +119,14 @@ Item {
                 textFormat: Text.PlainText
                 color: {
                     if (root.toolState === "searching")
-                        return "#62A8EA";
+                        return "YColors.blueText";
                     if (root.toolState === "pending")
-                        return "#FFA726";
+                        return "YColors.orange";
                     if (root.toolState === "done")
-                        return "#4CAF50";
+                        return "YColors.green";
                     if (root.toolState === "error")
-                        return "#FF453A";
-                    return "#8899AA";
+                        return "YColors.red";
+                    return "YColors.grayText";
                 }
                 font.pixelSize: 12
                 font.family: root.fontFamily || ""
@@ -148,7 +148,7 @@ Item {
             onPaint: {
                 var ctx = getContext("2d");
                 ctx.reset();
-                ctx.strokeStyle = "#8899AA";
+                ctx.strokeStyle = "YColors.grayText";
                 ctx.lineWidth = 1.5;
                 ctx.lineCap = "round";
                 ctx.lineJoin = "round";
@@ -184,7 +184,7 @@ Item {
         width: cardHeader.width
         anchors.top: cardHeader.bottom
         height: root.expanded ? Math.min(detailText.implicitHeight + 16, 80) : 0
-        color: "#111922"
+        color: "YColors.grayNormal"
         radius: 10
 
         Behavior on height {
@@ -202,7 +202,7 @@ Item {
         }
 
         border.width: 1
-        border.color: "#2B3A4A"
+        border.color: "#3F3F3F"
         clip: true
 
         Flickable {
@@ -217,7 +217,7 @@ Item {
                 id: detailText
                 width: detailFlick.width
                 text: root.rawText
-                color: "#667788"
+                color: "YColors.grayText"
                 font.pixelSize: 10
                 font.family: "Microsoft YaHei"
                 wrapMode: Text.Wrap

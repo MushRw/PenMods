@@ -9,9 +9,9 @@ Rectangle {
 
     height: 34
     radius: 8
-    color: "#CC0E1621"
+    color: "#CC1A1B1F"
     border.width: 1
-    border.color: "#2B3A4A"
+    border.color: "#3F3F3F"
 
     ListView {
         anchors { fill: parent; margins: 4 }
@@ -31,7 +31,7 @@ Rectangle {
             height: 26
             width: chipContent.implicitWidth + 36
             radius: 6
-            color: isMediaChip ? "#28552A" : "#2B5278"
+            color: isMediaChip ? "YColors.grayButton" : "YColors.blueRect"
 
             Row {
                 id: chipContent
@@ -51,7 +51,7 @@ Rectangle {
                 }
                 Text {
                     text: chipData ? (chipData.label || chipData.name || chipData.type || "") : ""
-                    color: "#FFFFFF"
+                    color: "YColors.white"
                     font.pixelSize: 11
                     font.family: root.fontFamily || ""
                     anchors.verticalCenter: parent.verticalCenter
@@ -75,7 +75,7 @@ Rectangle {
                 Text {
                     anchors.centerIn: parent
                     text: "×"
-                    color: "#FFFFFF"
+                    color: "YColors.white"
                     font.pixelSize: 12
                     font.bold: true
                 }

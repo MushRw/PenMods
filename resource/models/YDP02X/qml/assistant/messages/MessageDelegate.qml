@@ -51,7 +51,7 @@ Item {
         x: 8
         anchors.verticalCenter: parent.verticalCenter
         radius: 16
-        color: "#182533"
+        color: "YColors.grayNormal"
 
         MixedContentBubble {
             id: mixedBubble

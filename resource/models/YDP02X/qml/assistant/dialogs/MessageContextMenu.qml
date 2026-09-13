@@ -104,10 +104,10 @@ Item {
             return buttonCount * 44 + (buttonCount > 1 ? (buttonCount - 1) * 0.5 : 0);
         }
         radius: 14
-        color: "#CC1C1C1E"
+        color: "#CC1A1B1F"
         scale: root.menuScale
         clip: true
-        border.color: "#3A3A3C"
+        border.color: "#3F3F3F"
         border.width: 0.5
 
         Behavior on height {
@@ -125,7 +125,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: 14
-                    color: editMouse.pressed ? "#3A3A3C" : "transparent"
+                    color: editMouse.pressed ? "#3F3F3F" : "transparent"
                     Behavior on color { ColorAnimation { duration: 50 } }
                 }
 
@@ -146,7 +146,7 @@ Item {
 
             Rectangle {
                 width: parent.width; height: 0.5
-                color: "#444446"
+                color: "#444444"
                 visible: root.chatModel && root.targetIndex >= 0 && root.targetIndex < root.chatModel.count && root.chatModel.get(root.targetIndex).isUser
             }
 
@@ -158,13 +158,13 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: 14
-                    color: regenerateMouse.pressed ? "#3A3A3C" : "transparent"
+                    color: regenerateMouse.pressed ? "#3F3F3F" : "transparent"
                     Behavior on color { ColorAnimation { duration: 50 } }
                 }
 
                 Text {
                     text: "重新生成"
-                    color: "#007AFF"
+                    color: "YColors.blueRect"
                     font.pixelSize: 16
                     font.family: root.fontFamily || ""
                     anchors.centerIn: parent
@@ -179,7 +179,7 @@ Item {
 
             Rectangle {
                 width: parent.width; height: 0.5
-                color: "#444446"
+                color: "#444444"
                 visible: root.chatModel && root.targetIndex >= 0 && root.targetIndex < root.chatModel.count && !root.chatModel.get(root.targetIndex).isUser
             }
 
@@ -189,13 +189,13 @@ Item {
 
                 Rectangle {
                     anchors.fill: parent
-                    color: deleteSingleMouse.pressed ? "#3A3A3C" : "transparent"
+                    color: deleteSingleMouse.pressed ? "#3F3F3F" : "transparent"
                     Behavior on color { ColorAnimation { duration: 50 } }
                 }
 
                 Text {
                     text: "删除本条"
-                    color: "#FF453A"
+                    color: "YColors.red"
                     font.pixelSize: 16
                     font.family: root.fontFamily || ""
                     anchors.centerIn: parent
@@ -215,13 +215,13 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: 14
-                    color: deleteMouse.pressed ? "#3A3A3C" : "transparent"
+                    color: deleteMouse.pressed ? "#3F3F3F" : "transparent"
                     Behavior on color { ColorAnimation { duration: 50 } }
                 }
 
                 Text {
                     text: "删除本条及后续"
-                    color: "#FF453A"
+                    color: "YColors.red"
                     font.pixelSize: 16
                     font.family: root.fontFamily || ""
                     anchors.centerIn: parent

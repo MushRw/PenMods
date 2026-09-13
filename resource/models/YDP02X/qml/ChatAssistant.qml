@@ -395,7 +395,7 @@ YPage {
 
     Rectangle {
         anchors.fill: parent
-        color: "#0E1621"
+        color: "YColors.black"
         z: -100
     }
 
@@ -813,7 +813,7 @@ YPage {
         Rectangle {
             id: id_chat_container
             anchors.fill: parent
-            color: "#0E1621"
+            color: "YColors.black"
 
             ListView {
                 id: id_chat_listview
@@ -897,7 +897,7 @@ YPage {
                     width: 120
                     height: 36
                     radius: 18
-                    color: "#2B5278"
+                    color: "YColors.blueRect"
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 20
@@ -989,7 +989,7 @@ YPage {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "AI 助手"
                 font.pixelSize: 15
-                color: "#FFFFFF"
+                color: "YColors.white"
                 font.family: qmlGlobal.fontFamilyZhCn
                 font.bold: true
             }
@@ -997,7 +997,7 @@ YPage {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "点击左侧键盘开始对话"
                 font.pixelSize: 12
-                color: "#5A6B7D"
+                color: "YColors.graySwitchOff"
                 font.family: qmlGlobal.fontFamilyZhCn
             }
         }
@@ -1023,9 +1023,9 @@ YPage {
                 radius: 8
                 realSource: "qrc:/images/chat/keyboard"
                 sourceSize: Qt.size(18, 18)
-                color: "#182533"
+                color: "YColors.grayNormal"
                 border.width: 1
-                border.color: "#2B3A4A"
+                border.color: "#3F3F3F"
                 onValidClicked: showKeyboard()
             }
             YIconButton {
@@ -1034,9 +1034,9 @@ YPage {
                 radius: 8
                 realSource: "qrc:/images/chat/more"
                 sourceSize: Qt.size(18, 18)
-                color: "#182533"
+                color: "YColors.grayNormal"
                 border.width: 1
-                border.color: "#2B3A4A"
+                border.color: "#3F3F3F"
                 onValidClicked: id_more_menu.show()
             }
             YIconButton {
@@ -1045,9 +1045,9 @@ YPage {
                 radius: 8
                 realSource: "qrc:/images/chat/settings"
                 sourceSize: Qt.size(18, 18)
-                color: "#182533"
+                color: "YColors.grayNormal"
                 border.width: 1
-                border.color: "#2B3A4A"
+                border.color: "#3F3F3F"
                 onValidClicked: id_pop_container.show("settingpages/ChatAssistantSettings")
             }
         }
@@ -1074,9 +1074,9 @@ YPage {
             width: 28
             height: 28
             radius: 8
-            color: "#182533"
+            color: "YColors.grayNormal"
             border.width: 1
-            border.color: "#2B3A4A"
+            border.color: "#3F3F3F"
             visible: id_chat_assistant_page.isGenerating || id_chat_assistant_page._preparingSend
             opacity: visible ? 1.0 : 0.0
             anchors {
@@ -1102,7 +1102,7 @@ YPage {
                 onPaint: {
                     var ctx = getContext("2d");
                     ctx.reset();
-                    ctx.fillStyle = "#FF6B6B";
+                    ctx.fillStyle = "YColors.red";
                     ctx.fillRect(2, 2, 12, 12);
                 }
             }

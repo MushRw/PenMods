@@ -83,7 +83,7 @@ Item {
         id: fallbackText
         visible: root._state === MathCache.ERROR || (!root.serverAvailable && root._state !== MathCache.LOADING)
         text: root.display ? ("$$" + root.latex + "$$") : ("$" + root.latex + "$")
-        color: "#A0B8D0"
+        color: "YColors.grayText"
         font.pixelSize: 13
         font.family: root.fontFamily || ""
         wrapMode: Text.Wrap
@@ -105,7 +105,7 @@ Item {
                 width: 5
                 height: 5
                 radius: 2.5
-                color: "#62A8EA"
+                color: "YColors.blueText"
                 SequentialAnimation on opacity {
                     running: root._state === MathCache.LOADING
                     loops: Animation.Infinite

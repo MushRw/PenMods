@@ -8,7 +8,7 @@ Rectangle {
     width: 64
     height: 36
     radius: 16
-    color: "#182533"
+    color: "YColors.grayNormal"
 
     Row {
         anchors.centerIn: parent
@@ -16,7 +16,7 @@ Rectangle {
 
         Rectangle {
             width: 8; height: 8; radius: 4
-            color: "#8899AA"
+            color: "YColors.grayText"
             anchors.verticalCenter: parent.verticalCenter
 
             SequentialAnimation on scale {
@@ -29,7 +29,7 @@ Rectangle {
         }
         Rectangle {
             width: 8; height: 8; radius: 4
-            color: "#8899AA"
+            color: "YColors.grayText"
             anchors.verticalCenter: parent.verticalCenter
 
             SequentialAnimation on scale {
@@ -43,7 +43,7 @@ Rectangle {
         }
         Rectangle {
             width: 8; height: 8; radius: 4
-            color: "#8899AA"
+            color: "YColors.grayText"
             anchors.verticalCenter: parent.verticalCenter
 
             SequentialAnimation on scale {
