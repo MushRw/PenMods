@@ -52,6 +52,10 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
+    permissions:
+      contents: read
+      # 清理旧缓存要写权限（见「清理旧缓存」那一步）
+      actions: write
 
     steps:
       - name: 更新系统 & 安装基础依赖
@@ -82,6 +86,56 @@ jobs:
         with:
           submodules: recursive
 
+      # 先清旧缓存再 restore：per-sha 的滚动缓存会一直累积，把仓库 10G 缓存额度
+      # 挤满之后 GitHub 就按 LRU 把 xmake-packages / Qt 这些关键缓存删掉。
+      # 实测被删之后的代价：现场重装 python 3.14.3(5m50s) + librime(2m28s)，
+      # 只「配置 xmake」一步就要 12m40s。这里每个前缀只留最近几份。
+      - name: 清理旧缓存
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+
+          repo  = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          # 每个前缀保留的份数；0 = 全删（build-objs 已不再缓存，只清历史遗留）
+          keep = {
+              "ccache-": 3,
+              "build-gens-": 2,
+              "xmake-packages-": 2,
+              "qt-aarch64-": 2,
+              "xmake-cache-": 0,
+              "build-objs-": 0,
+          }
+
+          def api(url, method="GET"):
+              req = urllib.request.Request(
+                  url, method=method,
+                  headers={"Authorization": f"Bearer {token}",
+                           "Accept": "application/vnd.github+json"})
+              with urllib.request.urlopen(req) as r:
+                  return json.load(r) if method == "GET" else None
+
+          caches = api(f"https://api.github.com/repos/{repo}/actions/caches?per_page=100")
+          groups = {}
+          for c in caches.get("actions_caches", []):
+              for pref in keep:
+                  if c["key"].startswith(pref):
+                      groups.setdefault(pref, []).append(c)
+                      break
+          for pref, items in groups.items():
+              items.sort(key=lambda c: c["created_at"], reverse=True)
+              for c in items[keep[pref]:]:
+                  try:
+                      api(f"https://api.github.com/repos/{repo}/actions/caches/{c['id']}", "DELETE")
+                      print(f"deleted {c['key']} ({c['size_in_bytes']//1024//1024} MiB)")
+                  except Exception as e:
+                      print(f"delete failed {c['key']}: {e}")
+          print("剩余：", {p: min(len(v), keep[p]) for p, v in groups.items()})
+          PY
+
       - name: 缓存 Qt 5.15.2
         id: cache-qt
         uses: actions/cache@v4
@@ -92,9 +146,9 @@ jobs:
       - name: 缓存 Xmake 包
         uses: actions/cache@v4
         with:
-          path: |
-            ${{ env.XMAKE_PACKAGES_DIR }}
-            ~/.xmake/repositories
+          # 只缓存 packages：这里面是装好的依赖（python/librime/boost...），
+          # 命中就能省掉「配置 xmake」里那一串 install。
+          path: ${{ env.XMAKE_PACKAGES_DIR }}
           key: xmake-packages-${{ hashFiles('xmake.lua', 'xmake/**/*.lua') }}
           restore-keys: |
             xmake-packages-
@@ -107,16 +161,10 @@ jobs:
           restore-keys: |
             ccache-${{ env.BUILD_PLATFORM }}-${{ env.BUILD_MODE }}-
 
-      - name: 缓存 Xmake 编译缓存
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.XMAKE_CACHE_DIR }}
-          key: xmake-cache-${{ env.BUILD_PLATFORM }}-${{ env.BUILD_MODE }}-${{ github.sha }}
-          restore-keys: |
-            xmake-cache-${{ env.BUILD_PLATFORM }}-${{ env.BUILD_MODE }}-
-
       # 只缓存 xmake 自己生成的中间文件：.objs 是按 mtime 判定的，checkout 之后
       # 它既不会命中（等于白存），又占 63MB/次，所以不再进缓存，交给 ccache。
+      # 同理也不再缓存 ~/.xmake/cache：它 204MB/次，装的依赖在 packages 里已经有了，
+      # 而 per-sha 的滚动缓存正是把关键缓存挤掉、导致重装 12 分钟的元凶。
       - name: 缓存项目构建中间产物
         uses: actions/cache@v4
         with:
