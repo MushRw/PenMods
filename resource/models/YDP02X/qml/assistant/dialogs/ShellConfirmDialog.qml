@@ -79,7 +79,8 @@ Item {
                 width: parent.width
                 height: Math.min(cmdText.implicitHeight + 12, 60)
                 radius: 8
-                color: YColors.grayNormal
+                // 命令框是嵌在弹窗里的"凹槽"：比弹窗底（grayNormal）更深一档
+                color: YColors.black
                 border.width: 1
                 border.color: "#3F3F3F"
                 clip: true
@@ -109,7 +110,8 @@ Item {
 
                 Rectangle {
                     width: 100; height: 32; radius: 10
-                    color: YColors.grayNormal
+                    // 按钮比弹窗底亮一档，才像可以按
+                    color: YColors.grayButton
                     border.width: 1; border.color: YColors.red
                     Text {
                         anchors.centerIn: parent
@@ -129,7 +131,7 @@ Item {
 
                 Rectangle {
                     width: 100; height: 32; radius: 10
-                    color: YColors.grayNormal
+                    color: YColors.grayButton
                     border.width: 1; border.color: YColors.green
                     Text {
                         anchors.centerIn: parent

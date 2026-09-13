@@ -67,7 +67,8 @@ Item {
 
             Rectangle {
                 width: 100; height: 60; radius: 12
-                color: root.tavilyEnabled ? YColors.blueRect : YColors.grayButton
+                // 开关状态用全局色板的状态红（和输入界面拼音开关一致）
+                color: root.tavilyEnabled ? YColors.red : YColors.grayButton
                 Column {
                     anchors.centerIn: parent
                     spacing: 4

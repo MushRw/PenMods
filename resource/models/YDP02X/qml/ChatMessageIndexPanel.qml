@@ -10,7 +10,7 @@ Rectangle {
     id: id_root
     width: 0
     height: parent ? parent.height : 170
-    color: YColors.grayButton
+    color: YColors.grayNormal
     clip: true
     z: 100
     anchors.right: parent ? parent.right : undefined
@@ -150,7 +150,7 @@ Rectangle {
                 width: 30
                 height: 26
                 radius: 7
-                color: closeIndexMouse.pressed ? YColors.blueRect : "transparent"
+                color: closeIndexMouse.pressed ? YColors.graySwitchOff : "transparent"
                 anchors {
                     right: parent.right
                     verticalCenter: parent.verticalCenter
@@ -196,7 +196,7 @@ Rectangle {
                 width: indexListView.width
                 height: 28
                 radius: 6
-                color: indexMouse.pressed ? YColors.graySwitchOff : YColors.grayNormal
+                color: indexMouse.pressed ? YColors.graySwitchOff : YColors.grayButton
 
                 Behavior on color {
                     ColorAnimation {
@@ -219,7 +219,8 @@ Rectangle {
                         width: 22
                         height: 16
                         radius: 3
-                        color: modelData.isUser ? YColors.blueRect : modelData.isToolCall ? YColors.grayButton : "#3F3F3F"
+                        // 角色标签：用户=状态红，工具调用 #3F3F3F，其余用比条目底更深一档的灰
+                        color: modelData.isUser ? YColors.red : modelData.isToolCall ? "#3F3F3F" : YColors.grayNormal
                         anchors.verticalCenter: parent.verticalCenter
 
                         Text {

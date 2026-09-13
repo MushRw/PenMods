@@ -10,7 +10,7 @@ Rectangle {
     id: id_root
     width: 0
     height: parent ? parent.height : 170
-    color: YColors.grayButton
+    color: YColors.grayNormal
     clip: true
     z: 100
 
@@ -118,7 +118,7 @@ Rectangle {
                 width: 22
                 height: 22
                 radius: 7
-                color: newSessionMouse.pressed ? YColors.blueRect : YColors.grayNormal
+                color: newSessionMouse.pressed ? YColors.graySwitchOff : YColors.grayButton
                 anchors.verticalCenter: parent.verticalCenter
 
                 Text {
@@ -164,10 +164,12 @@ Rectangle {
                 radius: 8
                 color: {
                     if (modelData.id === id_root.activeSessionId)
-                        return "#3F3F3F";
+                        // 当前会话：用全局色板的状态红标出来，一眼看出"就是这条"
+                        return YColors.red;
                     if (sessionMouse.pressed)
                         return YColors.graySwitchOff;
-                    return YColors.grayNormal;
+                    // 面板底是 grayNormal，条目亮一档才像浮在面板上
+                    return YColors.grayButton;
                 }
 
                 Behavior on color {

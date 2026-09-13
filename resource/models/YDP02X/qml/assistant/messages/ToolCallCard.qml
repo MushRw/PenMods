@@ -185,7 +185,8 @@ Item {
         width: cardHeader.width
         anchors.top: cardHeader.bottom
         height: root.expanded ? Math.min(detailText.implicitHeight + 16, 80) : 0
-        color: YColors.grayNormal
+        // 展开的详情区比卡片主体（grayNormal）亮一档，展开/收起时层次看得出来
+        color: YColors.grayButton
         radius: 10
 
         Behavior on height {
