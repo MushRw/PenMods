@@ -203,15 +203,17 @@ YPage {
             }
 
             // 拼音开关：原来靠“长按 abc 键”，改成一键切换更好找
+            // 和返回/确定 一样钉在输入行顶部（固定 30x30）：输入行长高时不能跟着变形/移位
             Rectangle {
                 id: id_pinyin_toggle
                 width: 30
+                height: 30
                 radius: 6
                 color: id_input_page.isPinyinMode ? YColors.blueRect : YColors.grayButton
 
                 anchors.right: parent.right
                 anchors.top: parent.top
-                anchors.bottom: parent.bottom
+                anchors.topMargin: 2
 
                 YTextMedium {
                     anchors.centerIn: parent

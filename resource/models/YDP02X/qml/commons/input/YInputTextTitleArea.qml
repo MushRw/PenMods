@@ -51,8 +51,10 @@ Item {
         sourceSize: Qt.size(24, 24)
         anchors.right: compact ? id_accepted_button_background.left : parent.right
         anchors.rightMargin: compact ? 4 : 0
-        anchors.top: compact ? undefined : parent.top
-        anchors.verticalCenter: compact ? parent.verticalCenter : undefined
+        // compact：输入行会随内容长高（一行 → 两三行），按钮如果垂直居中就会跟着上下跑，
+        // 所以固定钉在输入行顶部（topMargin 2 让它在 34px 单行高度里也居中）。
+        anchors.top: parent.top
+        anchors.topMargin: compact ? 2 : 0
 
         YBackButtonBase {
             anchors.fill: parent
@@ -66,9 +68,10 @@ Item {
     YIconButton {
         id: id_accepted_button_background
         anchors.right: parent.right
+        anchors.top: compact ? parent.top : undefined
+        anchors.topMargin: compact ? 2 : 0
         anchors.bottom: compact ? undefined : parent.bottom
         anchors.bottomMargin: compact ? 0 : 5
-        anchors.verticalCenter: compact ? parent.verticalCenter : undefined
         implicitWidth: 30
         implicitHeight: 30
         radius: 6
