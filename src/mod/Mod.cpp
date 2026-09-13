@@ -40,6 +40,11 @@ Mod::Mod() {
         if (!mCaptureTimer->isActive()) {
             mCaptureTimer->start();
         }
+        // Rime 数据必须在 rime::Backend 初始化之前就位：两者都挂在下游的
+        // beforeUiInitialization 上，而 Mod 的实例化顺序在前，所以这里会先跑。
+        // 否则全新安装的首启里 librime 会先初始化、schema 还没落地，用户得再
+        // 重启一次输入法才能用（实测：部署日志比 Rime 初始化晚 1 秒）。
+        ensureRimeInstalled();
         context->setContextProperty("mod", this);
         qmlRegisterUncreatableType<PageIndex>(
             QML_PACKAGE_NAME,
