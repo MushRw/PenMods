@@ -22,12 +22,17 @@ YPage {
     // ≈ 549px，在 170px 的屏上必须上下滑着找键。
     //
     // 输入行高度按内容自适应：单行 34；输入换行后跟着内容长高（非拼音最多 3 行，拼音模式留出候选行只能到 2 行），
-    // 再长就由输入框自己滚动（YInputTextTitleArea 内已有 ensureVisible 跟随光标）。
-    readonly property int inputRowHeight: Math.min(isPinyinMode ? 46 : 74,
+    // 再长就由输入框自己滚动（YInputTextTitleArea 内已有 ensureVisible 跟随光标，并且可以手指拖动）。
+    readonly property int inputRowHeight: Math.min(isPinyinMode ? 46 : 72,
                                                    Math.max(34, id_input_text_title_area.neededHeight))
     readonly property int candidateRowHeight: 24
     readonly property int gridTopGap: 2
-    readonly property int bottomMargin: 4
+
+    // 键盘贴着屏幕下沿：三行按键固定锚在底部（键 30 高 + 行距 2，与 YInputTextItem /
+    // YInputTextCharsModelBase 保持一致），候选行紧贴键盘上方，输入行从顶部向下长。
+    readonly property int keyRowHeight: 30
+    readonly property int keyRowSpacing: 2
+    readonly property int gridHeight: 3 * keyRowHeight + 2 * keyRowSpacing
 
     RimeWrapper {
         id: id_rime_backend
@@ -222,7 +227,7 @@ YPage {
             }
         }
 
-        // 候选词视图（拼音模式）
+        // 候选词视图（拼音模式）：贴在键盘正上方（键盘锚在屏幕下沿）
         Item {
             id: id_candidate_view
             clip: true
@@ -231,8 +236,8 @@ YPage {
             width: parent.width
             height: visible ? id_input_page.candidateRowHeight : 0
 
-            anchors.top: id_input_row.bottom
-            anchors.topMargin: 4
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: id_input_page.gridHeight + id_input_page.gridTopGap
 
             Rectangle {
                 id: id_bg_rect
@@ -332,8 +337,7 @@ YPage {
         YInputTextLowerChars {
             id: id_input_text_lower_chars
             visible: id_input_page.currentKeyboardItem === this
-            anchors.top: id_candidate_view.visible ? id_candidate_view.bottom : id_input_row.bottom
-            anchors.topMargin: id_input_page.gridTopGap
+            anchors.bottom: parent.bottom
             anchors.left: parent.left
             anchors.right: parent.right
 
@@ -344,8 +348,7 @@ YPage {
         YInputTextUpperChars {
             id: id_input_text_upper_chars
             visible: id_input_page.currentKeyboardItem === this
-            anchors.top: id_candidate_view.visible ? id_candidate_view.bottom : id_input_row.bottom
-            anchors.topMargin: id_input_page.gridTopGap
+            anchors.bottom: parent.bottom
             anchors.left: parent.left
             anchors.right: parent.right
 
@@ -356,8 +359,7 @@ YPage {
         YInputTextNumberChars {
             id: id_input_text_number_chars
             visible: id_input_page.currentKeyboardItem === this
-            anchors.top: id_candidate_view.visible ? id_candidate_view.bottom : id_input_row.bottom
-            anchors.topMargin: id_input_page.gridTopGap
+            anchors.bottom: parent.bottom
             anchors.left: parent.left
             anchors.right: parent.right
 
@@ -368,8 +370,7 @@ YPage {
         YInputTextSymbolChars {
             id: id_input_text_symbol_chars
             visible: id_input_page.currentKeyboardItem === this
-            anchors.top: id_candidate_view.visible ? id_candidate_view.bottom : id_input_row.bottom
-            anchors.topMargin: id_input_page.gridTopGap
+            anchors.bottom: parent.bottom
             anchors.left: parent.left
             anchors.right: parent.right
 

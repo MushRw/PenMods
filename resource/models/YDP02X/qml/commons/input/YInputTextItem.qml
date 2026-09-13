@@ -40,8 +40,12 @@ YMouseArea {
         id_highlight_item_content.text = btnText
         // 注意：id_highlight_item.width/height 绑定到 visible 属性，
         // 在此函数被调用时绑定的值尚未重新求值（仍为 0），因此直接使用常量
-        id_highlight_item.x = globalPos.x + id_input_text_item.width / 2 - 33
-        id_highlight_item.y = globalPos.y + id_input_text_item.height / 2 - 28
+        // 键盘现在贴在屏幕下沿，最下面一行的放大气泡要夹在屏幕内，否则会被裁掉。
+        var host = id_highlight_item.parent
+        var maxX = host ? Math.max(host.width - 66, 0) : 10000
+        var maxY = host ? Math.max(host.height - 56, 0) : 10000
+        id_highlight_item.x = Math.min(Math.max(globalPos.x + id_input_text_item.width / 2 - 33, 0), maxX)
+        id_highlight_item.y = Math.min(Math.max(globalPos.y + id_input_text_item.height / 2 - 28, 0), maxY)
     }
 
     onPressed: {

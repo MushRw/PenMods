@@ -93,7 +93,11 @@ Item {
         contentHeight: id_input_core.contentHeight
         implicitHeight: 35 + id_input_core.height
         clip: true
-        interactive: false
+        // 紧凑键盘下输入框只有 1~3 行高，多行内容必须能上下拖动查看/改前面的行。
+        // 外层页面 Flickable 是 interactive: false，所以这里的拖动不会互相抢。
+        interactive: true
+        flickableDirection: Flickable.VerticalFlick
+        boundsBehavior: Flickable.StopAtBounds
 
         function ensureVisible(r) {
             if (contentX >= r.x)
