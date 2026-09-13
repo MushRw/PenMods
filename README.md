@@ -17,7 +17,7 @@
   - 文件管理器点开视频先显示 bili 风格播放页，点播放才启动播放器
   - 退出键会真正停止播放器，不再残留后台播放
 - **插件系统**：`/userdisk/PenMods/plugins/` 下按目录放插件（QML + 原生库），如 bili、2048、天气
-- **主界面壁纸**、**增强音乐播放器**（lrc 翻译歌词、flac 直接打开）、**中州韵输入法**、**音频守护进程**（`/tmp/audio_wakelocks` 唤醒锁）
+- **主界面壁纸**、**增强音乐播放器**（lrc 翻译歌词、flac 直接打开）、**中州韵输入法**（默认**雾凇拼音**词库，见 [resource/rime/README.md](resource/rime/README.md)）、**音频守护进程**（`/tmp/audio_wakelocks` 唤醒锁）
 - **其他**：列式数据库查询上限调节、A/B 槽切换、快速静音、开机自动挂载可写、vendor_storage 自动修复、OTA 更新
 
 ## 外部播放器（视频）

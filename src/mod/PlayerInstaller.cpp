@@ -21,7 +21,8 @@ constexpr const char* kPlayerMarker  = "/userdisk/mpv/mpv";
 constexpr const char* kPlayerArchive = "/userdata/PenMods/player.zip";
 constexpr const char* kVideoPlayer   = "/userdisk/VideoPlayer";
 constexpr const char* kPlayerWrapper = "/userdisk/mpv/mpv";
-constexpr const char* kRimeMarker    = "/userdisk/Music/Rime/luna_pinyin.schema.yaml";
+constexpr const char* kRimeMarker    = "/userdisk/Music/Rime/rime_ice.schema.yaml";
+constexpr const char* kRimePayload   = "rime_ice.schema.yaml";
 constexpr const char* kRimeArchive   = "/userdata/PenMods/rime.zip";
 
 void repairVideoPlayerLink() {
@@ -85,14 +86,17 @@ void ensureRimeInstalled() {
     spdlog::info("[PlayerInstaller] Rime 数据缺失，从 {} 部署...", kRimeArchive);
     exec("rm -rf /tmp/rime_install && mkdir -p /tmp/rime_install");
     exec(QString("unzip -q -o \"%1\" -d /tmp/rime_install").arg(kRimeArchive));
-    if (!QFile::exists("/tmp/rime_install/luna_pinyin.schema.yaml")) {
-        spdlog::error("[PlayerInstaller] rime.zip 内容不完整（缺少 luna_pinyin.schema.yaml）");
+    if (!QFile::exists(QString("/tmp/rime_install/") + kRimePayload)) {
+        spdlog::error("[PlayerInstaller] rime.zip 内容不完整（缺少 {}）", kRimePayload);
         return;
     }
 
-    exec("mkdir -p /userdisk/Music/Rime && cp -f /tmp/rime_install/* /userdisk/Music/Rime/");
+    // 必须递归拷贝：雾凇拼音的词库在 cn_dicts/、en_dicts/ 子目录里，
+    // 老版本的 `cp -f .../ *` 会把子目录直接丢掉。
+    // `src/.` 的写法保证连同隐藏文件一起复制到目标目录内部。
+    exec("mkdir -p /userdisk/Music/Rime && cp -rf /tmp/rime_install/. /userdisk/Music/Rime/");
     if (QFile::exists(kRimeMarker)) {
-        spdlog::info("[PlayerInstaller] Rime 数据部署完成");
+        spdlog::info("[PlayerInstaller] Rime 数据部署完成（雾凇拼音）");
     } else {
         spdlog::error("[PlayerInstaller] 部署后仍缺少 {}", kRimeMarker);
     }
