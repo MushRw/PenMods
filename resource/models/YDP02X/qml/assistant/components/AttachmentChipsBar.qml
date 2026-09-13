@@ -1,4 +1,5 @@
 import QtQuick 2.12
+import "../../commons"
 
 Rectangle {
     id: root
@@ -31,7 +32,7 @@ Rectangle {
             height: 26
             width: chipContent.implicitWidth + 36
             radius: 6
-            color: isMediaChip ? "YColors.grayButton" : "YColors.blueRect"
+            color: isMediaChip ? YColors.grayButton : YColors.blueRect
 
             Row {
                 id: chipContent
@@ -51,7 +52,7 @@ Rectangle {
                 }
                 Text {
                     text: chipData ? (chipData.label || chipData.name || chipData.type || "") : ""
-                    color: "YColors.white"
+                    color: YColors.white
                     font.pixelSize: 11
                     font.family: root.fontFamily || ""
                     anchors.verticalCenter: parent.verticalCenter
@@ -75,7 +76,7 @@ Rectangle {
                 Text {
                     anchors.centerIn: parent
                     text: "×"
-                    color: "YColors.white"
+                    color: YColors.white
                     font.pixelSize: 12
                     font.bold: true
                 }

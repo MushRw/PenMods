@@ -1,5 +1,6 @@
 import QtQuick 2.12
 import QtGraphicalEffects 1.12
+import "../../commons"
 
 Rectangle {
     id: root
@@ -34,41 +35,41 @@ Rectangle {
 
         property color backgroundColor: {
             switch (type) {
-            case "success": return "YColors.grayNormal";
-            case "warning": return "YColors.grayNormal";
-            case "info":    return "YColors.grayNormal";
+            case "success": return YColors.grayNormal;
+            case "warning": return YColors.grayNormal;
+            case "info":    return YColors.grayNormal;
             case "error":
-            default:        return "YColors.grayNormal";
+            default:        return YColors.grayNormal;
             }
         }
 
         property color borderColor: {
             switch (type) {
-            case "success": return "YColors.green";
-            case "warning": return "YColors.yellow";
-            case "info":    return "YColors.blueText";
+            case "success": return YColors.green;
+            case "warning": return YColors.yellow;
+            case "info":    return YColors.blueText;
             case "error":
-            default:        return "YColors.red";
+            default:        return YColors.red;
             }
         }
 
         property color iconColor: {
             switch (type) {
-            case "success": return "YColors.green";
-            case "warning": return "YColors.yellow";
-            case "info":    return "YColors.blueText";
+            case "success": return YColors.green;
+            case "warning": return YColors.yellow;
+            case "info":    return YColors.blueText;
             case "error":
-            default:        return "YColors.red";
+            default:        return YColors.red;
             }
         }
 
         property color textColor: {
             switch (type) {
-            case "success": return "YColors.green";
-            case "warning": return "YColors.yellow";
-            case "info":    return "YColors.blueText";
+            case "success": return YColors.green;
+            case "warning": return YColors.yellow;
+            case "info":    return YColors.blueText;
             case "error":
-            default:        return "YColors.red";
+            default:        return YColors.red;
             }
         }
     }

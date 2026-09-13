@@ -1,5 +1,6 @@
 import QtQuick 2.12
 import "MathCache.js" as MathCache
+import "../../commons"
 
 // 单个数学公式渲染气泡，调用本地 MathJax 服务（127.0.0.1:3000）
 Item {
@@ -83,7 +84,7 @@ Item {
         id: fallbackText
         visible: root._state === MathCache.ERROR || (!root.serverAvailable && root._state !== MathCache.LOADING)
         text: root.display ? ("$$" + root.latex + "$$") : ("$" + root.latex + "$")
-        color: "YColors.grayText"
+        color: YColors.grayText
         font.pixelSize: 13
         font.family: root.fontFamily || ""
         wrapMode: Text.Wrap
@@ -105,7 +106,7 @@ Item {
                 width: 5
                 height: 5
                 radius: 2.5
-                color: "YColors.blueText"
+                color: YColors.blueText
                 SequentialAnimation on opacity {
                     running: root._state === MathCache.LOADING
                     loops: Animation.Infinite

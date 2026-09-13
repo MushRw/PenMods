@@ -1,4 +1,5 @@
 import QtQuick 2.12
+import "../../commons"
 
 Item {
     id: root
@@ -50,9 +51,9 @@ Item {
         height: contentCol.height + 24
         anchors.centerIn: parent
         radius: 16
-        color: "YColors.grayNormal"
+        color: YColors.grayNormal
         border.width: 1
-        border.color: "YColors.orange"
+        border.color: YColors.orange
 
         Column {
             id: contentCol
@@ -68,7 +69,7 @@ Item {
                 text: root.queue.length > 0
                     ? "AI 请求执行命令 (" + (root.queue.length + 1) + ")"
                     : "AI 请求执行命令"
-                color: "YColors.orange"
+                color: YColors.orange
                 font.pixelSize: 13
                 font.bold: true
                 font.family: root.fontFamily || ""
@@ -78,7 +79,7 @@ Item {
                 width: parent.width
                 height: Math.min(cmdText.implicitHeight + 12, 60)
                 radius: 8
-                color: "YColors.grayNormal"
+                color: YColors.grayNormal
                 border.width: 1
                 border.color: "#3F3F3F"
                 clip: true
@@ -93,7 +94,7 @@ Item {
                     Text {
                         id: cmdText
                         text: root.command
-                        color: "YColors.white"
+                        color: YColors.white
                         font.pixelSize: 11
                         font.family: "monospace"
                         wrapMode: Text.Wrap
@@ -108,12 +109,12 @@ Item {
 
                 Rectangle {
                     width: 100; height: 32; radius: 10
-                    color: "YColors.grayNormal"
-                    border.width: 1; border.color: "YColors.red"
+                    color: YColors.grayNormal
+                    border.width: 1; border.color: YColors.red
                     Text {
                         anchors.centerIn: parent
                         text: "拒绝"
-                        color: "YColors.red"
+                        color: YColors.red
                         font.pixelSize: 13
                         font.family: root.fontFamily || ""
                     }
@@ -128,12 +129,12 @@ Item {
 
                 Rectangle {
                     width: 100; height: 32; radius: 10
-                    color: "YColors.grayNormal"
-                    border.width: 1; border.color: "YColors.green"
+                    color: YColors.grayNormal
+                    border.width: 1; border.color: YColors.green
                     Text {
                         anchors.centerIn: parent
                         text: "执行"
-                        color: "YColors.green"
+                        color: YColors.green
                         font.pixelSize: 13
                         font.family: root.fontFamily || ""
                     }

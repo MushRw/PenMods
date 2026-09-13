@@ -1,4 +1,5 @@
 import QtQuick 2.12
+import "../../commons"
 
 Item {
     id: root
@@ -21,25 +22,25 @@ Item {
         radius: root.expanded ? 0 : 10
         color: {
             if (root.toolState === "searching")
-                return "YColors.grayNormal";
+                return YColors.grayNormal;
             if (root.toolState === "pending")
-                return "YColors.grayNormal";
+                return YColors.grayNormal;
             if (root.toolState === "done")
-                return "YColors.grayNormal";
+                return YColors.grayNormal;
             if (root.toolState === "error")
-                return "YColors.grayNormal";
-            return "YColors.grayNormal";
+                return YColors.grayNormal;
+            return YColors.grayNormal;
         }
         border.width: 1
         border.color: {
             if (root.toolState === "searching")
-                return "YColors.grayButton";
+                return YColors.grayButton;
             if (root.toolState === "pending")
-                return "YColors.yellow";
+                return YColors.yellow;
             if (root.toolState === "done")
-                return "YColors.green";
+                return YColors.green;
             if (root.toolState === "error")
-                return "YColors.red";
+                return YColors.red;
             return "#3F3F3F";
         }
         clip: true
@@ -68,14 +69,14 @@ Item {
 
                 property string iconColor: {
                     if (root.toolState === "searching")
-                        return "YColors.blueText";
+                        return YColors.blueText;
                     if (root.toolState === "pending")
-                        return "YColors.orange";
+                        return YColors.orange;
                     if (root.toolState === "done")
-                        return "YColors.green";
+                        return YColors.green;
                     if (root.toolState === "error")
-                        return "YColors.red";
-                    return "YColors.grayText";
+                        return YColors.red;
+                    return YColors.grayText;
                 }
 
                 onPaint: {
@@ -119,14 +120,14 @@ Item {
                 textFormat: Text.PlainText
                 color: {
                     if (root.toolState === "searching")
-                        return "YColors.blueText";
+                        return YColors.blueText;
                     if (root.toolState === "pending")
-                        return "YColors.orange";
+                        return YColors.orange;
                     if (root.toolState === "done")
-                        return "YColors.green";
+                        return YColors.green;
                     if (root.toolState === "error")
-                        return "YColors.red";
-                    return "YColors.grayText";
+                        return YColors.red;
+                    return YColors.grayText;
                 }
                 font.pixelSize: 12
                 font.family: root.fontFamily || ""
@@ -148,7 +149,7 @@ Item {
             onPaint: {
                 var ctx = getContext("2d");
                 ctx.reset();
-                ctx.strokeStyle = "YColors.grayText";
+                ctx.strokeStyle = YColors.grayText;
                 ctx.lineWidth = 1.5;
                 ctx.lineCap = "round";
                 ctx.lineJoin = "round";
@@ -184,7 +185,7 @@ Item {
         width: cardHeader.width
         anchors.top: cardHeader.bottom
         height: root.expanded ? Math.min(detailText.implicitHeight + 16, 80) : 0
-        color: "YColors.grayNormal"
+        color: YColors.grayNormal
         radius: 10
 
         Behavior on height {
@@ -217,7 +218,7 @@ Item {
                 id: detailText
                 width: detailFlick.width
                 text: root.rawText
-                color: "YColors.grayText"
+                color: YColors.grayText
                 font.pixelSize: 10
                 font.family: "Microsoft YaHei"
                 wrapMode: Text.Wrap

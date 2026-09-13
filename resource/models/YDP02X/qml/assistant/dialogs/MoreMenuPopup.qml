@@ -1,4 +1,5 @@
 import QtQuick 2.12
+import "../../commons"
 
 Item {
     id: root
@@ -43,7 +44,7 @@ Item {
         id: menuContent
         width: 260
         height: 150
-        color: "YColors.grayNormal"
+        color: YColors.grayNormal
         radius: 20
         anchors.centerIn: parent
         scale: 0.8
@@ -66,7 +67,7 @@ Item {
 
             Rectangle {
                 width: 100; height: 60; radius: 12
-                color: root.tavilyEnabled ? "YColors.blueRect" : "YColors.grayButton"
+                color: root.tavilyEnabled ? YColors.blueRect : YColors.grayButton
                 Column {
                     anchors.centerIn: parent
                     spacing: 4
@@ -76,7 +77,7 @@ Item {
                         onPaint: {
                             var ctx = getContext("2d");
                             ctx.reset();
-                            ctx.strokeStyle = root.tavilyEnabled ? "YColors.white" : "YColors.grayText";
+                            ctx.strokeStyle = root.tavilyEnabled ? YColors.white : YColors.grayText;
                             ctx.lineWidth = 2;
                             ctx.lineCap = "round";
                             var cx = 9, cy = 9, r = 6;
@@ -109,7 +110,7 @@ Item {
 
             Rectangle {
                 width: 100; height: 60; radius: 12
-                color: "YColors.grayButton"
+                color: YColors.grayButton
                 Column {
                     anchors.centerIn: parent
                     spacing: 4
@@ -137,7 +138,7 @@ Item {
 
             Rectangle {
                 width: 100; height: 60; radius: 12
-                color: "YColors.grayButton"
+                color: YColors.grayButton
                 Column {
                     anchors.centerIn: parent
                     spacing: 4
@@ -165,7 +166,7 @@ Item {
 
             Rectangle {
                 width: 100; height: 60; radius: 12
-                color: "YColors.grayButton"
+                color: YColors.grayButton
                 Column {
                     anchors.centerIn: parent
                     spacing: 4

@@ -1,4 +1,5 @@
 import QtQuick 2.12
+import "../../commons"
 
 Item {
     id: root
@@ -51,7 +52,7 @@ Item {
         x: 8
         anchors.verticalCenter: parent.verticalCenter
         radius: 16
-        color: "YColors.grayNormal"
+        color: YColors.grayNormal
 
         MixedContentBubble {
             id: mixedBubble

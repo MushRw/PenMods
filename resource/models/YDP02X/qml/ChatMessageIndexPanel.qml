@@ -1,5 +1,6 @@
 import QtQuick 2.12
 import com.github.penuniverse 1.0
+import "commons"
 
 /*
  * ChatMessageIndexPanel - 当前会话消息索引面板
@@ -9,7 +10,7 @@ Rectangle {
     id: id_root
     width: 0
     height: parent ? parent.height : 170
-    color: "YColors.grayButton"
+    color: YColors.grayButton
     clip: true
     z: 100
     anchors.right: parent ? parent.right : undefined
@@ -134,7 +135,7 @@ Rectangle {
 
             Text {
                 text: "消息索引"
-                color: "YColors.white"
+                color: YColors.white
                 font.pixelSize: 12
                 font.family: qmlGlobal.fontFamilyZhCn
                 font.bold: true
@@ -149,7 +150,7 @@ Rectangle {
                 width: 30
                 height: 26
                 radius: 7
-                color: closeIndexMouse.pressed ? "YColors.blueRect" : "transparent"
+                color: closeIndexMouse.pressed ? YColors.blueRect : "transparent"
                 anchors {
                     right: parent.right
                     verticalCenter: parent.verticalCenter
@@ -157,7 +158,7 @@ Rectangle {
 
                 Text {
                     text: "✕"
-                    color: "YColors.grayText"
+                    color: YColors.grayText
                     font.pixelSize: 14
                     font.family: qmlGlobal.fontFamilyZhCn
                     anchors.centerIn: parent
@@ -195,7 +196,7 @@ Rectangle {
                 width: indexListView.width
                 height: 28
                 radius: 6
-                color: indexMouse.pressed ? "YColors.graySwitchOff" : "YColors.grayNormal"
+                color: indexMouse.pressed ? YColors.graySwitchOff : YColors.grayNormal
 
                 Behavior on color {
                     ColorAnimation {
@@ -218,12 +219,12 @@ Rectangle {
                         width: 22
                         height: 16
                         radius: 3
-                        color: modelData.isUser ? "YColors.blueRect" : modelData.isToolCall ? "YColors.grayButton" : "#3F3F3F"
+                        color: modelData.isUser ? YColors.blueRect : modelData.isToolCall ? YColors.grayButton : "#3F3F3F"
                         anchors.verticalCenter: parent.verticalCenter
 
                         Text {
                             text: modelData.role
-                            color: "YColors.white"
+                            color: YColors.white
                             font.pixelSize: 9
                             font.family: qmlGlobal.fontFamilyZhCn
                             font.bold: true
@@ -234,7 +235,7 @@ Rectangle {
                     // 消息预览
                     Text {
                         text: modelData.preview
-                        color: "YColors.grayText"
+                        color: YColors.grayText
                         font.pixelSize: 10
                         font.family: qmlGlobal.fontFamilyZhCn
                         elide: Text.ElideRight

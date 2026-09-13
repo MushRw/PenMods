@@ -1,4 +1,5 @@
 import QtQuick 2.12
+import "../../commons"
 
 Item {
     id: root
@@ -7,7 +8,7 @@ Item {
     property real edgeWidth: 40
     property real threshold: 60
     property bool gestureEnabled: true
-    property color indicatorColor: "YColors.blueRect"
+    property color indicatorColor: YColors.blueRect
 
     signal triggered()
 

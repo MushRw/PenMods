@@ -1,4 +1,5 @@
 import QtQuick 2.12
+import "../../commons"
 
 Rectangle {
     id: root
@@ -8,7 +9,7 @@ Rectangle {
     width: 64
     height: 36
     radius: 16
-    color: "YColors.grayNormal"
+    color: YColors.grayNormal
 
     Row {
         anchors.centerIn: parent
@@ -16,7 +17,7 @@ Rectangle {
 
         Rectangle {
             width: 8; height: 8; radius: 4
-            color: "YColors.grayText"
+            color: YColors.grayText
             anchors.verticalCenter: parent.verticalCenter
 
             SequentialAnimation on scale {
@@ -29,7 +30,7 @@ Rectangle {
         }
         Rectangle {
             width: 8; height: 8; radius: 4
-            color: "YColors.grayText"
+            color: YColors.grayText
             anchors.verticalCenter: parent.verticalCenter
 
             SequentialAnimation on scale {
@@ -43,7 +44,7 @@ Rectangle {
         }
         Rectangle {
             width: 8; height: 8; radius: 4
-            color: "YColors.grayText"
+            color: YColors.grayText
             anchors.verticalCenter: parent.verticalCenter
 
             SequentialAnimation on scale {

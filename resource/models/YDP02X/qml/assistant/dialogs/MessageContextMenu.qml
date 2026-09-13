@@ -1,5 +1,6 @@
 import QtQuick 2.12
 import QtGraphicalEffects 1.12
+import "../../commons"
 
 Item {
     id: root
@@ -164,7 +165,7 @@ Item {
 
                 Text {
                     text: "重新生成"
-                    color: "YColors.blueRect"
+                    color: YColors.blueRect
                     font.pixelSize: 16
                     font.family: root.fontFamily || ""
                     anchors.centerIn: parent
@@ -195,7 +196,7 @@ Item {
 
                 Text {
                     text: "删除本条"
-                    color: "YColors.red"
+                    color: YColors.red
                     font.pixelSize: 16
                     font.family: root.fontFamily || ""
                     anchors.centerIn: parent
@@ -221,7 +222,7 @@ Item {
 
                 Text {
                     text: "删除本条及后续"
-                    color: "YColors.red"
+                    color: YColors.red
                     font.pixelSize: 16
                     font.family: root.fontFamily || ""
                     anchors.centerIn: parent

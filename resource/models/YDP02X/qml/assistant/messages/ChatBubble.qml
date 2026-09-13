@@ -1,4 +1,5 @@
 import QtQuick 2.12
+import "../../commons"
 
 Rectangle {
     id: root
@@ -20,7 +21,7 @@ Rectangle {
     x: isUser ? (containerWidth - width - 8) : 8
 
     radius: 16
-    color: isUser ? "YColors.blueRect" : "YColors.grayNormal"
+    color: isUser ? YColors.blueRect : YColors.grayNormal
 
     Behavior on width {
         enabled: !root.isComplete
@@ -42,12 +43,12 @@ Rectangle {
         width: Math.min(implicitWidth, root.maxBubbleWidth - 24)
         anchors.centerIn: parent
         wrapMode: Text.Wrap
-        color: "YColors.white"
+        color: YColors.white
         font.pixelSize: 14
         font.family: root.fontFamily || ""
         lineHeight: 1.3
         horizontalAlignment: Text.AlignLeft
         textFormat: (root.isUser || !root.isComplete) ? Text.PlainText : Text.RichText
-        linkColor: "YColors.blueText"
+        linkColor: YColors.blueText
     }
 }

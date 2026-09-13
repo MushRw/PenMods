@@ -1,5 +1,6 @@
 import QtQuick 2.12
 import com.github.penuniverse 1.0
+import "commons"
 
 /*
  * ChatSessionListPanel - 会话历史列表面板
@@ -9,7 +10,7 @@ Rectangle {
     id: id_root
     width: 0
     height: parent ? parent.height : 170
-    color: "YColors.grayButton"
+    color: YColors.grayButton
     clip: true
     z: 100
 
@@ -100,7 +101,7 @@ Rectangle {
 
             Text {
                 text: "对话历史"
-                color: "YColors.white"
+                color: YColors.white
                 font.pixelSize: 12
                 font.family: qmlGlobal.fontFamilyZhCn
                 font.bold: true
@@ -117,12 +118,12 @@ Rectangle {
                 width: 22
                 height: 22
                 radius: 7
-                color: newSessionMouse.pressed ? "YColors.blueRect" : "YColors.grayNormal"
+                color: newSessionMouse.pressed ? YColors.blueRect : YColors.grayNormal
                 anchors.verticalCenter: parent.verticalCenter
 
                 Text {
                     text: "+"
-                    color: "YColors.white"
+                    color: YColors.white
                     font.pixelSize: 15
                     font.family: qmlGlobal.fontFamilyZhCn
                     font.bold: true
@@ -165,8 +166,8 @@ Rectangle {
                     if (modelData.id === id_root.activeSessionId)
                         return "#3F3F3F";
                     if (sessionMouse.pressed)
-                        return "YColors.graySwitchOff";
-                    return "YColors.grayNormal";
+                        return YColors.graySwitchOff;
+                    return YColors.grayNormal;
                 }
 
                 Behavior on color {
@@ -187,7 +188,7 @@ Rectangle {
 
                     Text {
                         text: modelData.title || "未命名对话"
-                        color: "YColors.white"
+                        color: YColors.white
                         font.pixelSize: 11
                         font.family: qmlGlobal.fontFamilyZhCn
                         font.bold: modelData.id === id_root.activeSessionId
@@ -197,7 +198,7 @@ Rectangle {
 
                     Text {
                         text: (modelData.messageCount || 0) + " 条消息"
-                        color: "YColors.graySwitchOff"
+                        color: YColors.graySwitchOff
                         font.pixelSize: 9
                         font.family: qmlGlobal.fontFamilyZhCn
                     }
@@ -220,7 +221,7 @@ Rectangle {
 
                     Text {
                         text: "×"
-                        color: "YColors.red"
+                        color: YColors.red
                         font.pixelSize: 14
                         font.family: qmlGlobal.fontFamilyZhCn
                         font.bold: true
