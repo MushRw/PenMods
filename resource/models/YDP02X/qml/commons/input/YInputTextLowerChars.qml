@@ -32,7 +32,7 @@ YInputTextCharsModelBase {
     YInputTextItem { text: "b" }
     YInputTextItem { text: "n" }
     YInputTextItem { text: "m" }
-    YInputTextItem { text: "空格"; action: "space" }
+    YInputTextItem { text: "空"; action: "space" }
     YInputTextItem { text: "↵"; action: "enter" }
-    YInputTextItem { text: "?123"; action: "switchNumber" }
+    YInputTextItem { text: "123"; action: "switchNumber" }
 }

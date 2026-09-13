@@ -17,10 +17,14 @@ YPage {
     property int currentPinyinLen: 0
 
     // 320x170 一屏放完：
-    // 输入行 34 + 候选行 24(+4) + 键盘 3 行(3*30 + 2*2 = 94) + 底边距 4 ≈ 160
+    // 输入行 34~74 + 候选行 24(+4) + 键盘 3 行(3*30 + 2*2 = 94) ≈ 156~168
     // 原来：标题 70 + 候选 64 + 功能键组 46 + 字母网格(56x46 的键、一行 5 个 → 6 行 301px)
     // ≈ 549px，在 170px 的屏上必须上下滑着找键。
-    readonly property int inputRowHeight: 34
+    //
+    // 输入行高度按内容自适应：单行 34；输入换行后跟着内容长高（非拼音最多 3 行，拼音模式留出候选行只能到 2 行），
+    // 再长就由输入框自己滚动（YInputTextTitleArea 内已有 ensureVisible 跟随光标）。
+    readonly property int inputRowHeight: Math.min(isPinyinMode ? 46 : 74,
+                                                   Math.max(34, id_input_text_title_area.neededHeight))
     readonly property int candidateRowHeight: 24
     readonly property int gridTopGap: 2
     readonly property int bottomMargin: 4

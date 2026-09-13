@@ -116,7 +116,12 @@ YMouseArea {
 
     YTextMedium {
         id: id_text_item
-        font.pixelSize: 16
+        // 多字符标签（abc / 123）在 28px 宽的键里会顶出边框，所以：
+        // 1) 多字符统一缩到 12px；2) 限制宽度 + 居中 + 溢出省略，绝不越界。
+        width: Math.max(id_input_text_item.width - 4, 8)
+        horizontalAlignment: Text.AlignHCenter
+        elide: Text.ElideRight
+        font.pixelSize: id_input_text_item.text.length > 1 ? 12 : 16
         anchors.centerIn: parent
         text: id_input_text_item.text
     }

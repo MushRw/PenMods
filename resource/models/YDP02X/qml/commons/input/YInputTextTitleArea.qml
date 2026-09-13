@@ -12,6 +12,10 @@ Item {
     property int minHeight: 70
     height: Math.max(id_input_core_background.contentHeight, minHeight)
 
+    // 输入内容实际需要的高度：YInputPage 用它把输入行按行数撑高（多行输入时能看到换行效果）。
+    // 只依赖 TextEdit 的文档高度（由文本和宽度决定），不依赖自身高度，因此不会和 anchors 形成绑定环。
+    readonly property int neededHeight: Math.max(id_input_core.contentHeight + 8, 34)
+
     readonly property bool acceptabled: id_input_core.length
     property alias text: id_input_core.text
     property alias placeHolderText: id_placeholder_text.text
