@@ -21,10 +21,10 @@ YPage {
     // 原来：标题 70 + 候选 64 + 功能键组 46 + 字母网格(56x46 的键、一行 5 个 → 6 行 301px)
     // ≈ 549px，在 170px 的屏上必须上下滑着找键。
     //
-    // 输入行高度按内容自适应：单行 38；换行后跟着内容长高（拼音模式要给候选行留位置，
-    // 封顶 42；非拼音可以到 68），再长就由输入框自己滚动（可以手指拖动）。
+    // 输入行高度按内容自适应：空/单行 28（贴着一行文字，不空出一截）；换行后跟着内容长高
+    // （拼音模式要给候选行留位置，封顶 42；非拼音可以到 68），再长由输入框自己滚动。
     readonly property int inputRowHeight: Math.min(isPinyinMode ? 42 : 68,
-                                                   Math.max(38, id_input_text_title_area.neededHeight))
+                                                   Math.max(28, id_input_text_title_area.neededHeight))
     readonly property int candidateRowHeight: 24
     readonly property int gridTopGap: 2
     // 底边距：留 2px，让最下面一行按键的圆角不被屏幕边缘切掉（原来贴到 0，看起来像被裁了）
@@ -193,7 +193,10 @@ YPage {
                 minHeight: id_input_page.inputRowHeight
 
                 anchors.left: parent.left
+                // 给「确定」和右边的「拼」之间留出与「返回 / 确定」一致的 4px 间隔
+                // （原来标题区右边界正好压在「拼」的左边缘上，两个键贴死）
                 anchors.right: id_pinyin_toggle.left
+                anchors.rightMargin: 4
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
 
