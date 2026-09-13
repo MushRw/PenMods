@@ -96,10 +96,10 @@ jobs:
           token = os.environ["GH_TOKEN"]
           # 每个前缀保留的份数；0 = 全删（build-objs 已不再缓存，只清历史遗留）
           keep = {
+              "xmake-cache-": 2,
               "build-objs-": 2,
               "xmake-packages-": 2,
               "qt-aarch64-": 2,
-              "xmake-cache-": 0,
               "build-gens-": 0,
               "ccache-": 0,
           }
@@ -147,8 +147,17 @@ jobs:
           restore-keys: |
             xmake-packages-
 
-      # 有了 build.fingerprint（按内容哈希判断是否重编），这份 .objs 才是真正有用的：
-      # 只改一两个 cpp 时，其余目标文件会被直接复用。
+      # 有了 xmake 自带的编译缓存（--policies=build.ccache,build.ccache.global_storage），
+      # 全局缓存目录就在 XMAKE_CACHE_DIR 下，必须一起缓存，否则每次都全量重编
+      # （实测 54 个 cpp + 57 个 moc 全部重编，约 4~7 分钟）。
+      - name: 缓存 Xmake 编译缓存
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.XMAKE_CACHE_DIR }}
+          key: xmake-cache-${{ env.BUILD_PLATFORM }}-${{ env.BUILD_MODE }}-${{ github.sha }}
+          restore-keys: |
+            xmake-cache-${{ env.BUILD_PLATFORM }}-${{ env.BUILD_MODE }}-
+
       - name: 缓存项目构建中间产物
         uses: actions/cache@v4
         with:
@@ -192,7 +201,7 @@ jobs:
             --build-platform=${{ env.BUILD_PLATFORM }} \
             --target-channel=${{ env.TARGET_CHANNEL }} \
             --toolchain=zig \
-            --policies=build.fingerprint \
+            --policies=build.ccache,build.ccache.global_storage \
             -m ${{ env.BUILD_MODE }} \
             -y \
             --cross=aarch64-linux-gnu.2.27
