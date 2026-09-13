@@ -150,28 +150,16 @@ YBackground {
 
     anchors.fill: parent
 
-    // 壁纸控制：通过 WallpaperManager 管理
+    // 壁纸：直接绑定 WallpaperManager 的状态，页面第一帧就是正确的壁纸。
+    // 原来是 source 固定默认 bg.png，再在 Component.onCompleted / currentWallpaperChanged
+    // 里改成自定义路径：开机时默认壁纸已经画出来了，Behavior 还要先淡出再淡入，肉眼就是闪一下。
+    // 绑定写法下初始值不触发 Behavior 动画，只有之后换壁纸才淡入淡出。
     Connections {
         target: wallpaperManager
         ignoreUnknownSignals: true
+        // 换壁纸就清掉"加载失败回退默认图"的标记，否则会一直停在默认图上
         function onCurrentWallpaperChanged() {
-            applyWallpaper();
-        }
-    }
-
-    function applyWallpaper() {
-        var path = wallpaperManager.currentWallpaper || "";
-        if (wallpaperManager.wallpaperMode === 0) {
-            // 无壁纸模式：不显示任何图片（纯黑）
-            id_bg_image.source = "";
-        } else if (path.length > 0 && path.indexOf("/") === 0) {
-            // 使用文件路径壁纸
-            id_bg_image.source = "file://" + path;
-        } else if (path.length > 0) {
-            id_bg_image.source = id_bg_image.defaultPath;
-        } else {
-            // 模式非0但无壁纸路径：使用默认背景
-            id_bg_image.source = id_bg_image.defaultPath;
+            id_bg_image.fallbackToDefault = false;
         }
     }
 
@@ -182,7 +170,24 @@ YBackground {
 
         property string defaultPath: "qrc:/images/background/bg.png"
 
-        source: defaultPath
+        // 加载失败时回退到默认壁纸（不直接写 source，避免打断上面的绑定）
+        property bool fallbackToDefault: false
+
+        source: {
+            if (fallbackToDefault) {
+                return defaultPath;
+            }
+            if (wallpaperManager.wallpaperMode === 0) {
+                // 无壁纸模式：不显示任何图片（纯黑）
+                return "";
+            }
+            var path = wallpaperManager.currentWallpaper || "";
+            if (path.length > 0 && path.indexOf("/") === 0) {
+                // 文件路径壁纸
+                return "file://" + path;
+            }
+            return defaultPath;
+        }
 
         Behavior on source {
             SequentialAnimation {
@@ -207,7 +212,7 @@ YBackground {
 
         onStatusChanged: {
             if (status === Image.Error) {
-                source = defaultPath;
+                fallbackToDefault = true;
             }
         }
     }
@@ -464,8 +469,8 @@ YBackground {
 
     Component.onCompleted: {
         refreshPluginDrawer();
-        // 初始化时应用壁纸
-        applyWallpaper();
+        // 壁纸由 id_bg_image.source 的绑定负责，这里不再需要手动 applyWallpaper()
+        // （手动赋值会打断绑定，而且会先渲染默认壁纸再淡出）
     }
 
     YDynamicPageStack {
