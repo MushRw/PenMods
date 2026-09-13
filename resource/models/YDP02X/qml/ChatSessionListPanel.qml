@@ -200,7 +200,8 @@ Rectangle {
 
                     Text {
                         text: (modelData.messageCount || 0) + " 条消息"
-                        color: YColors.graySwitchOff
+                        // 浅色：原来用 graySwitchOff(#515259) 太暗，读不出来
+                        color: YColors.grayText
                         font.pixelSize: 9
                         font.family: qmlGlobal.fontFamilyZhCn
                     }

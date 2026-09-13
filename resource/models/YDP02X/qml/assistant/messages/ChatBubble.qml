@@ -21,7 +21,7 @@ Rectangle {
     x: isUser ? (containerWidth - width - 8) : 8
 
     radius: 16
-    color: isUser ? YColors.blueRect : YColors.grayNormal
+    color: isUser ? YColors.red : YColors.grayNormal
 
     Behavior on width {
         enabled: !root.isComplete
@@ -49,6 +49,6 @@ Rectangle {
         lineHeight: 1.3
         horizontalAlignment: Text.AlignLeft
         textFormat: (root.isUser || !root.isComplete) ? Text.PlainText : Text.RichText
-        linkColor: YColors.blueText
+        linkColor: YColors.red
     }
 }

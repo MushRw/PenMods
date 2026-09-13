@@ -8,7 +8,7 @@ Item {
     property real edgeWidth: 40
     property real threshold: 60
     property bool gestureEnabled: true
-    property color indicatorColor: YColors.blueRect
+    property color indicatorColor: YColors.red
 
     signal triggered()
 

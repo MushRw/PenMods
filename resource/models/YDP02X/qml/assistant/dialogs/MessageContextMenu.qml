@@ -165,7 +165,7 @@ Item {
 
                 Text {
                     text: "重新生成"
-                    color: YColors.blueRect
+                    color: YColors.red
                     font.pixelSize: 16
                     font.family: root.fontFamily || ""
                     anchors.centerIn: parent

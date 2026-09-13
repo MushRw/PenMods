@@ -370,7 +370,7 @@ Item {
             // 四角手柄 (标准 8px radius, Youdao 风格)
             Rectangle {
                 x: root.cropX * parent.width - 8; y: root.cropY * parent.height - 8
-                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: YColors.blueRect
+                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: YColors.red
                 MouseArea {
                     anchors.fill: parent; anchors.margins: -10; preventStealing: true
                     onPositionChanged: {
@@ -385,7 +385,7 @@ Item {
             }
             Rectangle {
                 x: (root.cropX + root.cropW) * parent.width - 8; y: root.cropY * parent.height - 8
-                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: YColors.blueRect
+                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: YColors.red
                 MouseArea {
                     anchors.fill: parent; anchors.margins: -10; preventStealing: true
                     onPositionChanged: {
@@ -400,7 +400,7 @@ Item {
             }
             Rectangle {
                 x: root.cropX * parent.width - 8; y: (root.cropY + root.cropH) * parent.height - 8
-                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: YColors.blueRect
+                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: YColors.red
                 MouseArea {
                     anchors.fill: parent; anchors.margins: -10; preventStealing: true
                     onPositionChanged: {
@@ -414,7 +414,7 @@ Item {
             }
             Rectangle {
                 x: (root.cropX + root.cropW) * parent.width - 8; y: (root.cropY + root.cropH) * parent.height - 8
-                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: YColors.blueRect
+                width: 16; height: 16; radius: 8; color: "white"; border.width: 1.5; border.color: YColors.red
                 MouseArea {
                     anchors.fill: parent; anchors.margins: -10; preventStealing: true
                     onPositionChanged: {
@@ -639,7 +639,7 @@ Item {
             Row {
                 anchors.centerIn: parent; spacing: 12
                 Rectangle {
-                    width: 32; height: 20; radius: 10; color: YColors.blueRect
+                    width: 32; height: 20; radius: 10; color: YColors.red
                     Text { anchors.centerIn: parent; text: "−"; color: "white"; font.pixelSize: 13; font.bold: true }
                     MouseArea { anchors.fill: parent; onClicked: {
                         setZoom(zoomLevel - 0.25);
@@ -647,7 +647,7 @@ Item {
                 }
                 Text { anchors.verticalCenter: parent.verticalCenter; text: Math.round(zoomLevel * 100) + "%"; color: "white"; font.pixelSize: 10; font.family: qmlGlobal.fontFamilyZhCn }
                 Rectangle {
-                    width: 32; height: 20; radius: 10; color: YColors.blueRect
+                    width: 32; height: 20; radius: 10; color: YColors.red
                     Text { anchors.centerIn: parent; text: "+"; color: "white"; font.pixelSize: 13; font.bold: true }
                     MouseArea { anchors.fill: parent; onClicked: {
                         setZoom(zoomLevel + 0.25);
@@ -657,7 +657,7 @@ Item {
 
             YButton {
                 anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
-                width: 64; height: 22; pixelSize: 10; color: YColors.blueRect
+                width: 64; height: 22; pixelSize: 10; color: YColors.red
                 border.width: 0
                 text: "确认裁剪 ✓"; textColor: "white"
                 onClicked: onSaveCurrent()
@@ -671,13 +671,13 @@ Item {
 
             YButton {
                 width: 64; height: 22; pixelSize: 10; color: YColors.grayNormal
-                border.width: 1; border.color: YColors.blueRect
+                border.width: 1; border.color: YColors.red
                 text: "水平拼接"; textColor: "white"
                 onClicked: onDirectionSelected("horizontal")
             }
             YButton {
                 width: 64; height: 22; pixelSize: 10; color: YColors.grayNormal
-                border.width: 1; border.color: YColors.blueRect
+                border.width: 1; border.color: YColors.red
                 text: "竖直拼接"; textColor: "white"
                 onClicked: onDirectionSelected("vertical")
             }
@@ -704,7 +704,7 @@ Item {
 
             YButton {
                 anchors.centerIn: parent
-                width: 64; height: 22; pixelSize: 10; color: YColors.blueRect
+                width: 64; height: 22; pixelSize: 10; color: YColors.red
                 border.width: 0
                 text: "继续拍摄"; textColor: "white"
                 enabled: capturedImages.length < maxFrames
@@ -728,7 +728,7 @@ Item {
             YButton {
                 anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
                 width: 64; height: 22; pixelSize: 10; color: YColors.grayNormal
-                border.width: 1; border.color: YColors.blueRect
+                border.width: 1; border.color: YColors.red
                 text: "返回预览"; textColor: "white"
                 onClicked: onReturnToOverview()
             }

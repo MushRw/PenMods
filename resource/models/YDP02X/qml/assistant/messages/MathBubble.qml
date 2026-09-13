@@ -106,7 +106,7 @@ Item {
                 width: 5
                 height: 5
                 radius: 2.5
-                color: YColors.blueText
+                color: YColors.red
                 SequentialAnimation on opacity {
                     running: root._state === MathCache.LOADING
                     loops: Animation.Infinite

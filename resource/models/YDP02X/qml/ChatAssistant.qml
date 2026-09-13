@@ -897,7 +897,7 @@ YPage {
                     width: 120
                     height: 36
                     radius: 18
-                    color: YColors.blueRect
+                    color: YColors.red
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 20

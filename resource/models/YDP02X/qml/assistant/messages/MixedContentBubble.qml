@@ -384,7 +384,7 @@ Column {
             font.pixelSize: 14
             font.family: root.fontFamily || ""
             lineHeight: 1.3
-            linkColor: "#509DEB"
+            linkColor: "#F03043"
             verticalAlignment: Text.AlignVCenter
         }
     }
@@ -417,8 +417,8 @@ Column {
             return ph;
         });
 
-        t = t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<a href="$2" style="color:#509DEB">[$1]</a>');
-        t = t.replace(/\[([^\]]+?)\]\(([^)]+?)\)/g, '<a href="$2" style="color:#509DEB;text-decoration:none">$1</a>');
+        t = t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<a href="$2" style="color:#F03043">[$1]</a>');
+        t = t.replace(/\[([^\]]+?)\]\(([^)]+?)\)/g, '<a href="$2" style="color:#F03043;text-decoration:none">$1</a>');
         t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<b><i>$1</i></b>');
         t = t.replace(/___(.+?)___/g, '<b><i>$1</i></b>');
         t = t.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');

@@ -47,7 +47,7 @@ Rectangle {
             switch (type) {
             case "success": return YColors.green;
             case "warning": return YColors.yellow;
-            case "info":    return YColors.blueText;
+            case "info":    return YColors.red;
             case "error":
             default:        return YColors.red;
             }
@@ -57,7 +57,7 @@ Rectangle {
             switch (type) {
             case "success": return YColors.green;
             case "warning": return YColors.yellow;
-            case "info":    return YColors.blueText;
+            case "info":    return YColors.red;
             case "error":
             default:        return YColors.red;
             }
@@ -67,7 +67,7 @@ Rectangle {
             switch (type) {
             case "success": return YColors.green;
             case "warning": return YColors.yellow;
-            case "info":    return YColors.blueText;
+            case "info":    return YColors.red;
             case "error":
             default:        return YColors.red;
             }

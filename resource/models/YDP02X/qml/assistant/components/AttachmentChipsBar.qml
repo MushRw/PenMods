@@ -32,7 +32,7 @@ Rectangle {
             height: 26
             width: chipContent.implicitWidth + 36
             radius: 6
-            color: isMediaChip ? YColors.grayButton : YColors.blueRect
+            color: isMediaChip ? YColors.grayButton : YColors.red
 
             Row {
                 id: chipContent

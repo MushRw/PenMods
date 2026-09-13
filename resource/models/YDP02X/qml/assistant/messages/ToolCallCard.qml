@@ -69,7 +69,7 @@ Item {
 
                 property string iconColor: {
                     if (root.toolState === "searching")
-                        return YColors.blueText;
+                        return YColors.red;
                     if (root.toolState === "pending")
                         return YColors.orange;
                     if (root.toolState === "done")
@@ -120,7 +120,7 @@ Item {
                 textFormat: Text.PlainText
                 color: {
                     if (root.toolState === "searching")
-                        return YColors.blueText;
+                        return YColors.red;
                     if (root.toolState === "pending")
                         return YColors.orange;
                     if (root.toolState === "done")
