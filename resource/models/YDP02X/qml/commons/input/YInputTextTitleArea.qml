@@ -85,6 +85,15 @@ Item {
         }
     }
 
+    // 紧凑模式：给输入框垫一层淡底，和下面的候选行 / 键盘形成层次。
+    // 原来文字是直接浮在纯黑背景上的，看起来像"没画完"。
+    Rectangle {
+        anchors.fill: id_input_core_background
+        radius: 8
+        color: YColors.grayNormal
+        visible: compact
+    }
+
     Flickable {
         id: id_input_core_background
         anchors.left: parent.left
@@ -119,6 +128,10 @@ Item {
             font.family: qmlGlobal.fontFamily
             font.pixelSize: 18
             color: YColors.white
+            // 文字不要贴着输入框边框（紧凑模式下左边是屏幕 10px 外边距，看着已经很挤）
+            leftPadding: 6
+            rightPadding: 4
+            topPadding: 3
             cursorDelegate: id_cursor_delegate
             wrapMode: TextEdit.WrapAnywhere
             onCursorRectangleChanged: id_input_core_background.ensureVisible(cursorRectangle)
@@ -130,6 +143,9 @@ Item {
                 color: YColors.grayText
                 font: id_input_core.font
                 wrapMode: id_input_core.wrapMode
+                leftPadding: id_input_core.leftPadding
+                rightPadding: id_input_core.rightPadding
+                topPadding: id_input_core.topPadding
                 text: YTranslateText.inputTip
             }
         }

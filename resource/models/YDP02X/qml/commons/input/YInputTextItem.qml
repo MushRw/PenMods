@@ -115,17 +115,26 @@ YMouseArea {
         id: id_normal_area
         anchors.fill: parent
         radius: 8
-        color: id_input_text_item.action.length > 0 ? YColors.grayButton : YColors.grayNormal
+        // 按下时给键本身一层提亮反馈：之前只有顶部的放大气泡，键面不动，手感发虚。
+        color: {
+            var base = id_input_text_item.action.length > 0 ? YColors.grayButton : YColors.grayNormal
+            return id_input_text_item.pressed ? Qt.lighter(base, 1.9) : base
+        }
+        Behavior on color {
+            ColorAnimation {
+                duration: 80
+            }
+        }
     }
 
     YTextMedium {
         id: id_text_item
         // 多字符标签（abc / 123）在 28px 宽的键里会顶出边框，所以：
-        // 1) 多字符统一缩到 12px；2) 限制宽度 + 居中 + 溢出省略，绝不越界。
+        // 1) 多字符缩到 13px（12px 看起来比字母键弱太多）；2) 限制宽度 + 居中 + 溢出省略。
         width: Math.max(id_input_text_item.width - 4, 8)
         horizontalAlignment: Text.AlignHCenter
         elide: Text.ElideRight
-        font.pixelSize: id_input_text_item.text.length > 1 ? 12 : 16
+        font.pixelSize: id_input_text_item.text.length > 1 ? 13 : 16
         anchors.centerIn: parent
         text: id_input_text_item.text
     }

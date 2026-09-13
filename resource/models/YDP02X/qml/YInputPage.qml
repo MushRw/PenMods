@@ -17,18 +17,20 @@ YPage {
     property int currentPinyinLen: 0
 
     // 320x170 一屏放完：
-    // 输入行 34~74 + 候选行 24(+4) + 键盘 3 行(3*30 + 2*2 = 94) ≈ 156~168
+    // 输入行 38~70 + 候选行 24(+4) + 键盘 3 行(3*30 + 2*2 = 94) + 底边距 2
     // 原来：标题 70 + 候选 64 + 功能键组 46 + 字母网格(56x46 的键、一行 5 个 → 6 行 301px)
     // ≈ 549px，在 170px 的屏上必须上下滑着找键。
     //
-    // 输入行高度按内容自适应：单行 34；输入换行后跟着内容长高（非拼音最多 3 行，拼音模式留出候选行只能到 2 行），
-    // 再长就由输入框自己滚动（YInputTextTitleArea 内已有 ensureVisible 跟随光标，并且可以手指拖动）。
-    readonly property int inputRowHeight: Math.min(isPinyinMode ? 46 : 72,
-                                                   Math.max(34, id_input_text_title_area.neededHeight))
+    // 输入行高度按内容自适应：单行 38；换行后跟着内容长高（拼音模式要给候选行留位置，
+    // 封顶 42；非拼音可以到 68），再长就由输入框自己滚动（可以手指拖动）。
+    readonly property int inputRowHeight: Math.min(isPinyinMode ? 42 : 68,
+                                                   Math.max(38, id_input_text_title_area.neededHeight))
     readonly property int candidateRowHeight: 24
     readonly property int gridTopGap: 2
+    // 底边距：留 2px，让最下面一行按键的圆角不被屏幕边缘切掉（原来贴到 0，看起来像被裁了）
+    readonly property int gridBottomMargin: 2
 
-    // 键盘贴着屏幕下沿：三行按键固定锚在底部（键 30 高 + 行距 2，与 YInputTextItem /
+    // 键盘靠近屏幕下沿：三行按键固定锚在底部（键 30 高 + 行距 2，与 YInputTextItem /
     // YInputTextCharsModelBase 保持一致），候选行紧贴键盘上方，输入行从顶部向下长。
     readonly property int keyRowHeight: 30
     readonly property int keyRowSpacing: 2
@@ -182,6 +184,8 @@ YPage {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
+            // 顶端留 2px：输入框那层淡底的圆角不会被屏幕边缘切掉
+            anchors.topMargin: id_input_page.gridBottomMargin
 
             YInputTextTitleArea {
                 id: id_input_text_title_area
@@ -208,8 +212,10 @@ YPage {
                 id: id_pinyin_toggle
                 width: 30
                 height: 30
-                radius: 6
+                radius: 8
                 color: id_input_page.isPinyinMode ? YColors.blueRect : YColors.grayButton
+                border.color: id_input_page.isPinyinMode ? "#4A8BEE" : "#3F4046"
+                border.width: 1
 
                 anchors.right: parent.right
                 anchors.top: parent.top
@@ -239,7 +245,7 @@ YPage {
             height: visible ? id_input_page.candidateRowHeight : 0
 
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: id_input_page.gridHeight + id_input_page.gridTopGap
+            anchors.bottomMargin: id_input_page.gridHeight + id_input_page.gridTopGap + id_input_page.gridBottomMargin
 
             Rectangle {
                 id: id_bg_rect
@@ -249,7 +255,7 @@ YPage {
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 4
 
-                color: "#2B2B2B"
+                color: YColors.grayButton
                 radius: 8
                 border.color: "#3F3F3F"
                 border.width: 1
@@ -270,7 +276,7 @@ YPage {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     text: id_rime_backend.preeditText
-                    color: "#AAAAAA"
+                    color: YColors.grayText
                     font.pixelSize: 14
                 }
 
@@ -329,9 +335,9 @@ YPage {
 
             YTextMedium {
                 anchors.centerIn: id_bg_rect
-                text: "点右侧「拼」切回字母"
+                text: "点「拼」切回字母"
                 visible: isPinyinMode && id_rime_backend.preeditText.length === 0
-                color: "#666666"
+                color: YColors.grayText
                 font.pixelSize: 12
             }
         }
@@ -340,6 +346,7 @@ YPage {
             id: id_input_text_lower_chars
             visible: id_input_page.currentKeyboardItem === this
             anchors.bottom: parent.bottom
+            anchors.bottomMargin: id_input_page.gridBottomMargin
             anchors.left: parent.left
             anchors.right: parent.right
 
@@ -351,6 +358,7 @@ YPage {
             id: id_input_text_upper_chars
             visible: id_input_page.currentKeyboardItem === this
             anchors.bottom: parent.bottom
+            anchors.bottomMargin: id_input_page.gridBottomMargin
             anchors.left: parent.left
             anchors.right: parent.right
 
@@ -362,6 +370,7 @@ YPage {
             id: id_input_text_number_chars
             visible: id_input_page.currentKeyboardItem === this
             anchors.bottom: parent.bottom
+            anchors.bottomMargin: id_input_page.gridBottomMargin
             anchors.left: parent.left
             anchors.right: parent.right
 
@@ -373,6 +382,7 @@ YPage {
             id: id_input_text_symbol_chars
             visible: id_input_page.currentKeyboardItem === this
             anchors.bottom: parent.bottom
+            anchors.bottomMargin: id_input_page.gridBottomMargin
             anchors.left: parent.left
             anchors.right: parent.right
 
