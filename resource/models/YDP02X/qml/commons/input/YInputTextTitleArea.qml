@@ -14,8 +14,9 @@ Item {
 
     // 输入内容实际需要的高度：YInputPage 用它把输入行按行数撑高（多行输入时能看到换行效果）。
     // 只依赖 TextEdit 的文档高度（由文本和宽度决定），不依赖自身高度，因此不会和 anchors 形成绑定环。
-    // 下限 28：正好是"一行 18px 文字 + 3px 上内边距"，空文本时输入框不会比提示文字高出一截。
-    readonly property int neededHeight: Math.max(id_input_core.contentHeight + 2, 28)
+    // contentHeight 已包含上下 padding（各 3px），所以这里不再额外加余量：空文本时输入框
+    // 正好等于"一行文字 + 上下各 3px"，上下边缘到文字的距离相等。下限 28 兜底。
+    readonly property int neededHeight: Math.max(id_input_core.contentHeight, 28)
 
     readonly property bool acceptabled: id_input_core.length
     property alias text: id_input_core.text
@@ -129,10 +130,13 @@ Item {
             font.family: qmlGlobal.fontFamily
             font.pixelSize: 18
             color: YColors.white
-            // 文字不要贴着输入框边框（紧凑模式下左边是屏幕 10px 外边距，看着已经很挤）
+            // 文字不要贴着输入框边框（紧凑模式下左边是屏幕 10px 外边距，看着已经很挤）。
+            // 上下内边距必须成对：TextEdit.contentHeight 是含上下 padding 的，
+            // 只给 topPadding 的话，输入框下边缘到文字的间距会比上边缘少。
             leftPadding: 6
-            rightPadding: 4
+            rightPadding: 6
             topPadding: 3
+            bottomPadding: 3
             cursorDelegate: id_cursor_delegate
             wrapMode: TextEdit.WrapAnywhere
             onCursorRectangleChanged: id_input_core_background.ensureVisible(cursorRectangle)
@@ -147,6 +151,7 @@ Item {
                 leftPadding: id_input_core.leftPadding
                 rightPadding: id_input_core.rightPadding
                 topPadding: id_input_core.topPadding
+                bottomPadding: id_input_core.bottomPadding
                 text: YTranslateText.inputTip
             }
         }
