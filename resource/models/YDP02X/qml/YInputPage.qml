@@ -218,7 +218,8 @@ YPage {
                 height: 30
                 // 官方原版里 30x30 的小按钮是 radius 6 且没有描边（和「返回 / 确定」一致）
                 radius: 6
-                color: id_input_page.isPinyinMode ? YColors.blueRect : YColors.grayButton
+                // 官方原版开关状态色（YSwitch.qml）：开 = green #13B876，关 = graySwitchOff #515259
+                color: id_input_page.isPinyinMode ? YColors.green : YColors.graySwitchOff
 
                 anchors.right: parent.right
                 anchors.top: parent.top
