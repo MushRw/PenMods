@@ -239,3 +239,14 @@ jobs:
           name: PenMods-${{ env.BUILD_PLATFORM }}-${{ github.sha }}
           path: build/linux/arm64-v8a/
           retention-days: 7
+
+      # 完整产物 ~70MB（里面还有 player.zip / rime.zip / 安装包），平时只是想换笔上
+      # 那两个 .so 的话太慢，所以额外传一份只有 11MB 的精简产物。
+      - name: 上传精简产物（只有两个 .so）
+        uses: actions/upload-artifact@v4
+        with:
+          name: PenMods-libs-${{ env.BUILD_PLATFORM }}-${{ github.sha }}
+          path: |
+            build/linux/arm64-v8a/release/libPenMods.so
+            build/linux/arm64-v8a/release/libPenModsResources.so
+          retention-days: 7
