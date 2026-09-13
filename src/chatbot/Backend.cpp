@@ -33,6 +33,10 @@
 #include <QUrl>
 #include <QUuid>
 
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+
 namespace mod::chatbot {
 
 // -----------------------------------------------------------------------
@@ -264,6 +268,20 @@ QJsonObject ChatBot::messageToJson(const MessageData& msg) const {
 // 构建 API messages 数组
 // -----------------------------------------------------------------------
 
+// 从前面裁历史（token 预算 / MAX_HISTORY_SIZE）时不能把 tool 结果和它对应的
+// assistant(tool_calls) 拆散：OpenAI 兼容接口会直接 400
+// （"messages with role 'tool' must be a response to a preceding message with 'tool_calls'"）。
+// 这里只丢"开头就是 tool"的孤儿消息，成对的 tool_calls + tool 会整体保留。
+static void dropLeadingOrphanToolMessages(QVector<MessageData>& msgs) {
+    int drop = 0;
+    while (drop < msgs.size() && msgs[drop].role == "tool") {
+        ++drop;
+    }
+    if (drop > 0) {
+        msgs.remove(0, drop);
+    }
+}
+
 QJsonArray ChatBot::buildApiMessages(const QVector<MessageData>& history,
                                      const QString&              userText,
                                      const QVector<MessagePart>& userParts) {
@@ -298,6 +316,8 @@ QJsonArray ChatBot::buildApiMessages(const QVector<MessageData>& history,
         }
         historyToSend = kept;
     }
+    // 裁剪边界不能落在 tool 结果上（见上面的说明）
+    dropLeadingOrphanToolMessages(historyToSend);
     for (const auto& msg : historyToSend) {
         messages.append(messageToJson(msg));
     }
@@ -480,12 +500,30 @@ void ChatBot::flushSessions() {
 
     // dump() 不带缩进：体积和 CPU 都明显低于 dump(4)，而这个文件只给我们自己读。
     const std::string payload = root.dump();
-    QFile             file(sessionsFilePath());
-    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        file.write(payload.data(), static_cast<qint64>(payload.size()));
-        file.close();
-    } else {
-        error("无法写入 sessions.json: {}", sessionsFilePath().toStdString());
+    const QString     path    = sessionsFilePath();
+    const QString     tmpPath = path + ".tmp";
+
+    // 原子写：先写 .tmp 再 rename 覆盖。
+    // sessions.json 是聊天记录的唯一副本，原来直接 Truncate 覆盖：写到一半掉电/被 kill
+    // （词典笔随时可能被长按关机）就会留下半截 JSON，下次启动整份记录都读不出来。
+    QFile tmp(tmpPath);
+    if (!tmp.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        error("无法写入 {}: {}", tmpPath.toStdString(), tmp.errorString().toStdString());
+        return;
+    }
+    const qint64 payloadSize = static_cast<qint64>(payload.size());
+    const qint64 written     = tmp.write(payload.data(), payloadSize);
+    tmp.flush();
+    tmp.close();
+    if (written != payloadSize) {
+        error("sessions.json 写入不完整({}/{}), 放弃本次保存", written, payloadSize);
+        QFile::remove(tmpPath);
+        return;
+    }
+    // std::rename 在 Linux 上是原子的替换（QFile::rename 目标存在时会直接失败）
+    if (std::rename(tmpPath.toLocal8Bit().constData(), path.toLocal8Bit().constData()) != 0) {
+        error("sessions.json rename 失败: {}", std::strerror(errno));
+        QFile::remove(tmpPath);
     }
 }
 
@@ -541,7 +579,14 @@ void ChatBot::initSessions() {
 
             info("已加载 {} 个会话", m_sessions.size());
         } catch (const std::exception& e) {
-            warn("sessions.json 解析失败: {}, 使用默认配置", e.what());
+            warn("sessions.json 解析失败: {}, 已备份为 sessions.json.bad 后从空白开始", e.what());
+            // 把坏文件挪走保留现场：否则下一次保存会用新内容覆盖掉唯一副本，
+            // 用户连手工抢救的机会都没有。
+            const QString badPath = path + ".bad";
+            QFile::remove(badPath);
+            if (!QFile::rename(path, badPath)) {
+                warn("sessions.json 备份失败，保持原文件不动");
+            }
         }
     }
 
@@ -1113,9 +1158,11 @@ void ChatBot::makeApiRequest(const QJsonArray& messages) {
                 QByteArray lineBytes = m_sseBuffer.mid(cursor, nl - cursor);
                 cursor               = nl + 1;
                 QString trimmedLine = QString::fromUtf8(lineBytes).trimmed();
-                if (!trimmedLine.startsWith("data: ")) continue;
+                // SSE 规范里 "data:" 后面的空格是可选的，有些兼容端点（/代理）不带空格，
+                // 原来只认 "data: "，那种响应会被整条丢掉。
+                if (!trimmedLine.startsWith("data:")) continue;
 
-                QString jsonData = trimmedLine.mid(6);
+                QString jsonData = trimmedLine.mid(5).trimmed();
                 if (jsonData.trimmed() == "[DONE]") {
                     // 在 finished 信号之前就把响应写入历史，
                     // 防止 regenerateMessage 在 streamEnd 后 finished 前被调用时因索引越界空转
