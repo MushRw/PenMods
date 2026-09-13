@@ -115,10 +115,13 @@ YMouseArea {
         id: id_normal_area
         anchors.fill: parent
         radius: 8
-        // 按下时给键本身一层提亮反馈：之前只有顶部的放大气泡，键面不动，手感发虚。
+        // 按下用 #444444：官方原版（YInputPage 候选词按下态）就是这个值，
+        // 之前用 Qt.lighter 算出来的色不在官方色板里。
         color: {
-            var base = id_input_text_item.action.length > 0 ? YColors.grayButton : YColors.grayNormal
-            return id_input_text_item.pressed ? Qt.lighter(base, 1.9) : base
+            if (id_input_text_item.pressed) {
+                return "#444444"
+            }
+            return id_input_text_item.action.length > 0 ? YColors.grayButton : YColors.grayNormal
         }
         Behavior on color {
             ColorAnimation {

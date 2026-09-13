@@ -216,10 +216,9 @@ YPage {
                 id: id_pinyin_toggle
                 width: 30
                 height: 30
-                radius: 8
+                // 官方原版里 30x30 的小按钮是 radius 6 且没有描边（和「返回 / 确定」一致）
+                radius: 6
                 color: id_input_page.isPinyinMode ? YColors.blueRect : YColors.grayButton
-                border.color: id_input_page.isPinyinMode ? "#4A8BEE" : "#3F4046"
-                border.width: 1
 
                 anchors.right: parent.right
                 anchors.top: parent.top
@@ -259,7 +258,8 @@ YPage {
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 4
 
-                color: YColors.grayButton
+                // 候选行用官方原版取值：底 #2B2B2B、边框 #3F3F3F
+                color: "#2B2B2B"
                 radius: 8
                 border.color: "#3F3F3F"
                 border.width: 1
@@ -280,7 +280,8 @@ YPage {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     text: id_rime_backend.preeditText
-                    color: YColors.grayText
+                    // 官方原版：拼音串 #AAAAAA
+                    color: "#AAAAAA"
                     font.pixelSize: 14
                 }
 
@@ -341,7 +342,8 @@ YPage {
                 anchors.centerIn: id_bg_rect
                 text: "点「拼」切回字母"
                 visible: isPinyinMode && id_rime_backend.preeditText.length === 0
-                color: YColors.grayText
+                // 官方原版空状态提示色
+                color: "#666666"
                 font.pixelSize: 12
             }
         }
