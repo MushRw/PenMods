@@ -177,5 +177,36 @@ Item {
         anchors.bottomMargin: 8
         imageName: "slide/ic_collapse"
     }
+
+    // 自带扬声器一键开关：下拉面板左下角常驻，防止不小心外放（关掉后连朗读/提示音都不出声）。
+    // 状态来自 C++ 的 aSound（存 config.json，重启保持）；耳机通路不受影响。
+    Rectangle {
+        id: id_speaker_toggle
+        objectName: "YQuickSettingLayer.qml_id_speaker_toggle"
+        width: 66
+        height: 22
+        radius: 6
+        anchors.left: parent.left
+        anchors.leftMargin: 8
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 4
+        color: aSound.speakerEnabled ? "#33FFFFFF" : "#E63B6FD4"
+        border.color: aSound.speakerEnabled ? "#55FFFFFF" : "#99FFFFFF"
+        border.width: 1
+
+        YText {
+            anchors.centerIn: parent
+            font.pixelSize: 13
+            text: aSound.speakerEnabled ? "外放 开" : "外放 关"
+        }
+
+        YMouseArea {
+            anchors.fill: parent
+            objectName: "YQuickSettingLayer.qml_id_speaker_toggle_area"
+            onClicked: {
+                aSound.speakerEnabled = !aSound.speakerEnabled
+            }
+        }
+    }
 }
 

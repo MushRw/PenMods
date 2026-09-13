@@ -135,6 +135,9 @@ Config::Config() : Logger("Config") {
         {"capture", {
             {"enabled", false}
         }},
+        {"asound", {
+            {"speaker_enabled", true}
+        }},
         {"ai", {
             {"auto_send_scan", true},
             {"speech_assistant", false},
