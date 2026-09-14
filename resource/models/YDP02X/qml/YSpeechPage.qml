@@ -11,6 +11,12 @@ YPage {
     objectName: "YPage===YSpeechPage.qml"
     pageIndex: YEnum.PageIndex.Speech
 
+    // 按需求关掉原厂语音助手：这个页面被拉起（长按语音键等）时立即退回上一页，
+    // 等于彻底不可用。C++ 侧另有 voiceStart hook 兜底。
+    Component.onCompleted: {
+        backButtonClicked();
+    }
+
     Item {
         id: id_touch_talk_views
         anchors.fill: parent
