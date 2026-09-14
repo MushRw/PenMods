@@ -33,7 +33,7 @@ public:
     // 重置 Rime 会话
     Q_INVOKABLE void clear();
 
-    // 静态全局初始化函数，由 Backend 调用
+    // 静态全局初始化函数（现在由 ensureReady 惰性调用）
     static void globalInitialize();
 
 signals:
@@ -42,11 +42,16 @@ signals:
     void commitText(const QString &text); 
 
 private:
+    // 首次真正用到输入法时才做：全局初始化 + 建会话。
+    // 构造函数里什么都不做，因此即使 QML 很早就 new 出这个对象，也不会在开机阶段加载词库。
+    void ensureReady();
+
     void updateContext();
     void onCommit(const QString &text);
 
 private:
     RimeSessionId m_sessionId;    // Rime 会话 ID
+    bool          m_rimeReady = false; // 是否已完成全局初始化 + 建会话
     QString m_preeditText;        // 预编辑文本
     QStringList m_candidates;     // 候选词列表
     

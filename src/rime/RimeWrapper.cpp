@@ -23,15 +23,23 @@ void rimeNotificationHandler(
     spdlog::debug("Rime notification: {} {}", message_type, (message_value ? message_value : ""));
 }
 
-// 构造函数直接创建会话
+// 构造函数只取 API 指针，不做任何重活：
+// librime 的全局初始化（加载 6.7MB 词库 + start_maintenance）和建会话都推迟到
+// ensureReady()，由第一次真正用输入法时触发。这样即使 QML 很早就 new 出实例，
+// 开机阶段也不会付这份代价。
 RimeWrapper::RimeWrapper(QObject* parent) : QObject(parent), Logger("RimeWrapper"), m_sessionId(0) {
-    // 确保 API 已获取
     if (!s_api) {
         s_api = rime_get_api();
     }
+}
 
-    // 惰性初始化：本实例是 QML 用到输入法（打开输入页）时才创建的，
-    // 所以把 librime 的全局初始化放在这里，开机阶段不再做。
+// 首次真正用输入法时调用：全局初始化 + 建会话（幂等）
+void RimeWrapper::ensureReady() {
+    if (m_rimeReady) {
+        return;
+    }
+    m_rimeReady = true;
+
     globalInitialize();
 
     if (s_api && s_api->create_session) {
@@ -133,6 +141,7 @@ QString     RimeWrapper::preeditText() const { return m_preeditText; }
 QStringList RimeWrapper::candidates() const { return m_candidates; }
 
 bool RimeWrapper::processKey(const QString& key) {
+    ensureReady(); // 首次真正输入时才加载词库 / 建会话
     if (!m_sessionId || !s_api) {
         qWarning() << "Rime Not Initialized!";
         return false;
@@ -174,6 +183,7 @@ bool RimeWrapper::processKey(const QString& key) {
 }
 
 void RimeWrapper::selectCandidate(int index) {
+    ensureReady(); // 首次真正输入时才加载词库 / 建会话
     if (!m_sessionId || !s_api) return;
     if (s_api->select_candidate) {
         s_api->select_candidate(m_sessionId, static_cast<size_t>(index));

@@ -256,10 +256,10 @@ PEN_HOOK(uint32, _ZN12YSoundCenter9playMusicERK7QStringxd, void* self, void* a2,
 #endif
 
 PEN_HOOK(uint64, _ZN13YRecordCenter8startAsrEv, uint64 self, void* a2, void* a3, void* a4, void* a5) {
-    if (mod::AudioRecorder::getInstance().isWorking()) {
-        return ++*((uint64*)self + 14);
-    }
-    return origin(self, a2, a3, a4, a5);
+    // 按需求关掉原厂语音助手：不再转发给 origin，ASR 就永远不会真正启动。
+    // 我们自己的录音机录原始音频，不依赖 ASR，所以直接吞掉没有副作用。
+    spdlog::debug("[AudioRecorder] 忽略 startAsr（原厂语音助手已关闭）");
+    return ++*((uint64*)self + 14);
 }
 
 PEN_HOOK(
