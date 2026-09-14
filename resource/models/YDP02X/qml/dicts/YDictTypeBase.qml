@@ -477,14 +477,14 @@ Item {
                         logManager.sendHttpLog("action=detail_add_wordbook_click")
                         if (settingManager.isFirstAddWb) {
                             settingManager.isFirstAddWb = false
-                            qmlGlobal.showToast(YTranslateText.isFirstAddWb, "#2D2E33")
+                            qmlGlobal.showToast(YTranslateText.isFirstAddWb, YColors.grayButton)
                         }
                     } else {
                         console.warn("YDictPage.qml===id_fav_word_button===onValidClicked: deleteFromWordBook:", checkedWord)
                         resultManager.deleteFromWordBook(checkedWord)
                         if (settingManager.isFirstRemoveWb) {
                             settingManager.isFirstRemoveWb = false
-                            qmlGlobal.showToast(YTranslateText.isFirstRemoveWb, "#2D2E33")
+                            qmlGlobal.showToast(YTranslateText.isFirstRemoveWb, YColors.grayButton)
                         }
                     }
                 }
@@ -547,7 +547,7 @@ Item {
                 visible: resultManager.isReportButtonVisible
                 onValidClicked: {
                     logManager.sendHttpLog("action=detail_improve_click")
-                    qmlGlobal.showToast(YTranslateText.thxReport, "#2D2E33")
+                    qmlGlobal.showToast(YTranslateText.thxReport, YColors.grayButton)
                     resultManager.reportBadcaseButtonClicked()
                     resultManager.isReportButtonVisible = false
                     id_dict_page.reportedSet.add(resultManager.currentQuery)

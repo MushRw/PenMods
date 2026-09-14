@@ -4,7 +4,7 @@ import QtQuick 2.12
 import com.github.penuniverse 1.0
 
 Item {
-    property color portraitBorderColor: "#000000"
+    property color portraitBorderColor: YColors.black
     readonly property bool needReloadUserPortrait: (wifiManager.internetConnect && loginManager.isLogin && !qmlGlobal.fileExists(loginManager.iconPath))
 
     anchors.fill: parent
@@ -117,7 +117,7 @@ Item {
         width: 28
         height: 14
         border.width: 2
-        border.color: "#FFFFFF"
+        border.color: YColors.white
         color: "transparent"
         radius: 10
         smooth: true

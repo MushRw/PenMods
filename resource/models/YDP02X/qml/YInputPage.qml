@@ -263,7 +263,7 @@ YPage {
                 // 候选行用官方原版取值：底 #2B2B2B、边框 #3F3F3F
                 color: "#2B2B2B"
                 radius: 8
-                border.color: "#3F3F3F"
+                border.color: YColors.border
                 border.width: 1
             }
 
@@ -283,7 +283,7 @@ YPage {
                     anchors.verticalCenter: parent.verticalCenter
                     text: id_rime_backend.preeditText
                     // 官方原版：拼音串 #AAAAAA
-                    color: "#AAAAAA"
+                    color: YColors.textSecondary
                     font.pixelSize: 14
                 }
 
@@ -321,7 +321,7 @@ YPage {
                         width: parent.width - 4
                         height: 22
                         radius: 6
-                        color: mouse_area.pressed ? "#444444" : "transparent"
+                        color: mouse_area.pressed ? YColors.pressed : "transparent"
                     }
 
                     YTextMedium {
@@ -329,7 +329,7 @@ YPage {
                         anchors.centerIn: parent
                         text: model.text
                         font.pixelSize: 16
-                        color: "#FFFFFF"
+                        color: YColors.white
                     }
 
                     MouseArea {

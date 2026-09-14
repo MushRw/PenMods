@@ -36,7 +36,7 @@ YDrawerLayer {
                 id: id_grid_container_repeater
                 YButton {
                     implicitWidth: 178
-                    color: index === currentIndex ? YColors.red : "#2D2E33"
+                    color: index === currentIndex ? YColors.red : YColors.grayButton
                     mouseAreaMargins: -4
                     textFamily: qmlGlobal.fontFamilyZhCn
                     text: model.modelData

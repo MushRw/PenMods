@@ -44,7 +44,7 @@ YButtonBase {
     states: [
         State {
             name: "off"
-            PropertyChanges { target: id_three_states_button; color: "#FFFFFF" }
+            PropertyChanges { target: id_three_states_button; color: YColors.white }
             PropertyChanges { target: id_on_bg; visible: false }
             PropertyChanges { target: id_three_states_button; enabled: true }
         },

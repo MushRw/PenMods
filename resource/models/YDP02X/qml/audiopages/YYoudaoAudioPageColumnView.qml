@@ -54,7 +54,7 @@ YBackgroundIgnoreMouseEvent {
         logManager.sendHttpLog("action=listening_download_click")
         if (wifiManager.internetConnect) {
             if(usedStorage() >= parseInt(settingManager.memoryStorage))
-                qmlGlobal.showToast(YTranslateText.lowStorageSimTip, "#2D2E33")
+                qmlGlobal.showToast(YTranslateText.lowStorageSimTip, YColors.grayButton)
             else
                 mediaManager.download(modelDataId)
 
@@ -133,7 +133,7 @@ YBackgroundIgnoreMouseEvent {
                     YTextBase {
                         id: id_downloading_count
                         font.family: qmlGlobal.fontFamilyEnUs
-                        color: "#FFFFFF"
+                        color: YColors.white
                         font.pixelSize: 16
                         anchors.centerIn: parent
                         text: mediaManager.downloadingCount
@@ -154,7 +154,7 @@ YBackgroundIgnoreMouseEvent {
                     onClicked: {
                         if (wifiManager.internetConnect){
                             if(usedStorage() >= parseInt(settingManager.memoryStorage))
-                                qmlGlobal.showToast(YTranslateText.lowStorageSimTip, "#2D2E33")
+                                qmlGlobal.showToast(YTranslateText.lowStorageSimTip, YColors.grayButton)
                             else
                                 mediaManager.downloadAll()
                         }

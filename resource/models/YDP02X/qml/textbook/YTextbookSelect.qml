@@ -121,7 +121,7 @@ Item {
 
             Rectangle {
                 anchors.fill: parent
-                color: "#4D000000"
+                color: YColors.scrimLight
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
             }

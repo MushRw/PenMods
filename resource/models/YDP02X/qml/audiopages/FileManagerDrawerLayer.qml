@@ -46,7 +46,7 @@ YBackButtonPage {
                         id: id_button
                         implicitWidth: 125
                         mouseAreaMargins: -4
-                        color: orderType == fileManager.order ? YColors.red : "#2D2E33"
+                        color: orderType == fileManager.order ? YColors.red : YColors.grayButton
                         text: {
                             switch (orderType) {
                             case 0x00:

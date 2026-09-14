@@ -18,7 +18,7 @@ Item {
         anchors.rightMargin: 20
         anchors.bottom: parent.bottom
         radius: 50
-        color: "#E9900C"
+        color: YColors.yellow
         visible: false
         property bool showing: false
         function show(qsMsg, clrBg) {

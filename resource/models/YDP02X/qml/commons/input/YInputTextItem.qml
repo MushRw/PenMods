@@ -119,7 +119,7 @@ YMouseArea {
         // 之前用 Qt.lighter 算出来的色不在官方色板里。
         color: {
             if (id_input_text_item.pressed) {
-                return "#444444"
+                return YColors.pressed
             }
             return id_input_text_item.action.length > 0 ? YColors.grayButton : YColors.grayNormal
         }

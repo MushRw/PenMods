@@ -27,7 +27,7 @@ YBackButtonAudioPage {
     Rectangle {
         id: id_placeholder_layer
         anchors.fill: parent
-        color: "#000000"
+        color: YColors.black
 
         Column {
             anchors.centerIn: parent
@@ -51,7 +51,7 @@ YBackButtonAudioPage {
                     ctx.lineTo(29, 52);
                     ctx.lineTo(54, 36);
                     ctx.closePath();
-                    ctx.fillStyle = "#FFFFFF";
+                    ctx.fillStyle = YColors.white;
                     ctx.fill();
                 }
             }
@@ -59,7 +59,7 @@ YBackButtonAudioPage {
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: externalPlayer.fileName
-                color: "#AAAAAA"
+                color: YColors.textSecondary
                 font.pixelSize: 12
                 elide: Text.ElideMiddle
                 width: 280
@@ -113,7 +113,7 @@ YBackButtonAudioPage {
                 onPaint: {
                     var ctx = getContext("2d");
                     ctx.clearRect(0, 0, width, height);
-                    ctx.strokeStyle = "#FFFFFF";
+                    ctx.strokeStyle = YColors.white;
                     ctx.lineWidth = 2.5;
                     ctx.lineCap = "round";
                     ctx.lineJoin = "round";
@@ -142,7 +142,7 @@ YBackButtonAudioPage {
             anchors.rightMargin: 10
             anchors.verticalCenter: parent.verticalCenter
             text: externalPlayer.fileName
-            color: "#FFFFFF"
+            color: YColors.white
             font.pixelSize: 13
             font.bold: true
             elide: Text.ElideRight
@@ -184,7 +184,7 @@ YBackButtonAudioPage {
                 onPaint: {
                     var ctx = getContext("2d");
                     ctx.clearRect(0, 0, width, height);
-                    ctx.fillStyle = "#FFFFFF";
+                    ctx.fillStyle = YColors.white;
                     if (externalPlayer.running) {
                         // 暂停：两条竖条
                         ctx.fillRect(4, 3, 5, 16);
@@ -227,7 +227,7 @@ YBackButtonAudioPage {
             anchors.rightMargin: 10
             anchors.verticalCenter: parent.verticalCenter
             text: externalPlayer.running ? "正在播放，返回以退出" : "点击播放"
-            color: "#FFFFFF"
+            color: YColors.white
             font.pixelSize: 12
         }
     }

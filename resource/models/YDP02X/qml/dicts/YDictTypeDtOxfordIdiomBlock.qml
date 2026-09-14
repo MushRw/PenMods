@@ -102,7 +102,7 @@ Column {
                         if (idiomId.length <= 0) {
                             return vFormattedText
                         }
-                        vFormattedText += OxfordUtilities.formatText(idiomId, "#FFFFFF", 500) + "&nbsp;&nbsp;"
+                        vFormattedText += OxfordUtilities.formatText(idiomId, YColors.white, 500) + "&nbsp;&nbsp;"
                         vFormattedText += OxfordUtilities.grToFormatted(idiomObj, false)
                     }
                     visible: text.length > 0

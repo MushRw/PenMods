@@ -56,8 +56,8 @@ Column {
                 }
                 qsEn = OxfordUtilities.htmlToFormatted(qsEn)
                 qsCh = OxfordUtilities.htmlToFormatted(qsCh)
-                return OxfordUtilities.formatText(qsEn, "#FFFFFF", 500, 20, qmlGlobal.fontFamilyEnUs) + ' '
-                        + OxfordUtilities.formatText(qsCh, "#FFFFFF", 400, 20, qmlGlobal.fontFamilyZhCn)
+                return OxfordUtilities.formatText(qsEn, YColors.white, 500, 20, qmlGlobal.fontFamilyEnUs) + ' '
+                        + OxfordUtilities.formatText(qsCh, YColors.white, 400, 20, qmlGlobal.fontFamilyZhCn)
             }
             visible: text.length > 0
         }

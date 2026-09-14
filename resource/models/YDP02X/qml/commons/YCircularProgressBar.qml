@@ -9,7 +9,7 @@ Item {
     property int mediaIdValue: 0
 
     property color primaryColor: YColors.red
-    property color secondaryColor: "#2D2E33"
+    property color secondaryColor: YColors.grayButton
     property string lineCap: "square"
 
     width: size

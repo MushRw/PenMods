@@ -248,7 +248,7 @@ Item {
             id: id_player_state_mask
             anchors.fill: parent
             enabled: false
-            color: "#000000"
+            color: YColors.black
             radius: 0
 
             QtObject {

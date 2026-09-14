@@ -61,7 +61,7 @@ Column {
                             })
                         }
                         if (qsPh.length > 0) {
-                            vFormatted += OxfordUtilities.formatText(OxfordUtilities.htmlToFormatted(qsPh), "#FFFFFF", 500)
+                            vFormatted += OxfordUtilities.formatText(OxfordUtilities.htmlToFormatted(qsPh), YColors.white, 500)
                             vFormatted += "&nbsp;&nbsp;"
                         }
                         vFormatted += OxfordUtilities.grToFormatted(id_phraseObj_item.phraseObj)

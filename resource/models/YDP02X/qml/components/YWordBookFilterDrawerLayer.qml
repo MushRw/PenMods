@@ -75,7 +75,7 @@ YBackground {
                                 return 125
                             }
                         }
-                        color: langType === currentIndex ? YColors.red : "#2D2E33"
+                        color: langType === currentIndex ? YColors.red : YColors.grayButton
                         mouseAreaMargins: -4
                         text: {
                             switch (langType) {
@@ -119,8 +119,8 @@ YBackground {
             }
 
             YSettingSwitchItem {
-                color: "#2D2E33"
-                switchItem.offColor: "#515259"
+                color: YColors.grayButton
+                switchItem.offColor: YColors.graySwitchOff
                 title: YTranslateText.autoReadAloud
                 switchOn: settingManager.isWbAutoPronounce
                 onTimerTriggered: {
@@ -139,8 +139,8 @@ YBackground {
             }
 
             YSettingSwitchItem {
-                color: "#2D2E33"
-                switchItem.offColor: "#515259"
+                color: YColors.grayButton
+                switchItem.offColor: YColors.graySwitchOff
                 title: YTranslateText.autoPlay
                 switchOn: settingManager.isWbAutoPlay
                 onTimerTriggered: {
@@ -169,8 +169,8 @@ YBackground {
             }
 
             YSettingSwitchItem {
-                color: "#2D2E33"
-                switchItem.offColor: "#515259"
+                color: YColors.grayButton
+                switchItem.offColor: YColors.graySwitchOff
                 title: YTranslateText.autoCollectAfterScan
                 switchOn: settingManager.isAutoAddWb
                 onTimerTriggered: {
@@ -190,8 +190,8 @@ YBackground {
             }
 
             YSettingSwitchItem {
-                color: "#2D2E33"
-                switchItem.offColor: "#515259"
+                color: YColors.grayButton
+                switchItem.offColor: YColors.graySwitchOff
                 visible: currentFilterWordsList
                 implicitHeight: 54
                 title: '添加 "词组" 选项卡'
@@ -208,8 +208,8 @@ YBackground {
             }
 
             YSettingSwitchItem {
-                color: "#2D2E33"
-                switchItem.offColor: "#515259"
+                color: YColors.grayButton
+                switchItem.offColor: YColors.graySwitchOff
                 visible: currentFilterWordsList
                 implicitHeight: 54
                 title: "单词间大小写不敏感"
@@ -240,7 +240,7 @@ YBackground {
             }
 
             YSettingAboutClickableItem {
-                color: "#2D2E33"
+                color: YColors.grayButton
                 title: "基本词典释义数据"
                 enabled: !workBookTweaks.exporting
                 visible: currentFilterWordsList
@@ -279,7 +279,7 @@ YBackground {
 
             YSettingItemBackground {
                 enabled: YEnum.SYS_SYNCING !== wordBookManager.syncState
-                color: "#2D2E33"
+                color: YColors.grayButton
                 opacity: id_sync_button.pressed || !enabled ? 0.6 : 1
                 visible: currentFilterWordsList
                 YTextMedium {

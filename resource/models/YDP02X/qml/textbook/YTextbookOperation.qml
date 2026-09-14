@@ -168,7 +168,7 @@ YBackgroundIgnoreMouseEvent {
             anchors.fill: parent
             anchors.topMargin: 12
             anchors.bottomMargin: 12
-            color: "#000000"
+            color: YColors.black
             radius: 16
 
             Loader {
@@ -326,7 +326,7 @@ YBackgroundIgnoreMouseEvent {
                                 width: parent.width
                                 height: 46
                                 anchors.bottom: parent.bottom
-                                color: "#000000"
+                                color: YColors.black
                                 opacity: 0.5
                             }
                         }

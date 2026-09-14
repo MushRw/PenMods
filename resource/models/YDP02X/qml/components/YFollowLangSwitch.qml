@@ -33,7 +33,7 @@ YDrawerLayer {
 
         YButton {
             implicitWidth: 350
-            color: currentIndex === YEnum.UK ? YColors.red : "#2D2E33"
+            color: currentIndex === YEnum.UK ? YColors.red : YColors.grayButton
             mouseAreaMargins: -4
             text: YTranslateText.pronuncEnglish
             onClicked: {
@@ -51,7 +51,7 @@ YDrawerLayer {
 
         YButton {
             implicitWidth: 350
-            color: currentIndex === YEnum.US ? YColors.red : "#2D2E33"
+            color: currentIndex === YEnum.US ? YColors.red : YColors.grayButton
             mouseAreaMargins: -4
             text: YTranslateText.pronuncAmerica
             onClicked: {

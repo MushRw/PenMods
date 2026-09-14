@@ -58,7 +58,7 @@ YDrawerLayer {
 
                 YButton{
                     implicitWidth: 558
-                    color: currentIndex===index ? YColors.red : "#2D2E33"
+                    color: currentIndex===index ? YColors.red : YColors.grayButton
                     mouseAreaMargins: -4
                     textFamily: qmlGlobal.fontFamilyZhCn
                     text: model.modelData.title

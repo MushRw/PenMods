@@ -245,7 +245,7 @@ YDictTypeBase {
                             width: parent.width
                             height: contentHeight
                             font.family: qmlGlobal.fontFamilyZhCn
-                            color: "#FFFFFF"
+                            color: YColors.white
                             wrapMode: YTextBase.Wrap
                             text: {
                                 let qsRst = ""
@@ -267,7 +267,7 @@ YDictTypeBase {
                             height: contentHeight
                             font.family: qmlGlobal.fontFamilyKoKr
                             font.pixelSize: 26
-                            color: "#FFFFFF"
+                            color: YColors.white
                             textFormat: Text.RichText
                             wrapMode: YTextBase.Wrap
                             text: {

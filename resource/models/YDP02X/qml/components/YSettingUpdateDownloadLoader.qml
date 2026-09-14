@@ -161,7 +161,7 @@ YLoader {
                         //    break
                         case YEnum.UPDATE_ERROR_NO_ENOUGH_MEMORY:
                             qmlGlobal.showToast(YTranslateText.lowStorageTip
-                                                .arg(updateImgSize), "#E9900C")
+                                                .arg(updateImgSize), YColors.yellow)
                             break
                         case YEnum.UPDATE_DOWNLOAD_FINISHED:
                             install()

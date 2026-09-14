@@ -50,7 +50,7 @@ Item {
                 implicitHeight: id_download_progress_button.height
                 anchors.right: parent.right
                 anchors.rightMargin: -parent.anchors.rightMargin
-                color: "#FFFFFF"
+                color: YColors.white
                 radius: height/2
                 smooth: true
             }

@@ -56,7 +56,7 @@ YSettingItemPage {
                     if (bSuc && ("wifi_searching" !== id_setting_wifi.state)) {
                         tryScan()
                     } else {
-                        qmlGlobal.showToast(YTranslateText.connectFaild, "#E9900C")
+                        qmlGlobal.showToast(YTranslateText.connectFaild, YColors.yellow)
                     }
                 }
                 onScanFinished: {
@@ -173,14 +173,14 @@ YSettingItemPage {
                                     requestKeyboard(model.modelData.ssid)
                                 }
                             } else {
-                                qmlGlobal.showToast(YTranslateText.connetingWifi, "#E9900C")
+                                qmlGlobal.showToast(YTranslateText.connetingWifi, YColors.yellow)
                             }
                             break
                         case YEnum.LINKING:
-                            qmlGlobal.showToast(YTranslateText.connetingWifi, "#E9900C")
+                            qmlGlobal.showToast(YTranslateText.connetingWifi, YColors.yellow)
                             break
                         case YEnum.DISCONNECTING:
-                            qmlGlobal.showToast(YTranslateText.disconnetingWifi, "#E9900C")
+                            qmlGlobal.showToast(YTranslateText.disconnetingWifi, YColors.yellow)
                             break
                         }
                         // todo 无连接时

@@ -133,7 +133,7 @@ Item {
             lineHeightMode: Text.FixedHeight
             lineHeight: 20
             font.weight: Font.Normal
-            color: "#666873"
+            color: YColors.textMuted
             wrapMode: YTextBase.Wrap
             textFormat: YTextBase.RichText
             horizontalAlignment: YTextBase.AlignHCenter

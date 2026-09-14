@@ -27,7 +27,7 @@ YLoader {
         if (!isOidScanning) {
             soundCenter.stop()
             showEmpty()
-            qmlGlobal.showToast(YTranslateText.cannotFindContentTryAgain, "#2D2E33")
+            qmlGlobal.showToast(YTranslateText.cannotFindContentTryAgain, YColors.grayButton)
             qmlGlobal.hideDictPage()
         }
     }

@@ -41,7 +41,7 @@ Item {
                 return YColors.green;
             if (root.toolState === "error")
                 return YColors.red;
-            return "#3F3F3F";
+            return YColors.border;
         }
         clip: true
 
@@ -204,7 +204,7 @@ Item {
         }
 
         border.width: 1
-        border.color: "#3F3F3F"
+        border.color: YColors.border
         clip: true
 
         Flickable {

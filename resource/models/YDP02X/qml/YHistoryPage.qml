@@ -69,7 +69,7 @@ YBackButtonPage {
                                                model.modelData.srcLang,
                                                model.modelData.dstLang,
                                                YEnum.PageIndex.Fav)) {
-                    qmlGlobal.showToast(YTranslateText.queryFaildPleaseTryAgain, "#2D2E33")
+                    qmlGlobal.showToast(YTranslateText.queryFaildPleaseTryAgain, YColors.grayButton)
                 } else {
                     qmlGlobal.showDictPage(YEnum.PageIndex.History)
                 }

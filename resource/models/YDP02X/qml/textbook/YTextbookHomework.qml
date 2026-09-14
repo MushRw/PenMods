@@ -349,7 +349,7 @@ Item {
                 }
                 else {
                     id_textbook_submithomework_dialog.close()
-                    qmlGlobal.showToast(errMsg.length > 0 ? errMsg: YTranslateText.textbookHomeworkOralNotExist, "#2D2E33")
+                    qmlGlobal.showToast(errMsg.length > 0 ? errMsg: YTranslateText.textbookHomeworkOralNotExist, YColors.grayButton)
                 }
             }
         }

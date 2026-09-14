@@ -52,7 +52,7 @@ Item {
     Rectangle {
         id: id_bg_mask
         anchors.fill: parent
-        color:"large" === state ? "#CC000000" : Qt.rgba(0,0,0,0)
+        color:"large" === state ? YColors.scrimStrong : Qt.rgba(0,0,0,0)
         state:"normal"
         MouseArea {
             anchors.fill: parent

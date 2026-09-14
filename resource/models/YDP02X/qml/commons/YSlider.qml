@@ -69,7 +69,7 @@ YMouseArea {
             implicitHeight: 24
             radius: width/2
             anchors.verticalCenter: parent.verticalCenter
-            color: "#FFFFFF"
+            color: YColors.white
 
             Drag.active: id_drag_area.drag.active
             Drag.hotSpot.x: width / 2

@@ -212,7 +212,7 @@ YPage {
                 height: 36
                 radius: 6
                 color: "#5A6B7D"
-                textColor: "#FFFFFF"
+                textColor: YColors.white
                 onClicked: {
                     fileSelectionCancelled();
                     backButtonClicked();
@@ -224,8 +224,8 @@ YPage {
                 width: 120
                 height: 36
                 radius: 6
-                color: "#2B5278"
-                textColor: "#FFFFFF"
+                color: YColors.blueDeep
+                textColor: YColors.white
                 enabled: selectedFiles.length > 0
                 onClicked: {
                     if (selectedFiles.length > 0) {

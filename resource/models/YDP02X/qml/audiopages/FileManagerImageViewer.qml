@@ -475,7 +475,7 @@ YBackButtonAudioPage {
             width: 28
             height: 28
             radius: 14
-            color: mouseArea.pressed ? "#CC000000" : "transparent"
+            color: mouseArea.pressed ? YColors.scrimStrong : "transparent"
             border.color: "white"
             border.width: 1
 

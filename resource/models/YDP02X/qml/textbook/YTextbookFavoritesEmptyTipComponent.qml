@@ -17,6 +17,6 @@ Item {
         horizontalAlignment: Text.AlignHCenter
         font.pixelSize: 16
         wrapMode: Text.WrapAnywhere
-        color: "#909199"
+        color: YColors.grayText
     }
 }

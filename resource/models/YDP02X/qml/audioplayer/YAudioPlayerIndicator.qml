@@ -69,7 +69,7 @@ Item {
             id: id_drag_target_bg
             implicitWidth: 66
             implicitHeight: 151
-            color: id_drag_target.isExtendState ? "#2D2E33" : "#992D2E33"
+            color: id_drag_target.isExtendState ? YColors.grayButton : "#992D2E33"
             radius: width/2
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottom: parent.bottom

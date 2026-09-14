@@ -35,7 +35,7 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         radius: id_background.radius
         visible: width > 8
-        color: "#509DEB"
+        color: YColors.blueText
     }
 
     YText {

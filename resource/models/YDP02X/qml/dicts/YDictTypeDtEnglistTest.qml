@@ -16,7 +16,7 @@ Item {
             id: id_wordHead_text
             wrapMode: YText.Wrap
             textFormat: YTextBase.RichText
-            color: "#FFFFFF"
+            color: YColors.white
             width: parent.width
             height: paintedHeight
             text: {
@@ -160,7 +160,7 @@ Item {
             id: id_content_stem
             font.family: qmlGlobal.fontFamilyEnUs
             font.weight: Font.Medium
-            color: "#FFFFFF"
+            color: YColors.white
             font.pixelSize: 18
             wrapMode: YText.Wrap
             textFormat: YTextBase.RichText

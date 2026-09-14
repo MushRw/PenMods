@@ -41,7 +41,7 @@ YBackground {
 
             YTextCH {
                 id: id_title
-                color: "#ffffff"
+                color: YColors.white
                 width: parent.width
                 font.pixelSize: 20
                 wrapMode: YTextBase.Wrap
@@ -56,7 +56,7 @@ YBackground {
             YTextCH {
                 id: id_detail
                 width: parent.width
-                color: "#ffffff"
+                color: YColors.white
                 font.pixelSize: 18
                 wrapMode: YTextBase.Wrap
                 textFormat : YTextBase.RichText

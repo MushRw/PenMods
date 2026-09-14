@@ -109,7 +109,7 @@ Item {
 
                                 YTextBase {
                                     id: id_word_trs_sents_index
-                                    color: "#FFFFFF"
+                                    color: YColors.white
                                     font.pixelSize: 16
                                     font.weight: Font.Bold
                                     font.family: qmlGlobal.fontFamilyEnUs
@@ -262,7 +262,7 @@ Item {
             lineHeightMode: Text.FixedHeight
             lineHeight: 20
             font.weight: Font.Normal
-            color: "#666873"
+            color: YColors.textMuted
             wrapMode: YTextBase.Wrap
             textFormat: YTextBase.RichText
             horizontalAlignment: YTextBase.AlignHCenter

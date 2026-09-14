@@ -265,7 +265,7 @@ YBackButtonAudioPage {
             font.pixelSize: 16
             font.family: qmlGlobal.fontFamilyZhCn
             lineHeight: 1.2
-            linkColor: "#62A8EA"
+            linkColor: YColors.blueLink
             verticalAlignment: Text.AlignVCenter
         }
     }

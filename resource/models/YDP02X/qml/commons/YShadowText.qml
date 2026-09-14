@@ -7,7 +7,7 @@ YTextMedium {
     layer.enabled: true
     layer.effect: DropShadow {
         verticalOffset: 1
-        color: "#4D000000"
+        color: YColors.scrimLight
         radius: 3
         samples: 7
     }

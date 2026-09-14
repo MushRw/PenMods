@@ -28,12 +28,12 @@ YDictTypeBase {
                     mArray.forEach(function(mean){
                         if (typeof mean.type !== "undefined") {
                             sResult += '<span style="font-family: OPPOSans; font-style: normal; font-weight: 500;'
-                                    + 'color: #509DEB; font-size: 28px">' + mean.w + '</span>'
+                                    + 'color: YColors.blueText; font-size: 28px">' + mean.w + '</span>'
                                     + '<br>'
                         }
 
                         sResult += '<span style="font-family: Noto Sans KR; font-weight: 500;'
-                                + 'color: #FFFFFF; font-size: 28px">' + mean.trans + '</span>'
+                                + 'color: YColors.white; font-size: 28px">' + mean.trans + '</span>'
                                 + '<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>'
                                 + '<br>'
                     })

@@ -580,7 +580,7 @@ YBackground {
                 width: 40
                 height: 5
                 radius: 3
-                color: "#444444"
+                color: YColors.pressed
             }
 
             ListView {

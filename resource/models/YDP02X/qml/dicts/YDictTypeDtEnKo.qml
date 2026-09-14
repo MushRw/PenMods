@@ -29,12 +29,12 @@ YDictTypeBase {
                     mArray.forEach(function(mean){
                         if (typeof mean.pos !== "undefined") {
                             sResult += '<span style="font-family: Georgia; font-style: italic; font-weight: 400;'
-                                    + 'color: #909199; font-size: 28px">' + mean.pos + '</span>'
+                                    + 'color: YColors.grayText; font-size: 28px">' + mean.pos + '</span>'
                                     + '<span>&nbsp;</span>'
                         }
 
                         sResult += '<span style="font-family: Noto Sans KR; font-weight: 400;'
-                                + 'color: #FFFFFF; font-size: 28px">' + mean.tran + '</span>'
+                                + 'color: YColors.white; font-size: 28px">' + mean.tran + '</span>'
                                 + '<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>'
                                 + '<br>'
                     })
@@ -50,7 +50,7 @@ YDictTypeBase {
             font.family: qmlGlobal.fontFamilyEnUs
             font.pixelSize: 26
             wrapMode: YTextBase.Wrap
-            color: "#909199"
+            color: YColors.grayText
             width: parent.width
             height: paintedHeight
             text: {
@@ -88,12 +88,12 @@ YDictTypeBase {
                     mArray.forEach(function(mean){
                         if (typeof mean.name !== "undefined") {
                             sResult += '<span style="font-family: Georgia; font-style: italic;'
-                                    + ' color: #909199; font-size: 24px">' + mean.name + '</span>'
+                                    + ' color: YColors.grayText; font-size: 24px">' + mean.name + '</span>'
                                     + '<span>&nbsp;</span>'
                         }
 
                         sResult += '<span style="font-family: Nunito Sans; font-weight: 400;'
-                                + 'color: #FFFFFF; font-size: 28px">' + mean.value + '</span>'
+                                + 'color: YColors.white; font-size: 28px">' + mean.value + '</span>'
                                 + '<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>'
                                 + '<br>'
                     })
@@ -123,11 +123,11 @@ YDictTypeBase {
 
                         if (typeof mean.foreign !== "undefined") {
                             sResult += '<span style="font-family: Georgia; font-style: italic;'
-                                    + ' color: #909199; font-size: 28px">' + 'e.g' + '</span>'
+                                    + ' color: YColors.grayText; font-size: 28px">' + 'e.g' + '</span>'
                                     + '<span>&nbsp;</span>'
 
                             sResult += '<span style="font-family: Nunito Sans; font-weight: 400;'
-                                    + 'color: #FFFFFF; font-size: 28px">' + mean.foreign + '</span>'
+                                    + 'color: YColors.white; font-size: 28px">' + mean.foreign + '</span>'
                                     + '<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>'
                                     + '<br>'
                         }

@@ -18,7 +18,7 @@ YPage {
         onCallCardView: {
             id_card_view_loader.active = true
             if (settingManager.modelChangeCount < 3) {
-                qmlGlobal.showToast(YTranslateText.switchWordCard, "#2D2E33")
+                qmlGlobal.showToast(YTranslateText.switchWordCard, YColors.grayButton)
                 settingManager.setModelChangeCount(settingManager.modelChangeCount + 1);
             }
             logManager.sendHttpLog("action=wordbook_card_view_click")

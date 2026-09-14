@@ -41,7 +41,7 @@ YSettingItemPage {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.leftMargin: 10
-                    color: id_mode_none.isSelected ? "#62A8EA" : "#FFFFFF"
+                    color: id_mode_none.isSelected ? YColors.blueLink : YColors.white
                 }
 
                 Rectangle {
@@ -53,14 +53,14 @@ YSettingItemPage {
                     anchors.rightMargin: 10
                     border.width: id_mode_none.isSelected ? 0 : 2
                     border.color: "#5A6B7D"
-                    color: id_mode_none.isSelected ? "#2B5278" : "transparent"
+                    color: id_mode_none.isSelected ? YColors.blueDeep : "transparent"
 
                     Rectangle {
                         width: 8
                         height: 8
                         radius: 4
                         anchors.centerIn: parent
-                        color: id_mode_none.isSelected ? "#62A8EA" : "transparent"
+                        color: id_mode_none.isSelected ? YColors.blueLink : "transparent"
                     }
                 }
 
@@ -86,7 +86,7 @@ YSettingItemPage {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.leftMargin: 10
-                    color: id_mode_single.isSelected ? "#62A8EA" : "#FFFFFF"
+                    color: id_mode_single.isSelected ? YColors.blueLink : YColors.white
                 }
 
                 Rectangle {
@@ -98,14 +98,14 @@ YSettingItemPage {
                     anchors.rightMargin: 10
                     border.width: id_mode_single.isSelected ? 0 : 2
                     border.color: "#5A6B7D"
-                    color: id_mode_single.isSelected ? "#2B5278" : "transparent"
+                    color: id_mode_single.isSelected ? YColors.blueDeep : "transparent"
 
                     Rectangle {
                         width: 8
                         height: 8
                         radius: 4
                         anchors.centerIn: parent
-                        color: id_mode_single.isSelected ? "#62A8EA" : "transparent"
+                        color: id_mode_single.isSelected ? YColors.blueLink : "transparent"
                     }
                 }
 
@@ -131,7 +131,7 @@ YSettingItemPage {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.leftMargin: 10
-                    color: id_mode_cycle.isSelected ? "#62A8EA" : "#FFFFFF"
+                    color: id_mode_cycle.isSelected ? YColors.blueLink : YColors.white
                 }
 
                 Rectangle {
@@ -143,14 +143,14 @@ YSettingItemPage {
                     anchors.rightMargin: 10
                     border.width: id_mode_cycle.isSelected ? 0 : 2
                     border.color: "#5A6B7D"
-                    color: id_mode_cycle.isSelected ? "#2B5278" : "transparent"
+                    color: id_mode_cycle.isSelected ? YColors.blueDeep : "transparent"
 
                     Rectangle {
                         width: 8
                         height: 8
                         radius: 4
                         anchors.centerIn: parent
-                        color: id_mode_cycle.isSelected ? "#62A8EA" : "transparent"
+                        color: id_mode_cycle.isSelected ? YColors.blueLink : "transparent"
                     }
                 }
 
@@ -353,7 +353,7 @@ YSettingItemPage {
                                 if (sec < 3600) return Math.floor(sec / 60) + "分钟";
                                 return Math.floor(sec / 3600) + "小时";
                             }
-                            color: "#FFFFFF"
+                            color: YColors.white
                             font.pixelSize: 14
                         }
 
@@ -380,7 +380,7 @@ YSettingItemPage {
                                     YText {
                                         anchors.centerIn: parent
                                         text: "-"
-                                        color: "#62A8EA"
+                                        color: YColors.blueLink
                                         font.pixelSize: 18
                                         font.bold: true
                                     }
@@ -396,7 +396,7 @@ YSettingItemPage {
                                     YText {
                                         anchors.centerIn: parent
                                         text: "+"
-                                        color: "#62A8EA"
+                                        color: YColors.blueLink
                                         font.pixelSize: 18
                                         font.bold: true
                                     }
@@ -424,14 +424,14 @@ YSettingItemPage {
                                 width: 48
                                 height: 28
                                 radius: 6
-                                color: wallpaperManager.cycleInterval === modelData.value ? "#2B5278" : "#2C2C2E"
+                                color: wallpaperManager.cycleInterval === modelData.value ? YColors.blueDeep : "#2C2C2E"
                                 border.width: wallpaperManager.cycleInterval === modelData.value ? 1 : 0
-                                border.color: "#62A8EA"
+                                border.color: YColors.blueLink
 
                                 YText {
                                     anchors.centerIn: parent
                                     text: modelData.label
-                                    color: wallpaperManager.cycleInterval === modelData.value ? "#62A8EA" : "#8A9BAE"
+                                    color: wallpaperManager.cycleInterval === modelData.value ? YColors.blueLink : "#8A9BAE"
                                     font.pixelSize: 11
                                 }
 

@@ -65,7 +65,7 @@ YBackground {
 
             YButton {
                 implicitWidth: 120
-                color: "#2D2E33"
+                color: YColors.grayButton
                 text: YTranslateText.cancel
                 onClicked: {
                     hide()

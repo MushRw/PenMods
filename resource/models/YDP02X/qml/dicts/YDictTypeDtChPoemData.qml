@@ -210,7 +210,7 @@ Item {
                         id_poem_audiourl_button.icon = "audioplayer/audioplayer-play-red"
                         id_poem_audiourl_button.text = YTranslateText.chPoemReading
                         if (playRst === 1) {
-                            qmlGlobal.showToast(YTranslateText.downloadingSource, "#E9900C")
+                            qmlGlobal.showToast(YTranslateText.downloadingSource, YColors.yellow)
                         } else if (playRst === 2) {
                             qmlGlobal.showToast(YTranslateText.noNetworkTip, YColors.grayText)
                         }
@@ -284,7 +284,7 @@ Item {
                         id_poem_explain_button.icon = "audioplayer/audioplayer-explain"
                         id_poem_explain_button.text = YTranslateText.chPoemExplain
                         if (playRst === 1) {
-                            qmlGlobal.showToast(YTranslateText.downloadingSource, "#E9900C")
+                            qmlGlobal.showToast(YTranslateText.downloadingSource, YColors.yellow)
                         } else if (playRst === 2) {
                             qmlGlobal.showToast(YTranslateText.noNetworkTip, YColors.grayText)
                         }

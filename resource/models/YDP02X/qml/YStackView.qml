@@ -17,7 +17,7 @@ Item {
     Rectangle {
         id: id_stack_view_bg
         anchors.fill: parent
-        color: "#000000"
+        color: YColors.black
         opacity: currentPopIdValid
     }
 

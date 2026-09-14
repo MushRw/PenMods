@@ -85,7 +85,7 @@ YBackground {
                     implicitWidth: parent.width
                     readonly property bool isPlaying: (YEnum.PLAYING === mediaPlayerManager.playState)
                                                       && (mediaManager.playingMediaId === model.modelData.id)
-                    color: isPlaying ? YColors.red : "#2D2E33"
+                    color: isPlaying ? YColors.red : YColors.grayButton
                     mouseAreaMargins: -4
                     textItem.width: parent.width - 20
 

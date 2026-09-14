@@ -85,7 +85,7 @@ Item {
             Rectangle {
                 height: id_touch_regulator_root.height
                 width: id_touch_regulator_root.width
-                color: "#FFFFFF"
+                color: YColors.white
                 radius: height/2
                 smooth: true
             }

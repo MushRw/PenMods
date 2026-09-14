@@ -108,7 +108,7 @@ Item {
         color: "#CC1A1B1F"
         scale: root.menuScale
         clip: true
-        border.color: "#3F3F3F"
+        border.color: YColors.border
         border.width: 0.5
 
         Behavior on height {
@@ -126,7 +126,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: 14
-                    color: editMouse.pressed ? "#3F3F3F" : "transparent"
+                    color: editMouse.pressed ? YColors.border : "transparent"
                     Behavior on color { ColorAnimation { duration: 50 } }
                 }
 
@@ -147,7 +147,7 @@ Item {
 
             Rectangle {
                 width: parent.width; height: 0.5
-                color: "#444444"
+                color: YColors.pressed
                 visible: root.chatModel && root.targetIndex >= 0 && root.targetIndex < root.chatModel.count && root.chatModel.get(root.targetIndex).isUser
             }
 
@@ -159,7 +159,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: 14
-                    color: regenerateMouse.pressed ? "#3F3F3F" : "transparent"
+                    color: regenerateMouse.pressed ? YColors.border : "transparent"
                     Behavior on color { ColorAnimation { duration: 50 } }
                 }
 
@@ -180,7 +180,7 @@ Item {
 
             Rectangle {
                 width: parent.width; height: 0.5
-                color: "#444444"
+                color: YColors.pressed
                 visible: root.chatModel && root.targetIndex >= 0 && root.targetIndex < root.chatModel.count && !root.chatModel.get(root.targetIndex).isUser
             }
 
@@ -190,7 +190,7 @@ Item {
 
                 Rectangle {
                     anchors.fill: parent
-                    color: deleteSingleMouse.pressed ? "#3F3F3F" : "transparent"
+                    color: deleteSingleMouse.pressed ? YColors.border : "transparent"
                     Behavior on color { ColorAnimation { duration: 50 } }
                 }
 
@@ -216,7 +216,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: 14
-                    color: deleteMouse.pressed ? "#3F3F3F" : "transparent"
+                    color: deleteMouse.pressed ? YColors.border : "transparent"
                     Behavior on color { ColorAnimation { duration: 50 } }
                 }
 

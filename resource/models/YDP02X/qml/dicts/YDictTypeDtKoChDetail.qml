@@ -59,7 +59,7 @@ Item {
                     font.family: qmlGlobal.fontFamilyKoKr
                     font.pixelSize: 30
                     textFormat: YTextMedium.RichText
-                    color: "#FFFFFF"
+                    color: YColors.white
                     width: parent.width
                     height: contentHeight
                     text: headWordCur
@@ -179,7 +179,7 @@ Item {
                                                     font.family: qmlGlobal.fontFamilyZhCn
                                                     textFormat: YText.RichText
                                                     wrapMode: YText.Wrap
-                                                    color: "#FFFFFF"
+                                                    color: YColors.white
                                                     text: {
                                                         //释义和拼音
                                                         let qsMeanRaw = typeof trsObj.tr == "string" ? trsObj.tr : ""
@@ -427,7 +427,7 @@ Item {
             lineHeightMode: Text.FixedHeight
             lineHeight: 32
             font.weight: Font.Normal
-            color: "#666873"
+            color: YColors.textMuted
             wrapMode: YTextBase.Wrap
             textFormat: YTextBase.RichText
             horizontalAlignment: YTextBase.AlignHCenter

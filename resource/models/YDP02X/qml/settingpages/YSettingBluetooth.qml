@@ -83,7 +83,7 @@ YSettingItemPage {
 
             onConnectFinished: {
                 if (!bSuc) {
-                    qmlGlobal.showToast(YTranslateText.connectFaild, "#E9900C")
+                    qmlGlobal.showToast(YTranslateText.connectFaild, YColors.yellow)
                 } else {
                     id_setting_bluetooth_view.positionViewAtBeginning()
                 }

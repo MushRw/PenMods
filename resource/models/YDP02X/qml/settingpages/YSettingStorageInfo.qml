@@ -52,7 +52,7 @@ YSettingItemPage {
             anchors.right: parent.right
             anchors.top: id_tip.bottom
             implicitHeight: 50
-            color: "#2D2E33"
+            color: YColors.grayButton
             radius: height/2
             smooth: true
 
