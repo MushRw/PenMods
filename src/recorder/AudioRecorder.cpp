@@ -262,6 +262,13 @@ PEN_HOOK(uint64, _ZN13YRecordCenter8startAsrEv, uint64 self, void* a2, void* a3,
     return ++*((uint64*)self + 14);
 }
 
+PEN_HOOK(uint64, _ZN13YRecordCenter10voiceStartEy, uint64 self, uint64 a2) {
+    // 按需求关掉原厂语音助手：长按语音键走的是 voiceStart（不是 startAsr），
+    // 同样不转发 origin，从源头就不启动。页面层另有"拉起即退回"兜底。
+    spdlog::debug("[AudioRecorder] 忽略 voiceStart（原厂语音助手已关闭）");
+    return ++*((uint64*)self + 14);
+}
+
 PEN_HOOK(
     uint64,
     _ZN13YRecordCenter17startFollowSpeechERK7QStringS2_,
