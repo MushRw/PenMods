@@ -88,6 +88,14 @@ YBackButtonPage {
     onBackButtonClicked: {
         stop();
     }
+    // 兜底：页面被销毁（不只是按返回键，比如被别的页面顶掉/应用退出）时，
+    // 如果还在录，立刻停掉，别让麦克风留在打开状态。
+    Component.onDestruction: {
+        if (audioRecorder.state === AudioRecorder.ActiveState
+                || audioRecorder.state === AudioRecorder.WaitingState) {
+            stop();
+        }
+    }
     Flickable {
         id: id_item_container
 
