@@ -506,7 +506,7 @@ Item {
                     radius: 14
                     color: "transparent"
                     border.width: 2
-                    border.color: YColors.border
+                    border.color: "#3F3F3F"
                 }
                 Rectangle {
                     anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: -1 }
@@ -542,16 +542,16 @@ Item {
         z: 6
 
         // 上
-        Rectangle { x: parent.width / 2 - 8; y: 4; width: 16; height: 16; radius: 8; color: YColors.scrim
+        Rectangle { x: parent.width / 2 - 8; y: 4; width: 16; height: 16; radius: 8; color: "#88000000"
             Text { anchors.centerIn: parent; text: "▲"; color: "white"; font.pixelSize: 8 } }
             // 下
-            Rectangle { x: parent.width / 2 - 8; y: parent.height - 20; width: 16; height: 16; radius: 8; color: YColors.scrim
+            Rectangle { x: parent.width / 2 - 8; y: parent.height - 20; width: 16; height: 16; radius: 8; color: "#88000000"
                 Text { anchors.centerIn: parent; text: "▼"; color: "white"; font.pixelSize: 8 } }
                 // 左
-                Rectangle { x: 4; y: parent.height / 2 - 8; width: 16; height: 16; radius: 8; color: YColors.scrim
+                Rectangle { x: 4; y: parent.height / 2 - 8; width: 16; height: 16; radius: 8; color: "#88000000"
                     Text { anchors.centerIn: parent; text: "◀"; color: "white"; font.pixelSize: 8 } }
                     // 右
-                    Rectangle { x: parent.width - 20; y: parent.height / 2 - 8; width: 16; height: 16; radius: 8; color: YColors.scrim
+                    Rectangle { x: parent.width - 20; y: parent.height / 2 - 8; width: 16; height: 16; radius: 8; color: "#88000000"
                         Text { anchors.centerIn: parent; text: "▶"; color: "white"; font.pixelSize: 8 } }
     }
 
@@ -574,7 +574,7 @@ Item {
             Repeater {
                 model: capturedImages
                 Rectangle {
-                    width: 20; height: 14; radius: 1; color: YColors.border
+                    width: 20; height: 14; radius: 1; color: "#3F3F3F"
                     border.width: 1; border.color: index === capturedImages.length - 1 ? YColors.green : "#555555"
                     Image {
                         anchors.fill: parent; anchors.margins: 1
@@ -619,7 +619,7 @@ Item {
         id: bottomNavBar
         anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
         height: 30
-        color: YColors.scrimStrong
+        color: "#CC000000"
         z: 10
         visible: (imageLoaded || capturedImages.length > 0) && !processing
 

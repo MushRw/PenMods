@@ -1025,7 +1025,7 @@ YPage {
                 sourceSize: Qt.size(18, 18)
                 color: YColors.grayNormal
                 border.width: 1
-                border.color: YColors.border
+                border.color: "#3F3F3F"
                 onValidClicked: showKeyboard()
             }
             YIconButton {
@@ -1036,7 +1036,7 @@ YPage {
                 sourceSize: Qt.size(18, 18)
                 color: YColors.grayNormal
                 border.width: 1
-                border.color: YColors.border
+                border.color: "#3F3F3F"
                 onValidClicked: id_more_menu.show()
             }
             YIconButton {
@@ -1047,7 +1047,7 @@ YPage {
                 sourceSize: Qt.size(18, 18)
                 color: YColors.grayNormal
                 border.width: 1
-                border.color: YColors.border
+                border.color: "#3F3F3F"
                 onValidClicked: id_pop_container.show("settingpages/ChatAssistantSettings")
             }
         }
@@ -1076,7 +1076,7 @@ YPage {
             radius: 8
             color: YColors.grayNormal
             border.width: 1
-            border.color: YColors.border
+            border.color: "#3F3F3F"
             visible: id_chat_assistant_page.isGenerating || id_chat_assistant_page._preparingSend
             opacity: visible ? 1.0 : 0.0
             anchors {
