@@ -315,7 +315,7 @@ Column {
 
                 function _tableHtml() {
                     var html = '<table border="0" cellpadding="3" cellspacing="0" width="100%">';
-                    html += '<tr bgcolor="#2D2E33">';
+                    html += '<tr bgcolor="' + YColors.grayButton + '">';
                     for (var h = 0; h < mHeaders.length; h++) {
                         html += '<td><font color="' + YColors.white + '"><b>' + _cellHtml(mHeaders[h]) + '</b></font></td>';
                     }
@@ -413,7 +413,7 @@ Column {
         var codeSpans = [];
         t = t.replace(/`([^`\n]+?)`/g, function(match, code) {
             var ph = "\x00C" + codeSpans.length + "\x00";
-            codeSpans.push('<code style="background:#3F3F3F;padding:1px 4px;border-radius:3px;font-family:Consolas,monospace;font-size:12px;color:#FF8B20">' + code + '</code>');
+            codeSpans.push('<code style="background:' + YColors.border + ';padding:1px 4px;border-radius:3px;font-family:Consolas,monospace;font-size:12px;color:' + YColors.orange + '">' + code + '</code>');
             return ph;
         });
 
