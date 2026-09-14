@@ -58,7 +58,7 @@ public:
     QStringList availableThemes() const;
 
     // 取当前主题下某个色值（C++ 侧用，比如 markdownToHtml 需要把颜色拼进 HTML）
-    QString color(const QString& name) const { return mThemes.value(mId).value(name); }
+    QString color(const QString& name) const { return mThemes.value(mId).value(name).toString(); }
 
     QString black() const { return color("black"); }
     QString white() const { return color("white"); }
