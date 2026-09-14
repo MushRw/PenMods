@@ -39,11 +39,14 @@ YBackButtonAudioPage {
                 }
             }
 
+            // 有道听力：按需求去掉入口（隐藏并让位置布局不再占位）
             YAudioPageDomainButton {
                 id: id_yd_listening_button
                 name: YTranslateText.ydListening
                 count: columnManager.listeningCount + YTranslateText.pieces
                 imageName: "audiopage/yd_listening"
+                visible: false
+                height: 0
 
                 function enterPage() {
                     qmlGlobal.reinitYDListening()
@@ -55,11 +58,14 @@ YBackButtonAudioPage {
                 }
             }
 
+            // 扫读音频：按需求去掉入口
             YAudioPageDomainButton {
                 id: id_scan_reading_button
                 name: YTranslateText.myProductionAudios
                 count: columnManager.productionCount + YTranslateText.pieces
                 imageName: "audiopage/scan_audio"
+                visible: false
+                height: 0
 
                 onValidClicked: {
                     logManager.sendHttpLog("action=listening_make_click")
