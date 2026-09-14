@@ -94,6 +94,68 @@ YSettingItemPage {
 
             // ======================================
 
+            // 主题：切换 theme.id 会让所有绑定 YColors 的界面立刻重绘，并且写进 config.json
+            YText {
+                id: id_title_theme
+                font.pixelSize: 16
+                font.italic: true
+                color: YColors.grayText
+                wrapMode: YText.Wrap
+                lineHeightMode: YTextBase.FixedHeight
+                lineHeight: 24
+                width: parent.width
+                text: "主题"
+            }
+
+            Row {
+                spacing: 8
+
+                Repeater {
+                    model: theme.availableThemes
+
+                    Rectangle {
+                        width: 96
+                        height: 34
+                        radius: 8
+                        color: theme.id === modelData ? YColors.blueRect : YColors.grayButton
+                        border.width: 1
+                        border.color: YColors.border
+
+                        YText {
+                            anchors.centerIn: parent
+                            font.pixelSize: 13
+                            text: {
+                                if (modelData === "official")
+                                    return "官方深灰";
+                                if (modelData === "pureBlack")
+                                    return "纯黑省电";
+                                return modelData;
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                theme.id = modelData;
+                                qmlGlobal.showToast("主题已切换：" + modelData);
+                            }
+                        }
+                    }
+                }
+            }
+
+            YText {
+                font.pixelSize: 14
+                color: YColors.grayText
+                wrapMode: YText.Wrap
+                lineHeightMode: YTextBase.FixedHeight
+                lineHeight: 20
+                width: parent.width
+                text: "切换后整个界面立刻换色，并保存在 config.json（重启保持）。"
+            }
+
+            // ======================================
+
             YText {
                 id: id_title_other
                 font.pixelSize: 16
