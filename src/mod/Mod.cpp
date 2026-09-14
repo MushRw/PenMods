@@ -266,6 +266,7 @@ PEN_HOOK(bool, license_verify) { return true; }
 #include "system/sound/ASound.h"
 #include "system/sound/AudioDaemon.h"
 
+#include "theme/ThemeManager.h"
 #include "torch/Torch.h"
 
 #include "tweaker/ColumnDBLimiter.h"
@@ -350,6 +351,7 @@ __attribute__((constructor)) static void BeforeMain() {
     INSTANCE(ColumnDBLimiter);
     INSTANCE(KeyBoard);
     INSTANCE(LoggerMonitor);
+    INSTANCE(ThemeManager);
     INSTANCE(QueryTweaks);
     INSTANCE(TextBookHelper);
     INSTANCE(WordBookTweaks);

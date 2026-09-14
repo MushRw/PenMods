@@ -135,6 +135,9 @@ Config::Config() : Logger("Config") {
         {"capture", {
             {"enabled", false}
         }},
+        {"theme", {
+            {"id", "official"}
+        }},
         {"ai", {
             {"auto_send_scan", true},
             {"speech_assistant", false},
