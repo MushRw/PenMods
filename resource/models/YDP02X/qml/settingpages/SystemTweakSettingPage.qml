@@ -93,41 +93,6 @@ YSettingItemPage {
             }
 
             // ======================================
-            // 主题（测试）：切换后所有绑定了 YColors 的界面立刻重绘。
-            // 目前只有两套深色色板，且不持久化（重启回到 official）。
-            YText {
-                id: id_title_theme
-                font.pixelSize: 16
-                font.italic: true
-                color: YColors.grayText
-                wrapMode: YText.Wrap
-                lineHeightMode: YTextBase.FixedHeight
-                lineHeight: 24
-                width: parent.width
-                text: "主题（测试）"
-            }
-
-            YSettingSwitchItem {
-                implicitHeight: 54
-                title: "纯黑省电主题"
-                switchOn: YColors.themeId === "pureBlack"
-                interval: 0
-                onTimerTriggered: {
-                    YColors.themeId = switchOn ? "pureBlack" : "official"
-                }
-            }
-
-            YText {
-                font.pixelSize: 14
-                color: YColors.grayText
-                wrapMode: YText.Wrap
-                lineHeightMode: YTextBase.FixedHeight
-                lineHeight: 20
-                width: parent.width
-                text: "打开后底色压到接近全黑（省电），整个界面立刻换色；当前不保存，重启回到默认。"
-            }
-
-            // ======================================
 
             YText {
                 id: id_title_other
