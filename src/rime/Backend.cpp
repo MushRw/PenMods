@@ -20,10 +20,8 @@ void Backend::initialize(QQmlEngine *engine, QJSEngine *scriptEngine)
     // 1. 注册 QML 类型
     qmlRegisterType<RimeWrapper>("com.youdao.input", 1, 0, "RimeWrapper");
 
-    // 2. 执行 Rime 的全局初始化 (加载字典等耗时操作)
-    // 这样当 QML 创建 RimeWrapper 实例时，Backend 已经准备好了
-    RimeWrapper::globalInitialize();
-    
+    // Rime 全局初始化（加载 6.7MB 词库 + start_maintenance）已改到 RimeWrapper
+    // 构造函数里惰性触发：QML 只在打开输入页时才 new 出实例，不输入法就不付这份代价。
     // 注意：不需要创建 m_rimeWrapper 实例给 setContextProperty
     // 因为 QML 文件里自己写了 "RimeWrapper { id: ... }"
     // QML 会自己 new 一个出来，那个 new 出来的实例会自动调用构造函数创建 Session

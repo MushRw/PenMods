@@ -30,6 +30,10 @@ RimeWrapper::RimeWrapper(QObject* parent) : QObject(parent), Logger("RimeWrapper
         s_api = rime_get_api();
     }
 
+    // 惰性初始化：本实例是 QML 用到输入法（打开输入页）时才创建的，
+    // 所以把 librime 的全局初始化放在这里，开机阶段不再做。
+    globalInitialize();
+
     if (s_api && s_api->create_session) {
         m_sessionId = s_api->create_session();
         if (m_sessionId) {
