@@ -1,4 +1,5 @@
 import QtQuick 2.12
+import "../../commons"
 
 Column {
     id: root
@@ -34,7 +35,7 @@ Column {
         text: root.rawText
         textFormat: Text.PlainText
         wrapMode: Text.Wrap
-        color: "#FFFFFF"
+        color: YColors.white
         font.pixelSize: 14
         font.family: root.fontFamily || ""
         lineHeight: 1.3
@@ -116,8 +117,8 @@ Column {
             width: root.maxWidth
             height: codeLabel.implicitHeight + 16
             radius: 6
-            color: "#1A1B1F"
-            border.color: "#3F3F3F"
+            color: YColors.grayNormal
+            border.color: YColors.border
             border.width: 1
 
             Text {
@@ -127,7 +128,7 @@ Column {
                 text: parent.mCode
                 textFormat: Text.PlainText
                 wrapMode: Text.Wrap
-                color: "#FFFFFF"
+                color: YColors.white
                 font.pixelSize: 12
                 font.family: "Courier New, Consolas, monospace"
                 lineHeight: 1.4
@@ -170,7 +171,7 @@ Column {
             textFormat: Text.RichText
             width: Math.min(implicitWidth, root.maxWidth)
             wrapMode: Text.Wrap
-            color: "#FFFFFF"
+            color: YColors.white
             font.pixelSize: _headingSize(mLevel)
             font.bold: true
             font.family: root.fontFamily || ""
@@ -205,7 +206,7 @@ Column {
 
                     Text {
                         text: listBlockRoot.mOrdered ? (index + 1) + "." : "•"
-                        color: "#AAAAAA"
+                        color: YColors.textSecondary
                         font.pixelSize: 14
                         font.family: root.fontFamily || ""
                         width: listBlockRoot.mOrdered ? 20 : 12
@@ -239,7 +240,7 @@ Column {
             Rectangle {
                 width: 3
                 height: quoteCol.height
-                color: "#555555"
+                color: YColors.graySwitchOff
                 radius: 1
             }
 
@@ -269,7 +270,7 @@ Column {
             textFormat: Text.RichText
             width: parent ? parent.width : root.maxWidth
             wrapMode: Text.Wrap
-            color: "#AAAAAA"
+            color: YColors.textSecondary
             font.pixelSize: 14
             font.family: root.fontFamily || ""
             font.italic: true
@@ -283,7 +284,7 @@ Column {
         Rectangle {
             width: root.maxWidth
             height: 1
-            color: "#444444"
+            color: YColors.pressed
         }
     }
 
@@ -297,8 +298,8 @@ Column {
             width: root.maxWidth
             height: tableText.implicitHeight + 2
             radius: 4
-            color: "#1A1B1F"
-            border.color: "#3F3F3F"
+            color: YColors.grayNormal
+            border.color: YColors.border
             border.width: 1
 
             Text {
@@ -308,23 +309,23 @@ Column {
                 text: _tableHtml()
                 textFormat: Text.RichText
                 wrapMode: Text.Wrap
-                color: "#FFFFFF"
+                color: YColors.white
                 font.pixelSize: 11
                 font.family: root.fontFamily || ""
                 lineHeight: 1.2
 
                 function _tableHtml() {
                     var html = '<table border="0" cellpadding="3" cellspacing="0" width="100%">';
-                    html += '<tr bgcolor="#2D2E33">';
+                    html += '<tr bgcolor="' + YColors.grayButton + '">';
                     for (var h = 0; h < mHeaders.length; h++) {
-                        html += '<td><font color="#FFFFFF"><b>' + _cellHtml(mHeaders[h]) + '</b></font></td>';
+                        html += '<td><font color="' + YColors.white + '"><b>' + _cellHtml(mHeaders[h]) + '</b></font></td>';
                     }
                     html += '</tr>';
                     for (var r = 0; r < mRows.length; r++) {
-                        var bg = (r % 2 === 0) ? '#1A1B1F' : '#2D2E33';
+                        var bg = (r % 2 === 0) ? YColors.grayNormal : YColors.grayButton;
                         html += '<tr bgcolor="' + bg + '">';
                         for (var c = 0; c < mRows[r].length; c++) {
-                            html += '<td><font color="#FFFFFF">' + _cellHtml(mRows[r][c]) + '</font></td>';
+                            html += '<td><font color="' + YColors.white + '">' + _cellHtml(mRows[r][c]) + '</font></td>';
                         }
                         html += '</tr>';
                     }
@@ -380,11 +381,11 @@ Column {
             textFormat: Text.RichText
             width: Math.min(implicitWidth, root.maxWidth)
             wrapMode: Text.Wrap
-            color: "#FFFFFF"
+            color: YColors.white
             font.pixelSize: 14
             font.family: root.fontFamily || ""
             lineHeight: 1.3
-            linkColor: "#F03043"
+            linkColor: YColors.red
             verticalAlignment: Text.AlignVCenter
         }
     }
@@ -413,12 +414,12 @@ Column {
         var codeSpans = [];
         t = t.replace(/`([^`\n]+?)`/g, function(match, code) {
             var ph = "\x00C" + codeSpans.length + "\x00";
-            codeSpans.push('<code style="background:#3F3F3F;padding:1px 4px;border-radius:3px;font-family:Consolas,monospace;font-size:12px;color:#FF8B20">' + code + '</code>');
+            codeSpans.push('<code style="background:' + YColors.border + ';padding:1px 4px;border-radius:3px;font-family:Consolas,monospace;font-size:12px;color:' + YColors.orange + '">' + code + '</code>');
             return ph;
         });
 
-        t = t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<a href="$2" style="color:#F03043">[$1]</a>');
-        t = t.replace(/\[([^\]]+?)\]\(([^)]+?)\)/g, '<a href="$2" style="color:#F03043;text-decoration:none">$1</a>');
+        t = t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<a href="$2" style="color:' + YColors.red + '">[$1]</a>');
+        t = t.replace(/\[([^\]]+?)\]\(([^)]+?)\)/g, '<a href="$2" style="color:' + YColors.red + ';text-decoration:none">$1</a>');
         t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<b><i>$1</i></b>');
         t = t.replace(/___(.+?)___/g, '<b><i>$1</i></b>');
         t = t.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
@@ -426,7 +427,7 @@ Column {
         t = t.replace(/\*(.+?)\*/g, '<i>$1</i>');
         t = t.replace(/_(.+?)_/g, '<i>$1</i>');
         t = t.replace(/~~(.+?)~~/g, '<s>$1</s>');
-        t = t.replace(/==(.+?)==/g, '<span style="background:#33E9900C">$1</span>');
+        t = t.replace(/==(.+?)==/g, '<span style="background:#33' + YColors.yellow.substring(1) + '">$1</span>');
 
         for (var i = 0; i < codeSpans.length; i++) {
             t = t.replace("\x00C" + i + "\x00", codeSpans[i]);
