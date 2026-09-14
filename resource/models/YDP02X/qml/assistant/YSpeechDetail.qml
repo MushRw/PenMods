@@ -253,7 +253,7 @@ YPage {
                         textFormat: YText.PlainText
                         text: content.result[0].text
                         implicitHeight: 38
-                        color: "#2d2e33"
+                        color: YColors.grayButton
                         onVisibleChanged: {
                             if (visible) {
                                 qmlGlobal.audioPlayId = soundCenter.play(content.result[0].title, "ch");
@@ -358,7 +358,7 @@ YPage {
                         implicitHeight: 38
                         textFontFamily: qmlGlobal.fontFamily
                         textFormat: YText.PlinText
-                        color: "#2d2e33"
+                        color: YColors.grayButton
                         text: YTranslateText.pronunciation
                         visible: resType == YEnum.WordENMeanResult
                         onValidClicked: {
@@ -468,7 +468,7 @@ YPage {
                             wrapMode: YTextBase.Wrap
                             verticalAlignment: YTextBase.AlignVCenter
                             text: model.modelData
-                            color: "#ffffff"
+                            color: YColors.white
                         }
                     }
                 }

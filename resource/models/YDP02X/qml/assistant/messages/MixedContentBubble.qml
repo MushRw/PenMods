@@ -34,7 +34,7 @@ Column {
         text: root.rawText
         textFormat: Text.PlainText
         wrapMode: Text.Wrap
-        color: "#FFFFFF"
+        color: YColors.white
         font.pixelSize: 14
         font.family: root.fontFamily || ""
         lineHeight: 1.3
@@ -117,7 +117,7 @@ Column {
             height: codeLabel.implicitHeight + 16
             radius: 6
             color: "#1A1B1F"
-            border.color: "#3F3F3F"
+            border.color: YColors.border
             border.width: 1
 
             Text {
@@ -127,7 +127,7 @@ Column {
                 text: parent.mCode
                 textFormat: Text.PlainText
                 wrapMode: Text.Wrap
-                color: "#FFFFFF"
+                color: YColors.white
                 font.pixelSize: 12
                 font.family: "Courier New, Consolas, monospace"
                 lineHeight: 1.4
@@ -170,7 +170,7 @@ Column {
             textFormat: Text.RichText
             width: Math.min(implicitWidth, root.maxWidth)
             wrapMode: Text.Wrap
-            color: "#FFFFFF"
+            color: YColors.white
             font.pixelSize: _headingSize(mLevel)
             font.bold: true
             font.family: root.fontFamily || ""
@@ -205,7 +205,7 @@ Column {
 
                     Text {
                         text: listBlockRoot.mOrdered ? (index + 1) + "." : "•"
-                        color: "#AAAAAA"
+                        color: YColors.textSecondary
                         font.pixelSize: 14
                         font.family: root.fontFamily || ""
                         width: listBlockRoot.mOrdered ? 20 : 12
@@ -269,7 +269,7 @@ Column {
             textFormat: Text.RichText
             width: parent ? parent.width : root.maxWidth
             wrapMode: Text.Wrap
-            color: "#AAAAAA"
+            color: YColors.textSecondary
             font.pixelSize: 14
             font.family: root.fontFamily || ""
             font.italic: true
@@ -298,7 +298,7 @@ Column {
             height: tableText.implicitHeight + 2
             radius: 4
             color: "#1A1B1F"
-            border.color: "#3F3F3F"
+            border.color: YColors.border
             border.width: 1
 
             Text {
@@ -308,7 +308,7 @@ Column {
                 text: _tableHtml()
                 textFormat: Text.RichText
                 wrapMode: Text.Wrap
-                color: "#FFFFFF"
+                color: YColors.white
                 font.pixelSize: 11
                 font.family: root.fontFamily || ""
                 lineHeight: 1.2
@@ -321,7 +321,7 @@ Column {
                     }
                     html += '</tr>';
                     for (var r = 0; r < mRows.length; r++) {
-                        var bg = (r % 2 === 0) ? '#1A1B1F' : '#2D2E33';
+                        var bg = (r % 2 === 0) ? '#1A1B1F' : YColors.grayButton;
                         html += '<tr bgcolor="' + bg + '">';
                         for (var c = 0; c < mRows[r].length; c++) {
                             html += '<td><font color="#FFFFFF">' + _cellHtml(mRows[r][c]) + '</font></td>';
@@ -380,11 +380,11 @@ Column {
             textFormat: Text.RichText
             width: Math.min(implicitWidth, root.maxWidth)
             wrapMode: Text.Wrap
-            color: "#FFFFFF"
+            color: YColors.white
             font.pixelSize: 14
             font.family: root.fontFamily || ""
             lineHeight: 1.3
-            linkColor: "#F03043"
+            linkColor: YColors.red
             verticalAlignment: Text.AlignVCenter
         }
     }
