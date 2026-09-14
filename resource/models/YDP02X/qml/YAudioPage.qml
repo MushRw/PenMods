@@ -39,6 +39,18 @@ YBackButtonAudioPage {
                 }
             }
 
+            // 插件管理：从首页搬到这里，沿用首页那张图标
+            YAudioPageDomainButton {
+                id: id_plugin_manager_button
+                name: "插件管理"
+                count: ""
+                imageName: "qrc:/images/home/home-plugin.png"
+
+                onValidClicked: {
+                    id_pop_layer.show("PluginManager")
+                }
+            }
+
             // 有道听力：按需求去掉入口（隐藏并让位置布局不再占位）
             YAudioPageDomainButton {
                 id: id_yd_listening_button

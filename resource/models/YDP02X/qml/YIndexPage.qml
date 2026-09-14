@@ -426,11 +426,12 @@ YBackground {
                 "pageIndex": YEnum.PageIndex.History,
                 "logAction": "action=home_history_click"
             });
-            append({
-                "iconFg": "qrc:/images/home/home-plugin.png",
-                "pageIndex": PageIndex.PluginManager,
-                "logAction": ""
-            });
+            // 插件管理入口已搬到「听力练习」页（YAudioPage），首页不再保留
+            // append({
+            //     "iconFg": "qrc:/images/home/home-plugin.png",
+            //     "pageIndex": PageIndex.PluginManager,
+            //     "logAction": ""
+            // });
             append({
                 "iconFg": "home-setting",
                 "pageIndex": YEnum.PageIndex.Setting,
