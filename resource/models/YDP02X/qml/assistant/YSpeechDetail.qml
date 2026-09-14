@@ -542,12 +542,12 @@ YPage {
                 let showtext = ""
                 if (item.type == "AUTHOR"){
                     textMetrics.text = item.intro
-                    showtext = ('<font size="4" color="#ffffff">%1</font> <p>%2').arg(item.name).arg(textMetrics.elidedText);
+                    showtext = ('<font size="4" color="' + YColors.white + '">%1</font> <p>%2').arg(item.name).arg(textMetrics.elidedText);
                     append({"peomInfo": showtext, "peomId": item.name, "peomTitle": item.name, "content": item.intro})
                 }
                 else if (item.type == "POEM"){
                     textMetrics.text = item.content
-                    showtext = ('<font size="4" color="#ffffff">%1</font><p>%2(%3)<p>%4').arg(item.title).arg(item.author).arg(item.dynasty).arg(textMetrics.elidedText);
+                    showtext = ('<font size="4" color="' + YColors.white + '">%1</font><p>%2(%3)<p>%4').arg(item.title).arg(item.author).arg(item.dynasty).arg(textMetrics.elidedText);
                     append({"peomInfo": showtext, "peomId": item.id, "peomTitle": item.title, "content": item.content})
                 }
             })

@@ -317,14 +317,14 @@ Column {
                     var html = '<table border="0" cellpadding="3" cellspacing="0" width="100%">';
                     html += '<tr bgcolor="#2D2E33">';
                     for (var h = 0; h < mHeaders.length; h++) {
-                        html += '<td><font color="#FFFFFF"><b>' + _cellHtml(mHeaders[h]) + '</b></font></td>';
+                        html += '<td><font color="' + YColors.white + '"><b>' + _cellHtml(mHeaders[h]) + '</b></font></td>';
                     }
                     html += '</tr>';
                     for (var r = 0; r < mRows.length; r++) {
                         var bg = (r % 2 === 0) ? '#1A1B1F' : YColors.grayButton;
                         html += '<tr bgcolor="' + bg + '">';
                         for (var c = 0; c < mRows[r].length; c++) {
-                            html += '<td><font color="#FFFFFF">' + _cellHtml(mRows[r][c]) + '</font></td>';
+                            html += '<td><font color="' + YColors.white + '">' + _cellHtml(mRows[r][c]) + '</font></td>';
                         }
                         html += '</tr>';
                     }
