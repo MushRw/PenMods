@@ -481,6 +481,14 @@ YBackground {
         visible: count > 0
         logTag: "YIndexPage plugin"
 
+        // 插件页全部关掉后，通知 C++ 回收 QML 组件缓存 + JS 堆。
+        // 页面对象本身 YDynamicPageStack 会销毁，但编译过的组件和 JS 堆不会立刻还，
+        // 笔上内存紧张，这里显式收一次（日志里会打印前后 VmRSS）。
+        onCountChanged: {
+            if (count === 0 && typeof pluginManager !== "undefined")
+                pluginManager.onPluginPageClosed();
+        }
+
         // 事件屏障：位于动态插件内容之后（z:-1），
         // 插件自身 MouseArea 优先接收事件，
         // 未被覆盖区域由屏障吸收，防止穿透到下层
