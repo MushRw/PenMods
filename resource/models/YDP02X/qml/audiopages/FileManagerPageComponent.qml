@@ -121,7 +121,7 @@ YPage {
                     visible: fileManager.usbDiskPresent
                     title: "U 盘"
                     value: fileManager.usbDiskPath
-                    imageName: "settings/info_more_arrow"
+                    iconComponent.source: res.getDisk('settings/info_more_arrow')
                     onClicked: {
                         if (!fileManager.openUsbDisk())
                             qmlGlobal.showToast("U 盘已断开", YColors.yellow);
