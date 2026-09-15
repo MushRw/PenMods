@@ -33,6 +33,10 @@ class FileManager : public QAbstractListModel, public Singleton<FileManager>, pr
     // File visibility
     Q_PROPERTY(bool showHiddenFiles READ getShowHiddenFiles WRITE setShowHiddenFiles NOTIFY showHiddenFilesChanged);
 
+    // U 盘（厂商自带 usbmount 会把它挂到 /media/usbN，这里只做"发现 + 跳转"，不自己挂载）
+    Q_PROPERTY(bool usbDiskPresent READ isUsbDiskPresent NOTIFY usbDiskChanged);
+    Q_PROPERTY(QString usbDiskPath READ getUsbDiskPath NOTIFY usbDiskChanged);
+
 public:
     [[nodiscard]] int rowCount(const QModelIndex& parent) const override;
 
@@ -99,6 +103,11 @@ public:
 
     void setShowHiddenFiles(bool);
 
+    // U 盘：只做"发现 + 跳转"，挂载/卸载由厂商的 usbmount 负责
+    [[nodiscard]] bool    isUsbDiskPresent() const { return !mUsbDiskPath.isEmpty(); }
+    [[nodiscard]] QString getUsbDiskPath() const { return mUsbDiskPath; }
+    Q_INVOKABLE bool      openUsbDisk();
+
     Q_INVOKABLE void playFromView(const QString& fileName);
 
     Q_INVOKABLE void executeFile(const QString& fileName);
@@ -129,6 +138,9 @@ signals:
     void hidePairedLyricsChanged();
     
     void showHiddenFilesChanged();
+
+    // U 盘挂载状态变化（插入/拔出）
+    void usbDiskChanged();
 
 private:
     friend Singleton<FileManager>;
@@ -180,6 +192,11 @@ private:
     // Inotify functions
     void setupInotify();
     void cleanupInotify();
+
+    // U 盘：从 /proc/mounts 里找 /media/usbN 的挂载点
+    void    refreshUsbDisk();
+    QString mUsbDiskPath;
+    QTimer* mUsbDiskTimer{nullptr};
     void onInotifyReadyRead();
     void dispatchDirChanged();
     void addInotifyWatch(const QString& path);

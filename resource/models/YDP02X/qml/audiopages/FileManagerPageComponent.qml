@@ -110,14 +110,33 @@ YPage {
             id: id_header_component
             Item {
                 width: id_files_view.width
-                implicitHeight: 50
+                implicitHeight: 50 + (id_usb_disk_entry.visible ? 50 : 0)
+
+                // U 盘入口：厂商自带的 usbmount 已经把 U 盘挂到 /media/usbN，
+                // 这里只做"发现 + 跳转"，插上/拔下时自动出现和消失。
+                YSettingAboutClickableItem {
+                    id: id_usb_disk_entry
+                    width: parent.width
+                    implicitHeight: 50
+                    visible: fileManager.usbDiskPresent
+                    title: "U 盘"
+                    value: fileManager.usbDiskPath
+                    imageName: "settings/info_more_arrow"
+                    onClicked: {
+                        if (!fileManager.openUsbDisk())
+                            qmlGlobal.showToast("U 盘已断开", YColors.yellow);
+                    }
+                }
+
                 YTextBase {
                     color: YColors.grayText
                     font.pixelSize: 16
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.top: id_usb_disk_entry.visible ? id_usb_disk_entry.bottom : parent.top
+                    anchors.bottom: parent.bottom
                     width: parent.width
                     visible: !id_error_tip.visible
                     elide: YTextBase.ElideLeft
+                    verticalAlignment: Text.AlignVCenter
                     text: fileManager.currentTitle
                     textFormat: Text.RichText
                 }

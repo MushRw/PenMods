@@ -56,6 +56,13 @@ FileManager::FileManager() : QAbstractListModel(), Logger("FileManager") {
     // 打印后缀表：改后缀/新增格式时，日志里一眼能看到当前支持什么
     info("支持的文件后缀表:\n{}", extensionTableText().toStdString());
 
+    // U 盘：厂商自带 usbmount 会挂到 /media/usbN，这里只轮询挂载表做"发现"
+    mUsbDiskTimer = new QTimer(this);
+    mUsbDiskTimer->setInterval(5000);
+    connect(mUsbDiskTimer, &QTimer::timeout, this, &FileManager::refreshUsbDisk);
+    mUsbDiskTimer->start();
+    refreshUsbDisk();
+
     setupInotify();
     connect(&Event::getInstance(), &Event::uiCompleted, [this]() {
         if (shouldHiddenAll()) {
@@ -669,6 +676,45 @@ QString FileManager::extensionTableText() const {
         out += QString("\n  %1 -> %2 (%3)").arg(k, -6).arg(e.handler, -5).arg(e.icon);
     }
     return out;
+}
+
+// ---------------------------------------------------------------------------
+// U 盘（/media/usbN 由厂商的 usbmount 自动挂载/卸载，这里只负责"发现 + 跳转"）
+// ---------------------------------------------------------------------------
+
+void FileManager::refreshUsbDisk() {
+    QString found;
+    QFile   mounts("/proc/mounts");
+    if (mounts.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QString text = QString::fromUtf8(mounts.readAll());
+        for (const auto& line : text.split('\n')) {
+            const auto parts = line.split(' ');
+            if (parts.size() >= 2 && parts.at(1).startsWith("/media/usb")) {
+                found = parts.at(1);
+                break;
+            }
+        }
+    }
+
+    if (found == mUsbDiskPath) {
+        return;
+    }
+    mUsbDiskPath = found;
+    if (mUsbDiskPath.isEmpty()) {
+        info("U 盘已移除");
+    } else {
+        info("U 盘已挂载: {}", mUsbDiskPath.toStdString());
+    }
+    emit usbDiskChanged();
+}
+
+bool FileManager::openUsbDisk() {
+    refreshUsbDisk();
+    if (mUsbDiskPath.isEmpty()) {
+        return false;
+    }
+    // changeDir 支持绝对路径：QDir::absoluteFilePath 对绝对路径原样返回
+    return changeDir(mUsbDiskPath);
 }
 
 void FileManager::executeFile(const QString& fileName) {
