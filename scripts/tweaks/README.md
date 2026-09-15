@@ -71,3 +71,61 @@ adb shell 'mount -o remount,rw / && rm /etc/init.d/S20zramswap && sync && mount 
 ```
 
 注意：A/B 双槽的 OTA 换槽后 `/etc` 会被换掉，需要重新安装一次。
+
+---
+
+## runDictPen-malloc.sh —— 限制 glibc malloc arena，降低堆碎片
+
+### 为什么
+
+主程序内存画像（`/proc/<pid>/smaps` 按类别汇总，YDP02X）：
+
+| 类别 | 刚启动 | 跑 5 小时后 |
+| --- | --- | --- |
+| 匿名内存（heap/stack/JIT） | 45 MB | 88 MB |
+| `[heap]`（主堆） | 53 MB | 87 MB |
+| so 库 | 68 MB | 16 MB（被换出/变冷） |
+| 数据文件（字体/表） | 12 MB | 6 MB |
+| **合计 RSS** | **181 MB** | **222 MB** |
+
+其中"无路径匿名映射"那几块（26MB / 11MB / 7.7MB / 7.1MB …）会随时间从 ~30MB 涨到
+~62MB —— 这是 glibc **每个线程一个 malloc arena** 造成的碎片（44~52 线程，上限
+8 × 核数）。库只占 68MB（其中 `libmali.so` 一个就 20MB，动不了）。
+
+### 做法与实测
+
+`/usr/bin/runDictPen` 里加两行（必须在启动主程序之前）：
+
+```sh
+export MALLOC_ARENA_MAX=2
+export MALLOC_TRIM_THRESHOLD_=131072
+```
+
+| 配置 | 新启状态 VmRSS | 结论 |
+| --- | --- | --- |
+| 改前 | 181 MB | — |
+| `ARENA_MAX=2` + `TRIM=131072` | **168 MB（-14 MB / -7.4%）** | 采用 |
+| `ARENA_MAX=1` + `TRIM/MMAP=65536` | 166 MB | 只再多 1MB，单 arena 有锁竞争，弃用 |
+
+主堆 `[heap]` 从 53MB 降到 21MB，多出来的量转移到第二个 arena（总量净降）。
+
+### 安装
+
+```sh
+adb push runDictPen-malloc.sh /userdata/ && adb shell sh /userdata/runDictPen-malloc.sh
+```
+
+生效时机：**下次重启主程序**（`guardian_run` 会用新脚本重新拉起）。
+
+### 回退
+
+```sh
+adb shell 'mount -o remount,rw / && cp /userdata/runDictPen.bak /usr/bin/runDictPen && sync'
+```
+
+### 已知副作用
+
+`sed -i` 替换 `/usr/bin/runDictPen` 后，**正在运行的**启动脚本还持有被替换的旧 inode，
+于是 `mount -o remount,ro /` 会报 `Device or resource busy`，根分区会停在 rw 直到重启。
+无害（mod 自己也会临时把 `/` 挂 rw），下次重启自动恢复只读。
+
