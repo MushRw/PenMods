@@ -20,6 +20,20 @@ bool    g_rimeInitialized  = false;
 QTimer* g_idleReleaseTimer = nullptr;
 // 活着的 RimeWrapper 实例数：归零才安排回收，避免页面切换期间误释放
 int     g_liveInstances    = 0;
+
+// 当前进程 VmRSS（KB）；读不到返回 -1（用于验证"到底回收了多少"）
+qint64 currentRssKb() {
+    QFile f("/proc/self/status");
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return -1;
+    }
+    for (const auto& line : QString::fromUtf8(f.readAll()).split('\n')) {
+        if (line.startsWith("VmRSS:")) {
+            return line.mid(6).trimmed().section(' ', 0, 0).toLongLong();
+        }
+    }
+    return -1;
+}
 } // namespace
 
 // Rime 通知回调
@@ -60,14 +74,41 @@ void RimeWrapper::ensureReady() {
 
     globalInitialize();
 
-    if (s_api && s_api->create_session) {
-        m_sessionId = s_api->create_session();
-        if (m_sessionId) {
-            spdlog::debug("Rime session created: {}", m_sessionId);
-        } else {
-            spdlog::error("Failed to create Rime session");
-        }
+    tryCreateSession();
+}
+
+// 建会话：如果部署/全量维护还在跑，create_session 会直接失败（实测：
+// "Failed to create Rime session" 就出现在 initialize 之后紧跟着建会话时）。
+// 所以这里带重试，维护没结束就等着，而不是把输入法废掉。
+void RimeWrapper::tryCreateSession() {
+    if (m_sessionId || !s_api) {
+        return;
     }
+
+    if (s_api->is_maintenance_mode && s_api->is_maintenance_mode()) {
+        if (m_sessionRetry++ < 60) { // 最多等 30 秒
+            QTimer::singleShot(500, this, [this]() { tryCreateSession(); });
+            return;
+        }
+        spdlog::error("Rime 维护一直没结束，放弃建会话");
+        m_rimeReady = false; // 让下次输入重新走一遍
+        return;
+    }
+
+    m_sessionId = s_api->create_session ? s_api->create_session() : 0;
+    if (!m_sessionId) {
+        if (m_sessionRetry++ < 20) {
+            QTimer::singleShot(300, this, [this]() { tryCreateSession(); });
+            return;
+        }
+        spdlog::error("Failed to create Rime session（重试耗尽）");
+        m_rimeReady = false;
+        return;
+    }
+
+    m_sessionRetry = 0;
+    spdlog::info("Rime session created: {}", m_sessionId);
+    updateContext();
 }
 
 RimeWrapper::~RimeWrapper() {
@@ -90,18 +131,21 @@ void RimeWrapper::globalRelease() {
         return;
     }
 
-    if (s_api) {
-        // 维护线程还在跑（比如补 melt_eng 表的那次全量维护）时先等它结束，别在部署中途 finalize
-        if (s_api->join_maintenance_thread) {
-            s_api->join_maintenance_thread();
-        }
-        if (s_api->finalize) {
-            s_api->finalize();
-        }
+    // 维护线程还在跑（比如补 melt_eng 表那次全量维护）时不能 finalize，
+    // 但也不能 join —— 那会卡住 UI 线程几十秒。改成延后重试。
+    if (s_api && s_api->is_maintenance_mode && s_api->is_maintenance_mode()) {
+        spdlog::info("Rime 维护进行中，延后 3 秒再回收");
+        scheduleIdleRelease(3000);
+        return;
     }
 
+    const qint64 before = currentRssKb();
+    if (s_api && s_api->finalize) {
+        s_api->finalize();
+    }
     g_rimeInitialized = false;
-    spdlog::info("Rime 全局状态已释放（空闲回收），下次输入会重新加载词库");
+    spdlog::info("Rime 全局状态已释放（空闲回收），VmRSS {} KB -> {} KB；下次输入会重新加载词库",
+                 before, currentRssKb());
 }
 
 void RimeWrapper::scheduleIdleRelease(int delayMs) {
@@ -183,32 +227,19 @@ void RimeWrapper::globalInitialize() {
     }
 
     if (api->start_maintenance) {
-        // 原来是 start_maintenance(0)：只做增量检查。实测笔上 build/ 里**从来没有**
-        // melt_eng.table.bin（rime_ice.table.bin / prism / reverse 都在），而
-        // rime_ice.schema.yaml 里挂着 table_translator@melt_eng（英文词库，2.5 万条），
-        // 运行时加载不到表就报：
-        //     Error opening table file '.../build/melt_eng.table.bin'
-        //     Error loading table for dictionary 'melt_eng'
-        // 增量检查认为 rime_ice 已是最新，于是永远不会补这一份。
+        // 只做增量检查。
         //
-        // 这里做一次性全量维护把它补出来：start_maintenance(1) 走 staging 目录重建
-        // 再整体替换，所以**即使重编失败也不会动到现有可用的表**（不会把键盘搞坏），
-        // 失败最多是白跑一次。用 stamp 保证只跑一次，避免每次开机都全量重编。
-        const QString meltEngTable = "/userdisk/Music/Rime/build/melt_eng.table.bin";
-        const QString repairStamp  = "/userdisk/Music/Rime/build/.melt_eng_repair";
-        const bool    needRepair   = !QFile::exists(meltEngTable) && !QFile::exists(repairStamp);
-        if (needRepair) {
-            QFile stamp(repairStamp);
-            if (stamp.open(QIODevice::WriteOnly)) {
-                stamp.write("1");
-                stamp.close();
-            }
-            spdlog::info("melt_eng 词典表缺失，触发一次性全量维护补齐");
-            api->start_maintenance(1); // 1 = full_check
-        } else {
-            spdlog::info("Rime Maintenance starting...");
-            api->start_maintenance(0); // 0 = False
-        }
+        // 已知问题（试过、走不通，别再走一遍）：笔上 build/ 里从来没有
+        // melt_eng.table.bin，而 rime_ice.schema.yaml 挂着 table_translator@melt_eng，
+        // 运行时就会报 "Error opening table file .../melt_eng.table.bin"。
+        // 曾改成检测到缺失就 start_maintenance(1) 全量维护来补，实测：
+        //   1) 全量维护确实跑起来了，但**依然不生成 melt_eng.table.bin**
+        //      （librime 的部署只编译方案自身的主词典，附加 translator 的词典不编译）；
+        //   2) 维护期间 create_session() 会失败，把第一次用输入法直接搞废。
+        // 正确解法是预编译一份 table.bin 打进 rime.zip，或把该 translator 从方案里去掉；
+        // 这里先保持增量维护，配合 tryCreateSession() 的重试。
+        spdlog::info("Rime Maintenance starting...");
+        api->start_maintenance(0); // 0 = False
     }
 
     g_rimeInitialized = true;

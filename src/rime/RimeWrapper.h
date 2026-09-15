@@ -51,12 +51,17 @@ private:
     // 构造函数里什么都不做，因此即使 QML 很早就 new 出这个对象，也不会在开机阶段加载词库。
     void ensureReady();
 
+    // 建会话（带重试）：部署/全量维护进行中时 create_session 会失败，
+    // 这时要等维护结束再建，不能直接放弃——第一次用输入法恰好赶上首次部署就会踩到。
+    void tryCreateSession();
+
     void updateContext();
     void onCommit(const QString &text);
 
 private:
     RimeSessionId m_sessionId;    // Rime 会话 ID
     bool          m_rimeReady = false; // 是否已完成全局初始化 + 建会话
+    int           m_sessionRetry = 0;  // 建会话重试次数（维护未结束时用）
     QString m_preeditText;        // 预编辑文本
     QStringList m_candidates;     // 候选词列表
     
