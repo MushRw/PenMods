@@ -1,0 +1,67 @@
+#!/bin/sh
+# /etc/init.d/S20zramswap —— 把 swap 从"直接写 eMMC"改成"先在内存里压缩"
+#
+# 为什么放 S20：/etc/init.d/S21mountall.sh 会读 /etc/fstab 里的 swap 条目并 swapon，
+# 而内核**按激活顺序**分配 swap 优先级（先挂的优先级高，-1 最高）。
+# 排在 S21 之前执行，zram 就拿到 -1 被优先使用，eMMC 那个 1GB swap 变 -2 只做兜底。
+#
+# 实测（YDP02X，460MB 内存，压力测试灌 100MB 到 tmpfs）：
+#   页全部落在 zram，eMMC swap 用量保持 0；
+#   原始 14.1MB -> 压缩 3.09MB -> 实际占内存 3.5MB（这批数据压缩比 4.6x，真实数据约 2-3x）。
+#
+# 可逆：rm 掉本文件重启即可（或执行 `S20zramswap stop`）。
+# eMMC swap 始终保留为兜底，所以不会出现"没有 swap 可用"。
+
+ZRAM_DEV=/dev/zram0
+ZRAM_SYS=/sys/block/zram0
+SIZE_MB=256
+
+case "$1" in
+    start)
+        [ -e "$ZRAM_DEV" ] || { echo "S20zramswap: $ZRAM_DEV 不存在，跳过"; exit 0; }
+
+        # zram 换页便宜（内存压缩、不写盘），swappiness 提到 100，
+        # 让冷页优先压进内存，而不是把页缓存挤掉。放前面：即使下面提前退出也要生效。
+        echo 100 > /proc/sys/vm/swappiness
+
+        if grep -q zram /proc/swaps 2>/dev/null; then
+            echo "S20zramswap: zram 已在用，跳过创建"
+            exit 0
+        fi
+
+        echo 1 > $ZRAM_SYS/reset 2>/dev/null
+        if ! echo $((SIZE_MB * 1024 * 1024)) > $ZRAM_SYS/disksize; then
+            echo "S20zramswap: 设置 disksize 失败，保持原样"
+            exit 0
+        fi
+
+        mkswap "$ZRAM_DEV" >/dev/null 2>&1
+        if swapon "$ZRAM_DEV"; then
+            echo "S20zramswap: 已启用 ${SIZE_MB}MB zram swap（优先级 -1，eMMC 兜底变 -2）"
+        else
+            echo 1 > $ZRAM_SYS/reset 2>/dev/null
+            echo "S20zramswap: swapon 失败，已复位，保持原样"
+            exit 0
+        fi
+        ;;
+    stop)
+        swapoff "$ZRAM_DEV" 2>/dev/null
+        echo 1 > $ZRAM_SYS/reset 2>/dev/null
+        echo "S20zramswap: 已停用（eMMC swap 不受影响）"
+        ;;
+    status)
+        echo "--- swap 设备 ---"
+        cat /proc/swaps
+        echo "--- swappiness ---"
+        cat /proc/sys/vm/swappiness
+        echo "--- zram 统计（原始字节 / 压缩后 / 占用内存 / ...）---"
+        cat $ZRAM_SYS/mm_stat 2>/dev/null
+        echo "--- 压缩算法 ---"
+        cat $ZRAM_SYS/comp_algorithm 2>/dev/null
+        ;;
+    *)
+        echo "用法: $0 {start|stop|status}"
+        exit 1
+        ;;
+esac
+exit 0
