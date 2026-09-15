@@ -8,6 +8,8 @@
 #include <QFile>
 #include <QTimer>
 
+#include <malloc.h> // malloc_trim
+
 namespace mod::rime {
 
 RimeApi* RimeWrapper::s_api = nullptr;
@@ -144,6 +146,12 @@ void RimeWrapper::globalRelease() {
         s_api->finalize();
     }
     g_rimeInitialized = false;
+
+    // finalize() 只把 librime 的内部结构 free 掉，glibc 通常**不会**把这份堆还给内核：
+    // 实测 finalize 后 VmRSS 263544 KB -> 263588 KB，一点没降 —— 词典那 ~100MB 全留在
+    // arena 的空闲链表里。显式 trim 一次，把空闲堆真正还给系统。
+    malloc_trim(0);
+
     spdlog::info("Rime 全局状态已释放（空闲回收），VmRSS {} KB -> {} KB；下次输入会重新加载词库",
                  before, currentRssKb());
 }
