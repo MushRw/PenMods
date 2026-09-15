@@ -359,7 +359,7 @@ YBackButtonPage {
             DescribedClickableTextBox {
                 title: "视觉代理模型"
                 describe: getProxyModelName()
-                describeItem.color: fd.proxyVisionModelId ? YColors.textColor : YColors.grayText
+                describeItem.color: fd.proxyVisionModelId ? YColors.white : YColors.grayText
                 visible: !fd.capVision
                 opacityChangableWhenPressed: false
                 onClicked: {
@@ -375,7 +375,7 @@ YBackButtonPage {
             DescribedClickableTextBox {
                 title: "代理提示词"
                 describe: fd.proxyVisionPrompt || "点击输入（默认：请详细描述图片内容）"
-                describeItem.color: fd.proxyVisionPrompt ? YColors.textColor : YColors.grayText
+                describeItem.color: fd.proxyVisionPrompt ? YColors.white : YColors.grayText
                 visible: !fd.capVision
                 opacityChangableWhenPressed: false
                 onClicked: openKeyboard("proxyVisionPrompt", "请输入发给视觉模型的分析提示词")
