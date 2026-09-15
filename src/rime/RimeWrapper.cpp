@@ -5,6 +5,7 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
+#include <QFile>
 
 namespace mod::rime {
 
@@ -129,8 +130,32 @@ void RimeWrapper::globalInitialize() {
     }
 
     if (api->start_maintenance) {
-        spdlog::info("Rime Maintenance starting...");
-        api->start_maintenance(0); // 0 = False
+        // 原来是 start_maintenance(0)：只做增量检查。实测笔上 build/ 里**从来没有**
+        // melt_eng.table.bin（rime_ice.table.bin / prism / reverse 都在），而
+        // rime_ice.schema.yaml 里挂着 table_translator@melt_eng（英文词库，2.5 万条），
+        // 运行时加载不到表就报：
+        //     Error opening table file '.../build/melt_eng.table.bin'
+        //     Error loading table for dictionary 'melt_eng'
+        // 增量检查认为 rime_ice 已是最新，于是永远不会补这一份。
+        //
+        // 这里做一次性全量维护把它补出来：start_maintenance(1) 走 staging 目录重建
+        // 再整体替换，所以**即使重编失败也不会动到现有可用的表**（不会把键盘搞坏），
+        // 失败最多是白跑一次。用 stamp 保证只跑一次，避免每次开机都全量重编。
+        const QString meltEngTable = "/userdisk/Music/Rime/build/melt_eng.table.bin";
+        const QString repairStamp  = "/userdisk/Music/Rime/build/.melt_eng_repair";
+        const bool    needRepair   = !QFile::exists(meltEngTable) && !QFile::exists(repairStamp);
+        if (needRepair) {
+            QFile stamp(repairStamp);
+            if (stamp.open(QIODevice::WriteOnly)) {
+                stamp.write("1");
+                stamp.close();
+            }
+            spdlog::info("melt_eng 词典表缺失，触发一次性全量维护补齐");
+            api->start_maintenance(1); // 1 = full_check
+        } else {
+            spdlog::info("Rime Maintenance starting...");
+            api->start_maintenance(0); // 0 = False
+        }
     }
 
     is_initialized = true;
