@@ -25,11 +25,6 @@ public:
     Q_INVOKABLE void        uninstallPlugin(const QString& pluginName);
     Q_INVOKABLE void        requestPluginList();
 
-    // 插件页关闭后调用：回收 QML 组件缓存 + JS 堆，并把前后 VmRSS 写进日志。
-    // 插件自己的 .so（以及它注册的后台钩子，比如 LX-Pen 的后台播放）不能卸，
-    // 那部分常驻是设计使然；这里只收 Qt 侧那些"关了页面也不还"的内存。
-    Q_INVOKABLE void        onPluginPageClosed();
-
 signals:
     void pluginListUpdated();
     void pluginStateChanged(const QString& pluginName, bool newState);

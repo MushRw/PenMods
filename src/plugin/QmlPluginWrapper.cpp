@@ -1,29 +1,8 @@
 #include "QmlPluginWrapper.h"
-#include <QFile>
 #include <QJsonArray>
-#include <QTimer>
 #include <QUrl>
 
-#include "spdlog/spdlog.h"
-
 namespace mod {
-
-namespace {
-// 当前进程 VmRSS（KB）；读不到返回 -1
-qint64 currentRssKb() {
-    QFile f("/proc/self/status");
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        return -1;
-    }
-    for (const auto& line : QString::fromUtf8(f.readAll()).split('\n')) {
-        if (line.startsWith("VmRSS:")) {
-            // 不用 QString::SkipEmptyParts（Qt 5.15 已废弃），直接取第一个字段
-            return line.mid(6).trimmed().section(' ', 0, 0).toLongLong();
-        }
-    }
-    return -1;
-}
-} // namespace
 
 QmlPluginWrapper::QmlPluginWrapper(QObject* parent) : QObject(parent), m_pluginManager(&PluginManager::getInstance()) {
     // 连接底层插件管理器的信号
@@ -74,23 +53,6 @@ void QmlPluginWrapper::requestPluginList() {
 
 void QmlPluginWrapper::onPluginsChanged() {
     emit pluginListUpdated();
-}
-
-void QmlPluginWrapper::onPluginPageClosed() {
-    // 插件页销毁后，编译过的 QML 组件和 JS 堆里的对象不会立刻还给系统，
-    // RSS 就一直挂在那个高位上。等 2 秒（让销毁/事件收尾）再 GC + trim，
-    // 并打印前后 VmRSS —— 这样"有没有真回收"在日志里能直接看到，不靠猜。
-    QTimer::singleShot(2000, this, [this]() {
-        QQmlEngine* engine = m_pluginManager ? m_pluginManager->engine() : nullptr;
-        if (!engine) {
-            return;
-        }
-        const qint64 before = currentRssKb();
-        engine->collectGarbage();
-        engine->trimComponentCache();
-        const qint64 after = currentRssKb();
-        spdlog::info("插件页已关闭，回收 QML/JS: VmRSS {} KB -> {} KB", before, after);
-    });
 }
 
 QString QmlPluginWrapper::resolvePluginId(const QString& idOrName) const {
