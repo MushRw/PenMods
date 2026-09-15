@@ -30,6 +30,9 @@
 #include <unistd.h>
 #include <errno.h>
 
+#include <algorithm>
+#include <cstring>
+
 namespace mod::filemanager {
 
 static const char* HIDDEN_FLAG = ".HIDDEN_DIR";
@@ -49,6 +52,9 @@ FileManager::FileManager() : QAbstractListModel(), Logger("FileManager") {
 
     // 初始化路径历史，设置初始路径为根目录
     mPathHistory.push_back(mRoot);
+
+    // 打印后缀表：改后缀/新增格式时，日志里一眼能看到当前支持什么
+    info("支持的文件后缀表:\n{}", extensionTableText().toStdString());
 
     setupInotify();
     connect(&Event::getInstance(), &Event::uiCompleted, [this]() {
@@ -99,51 +105,12 @@ QVariant FileManager::data(const QModelIndex& index, int role) const {
         if (entity->isDir()) {
             return "qrc:/images/folder-empty.png";
         }
-        auto    ext = entity->suffix().toLower();
-        QString name;
-        switch (H(ext.toUtf8())) {
-        case H("mp3"):
-        case H("flac"):
-        case H("m4a"):
-            name = "mp3";
-            break;
-        case H("md"):
-            name = "md";
-            break;
-        case H("txt"):
-        case H("lrc"):
-            name = "txt";
-            break;
-        case H("json"):
-            name = "json";
-            break;
-        case H("yml"):
-        case H("yaml"):
-        case H("xml"):
-            name = "xml";
-            break;
-        case H("avi"):
-        case H("mp4"):
-        case H("mov"):
-        case H("flv"):
-        case H("mkv"):
-        case H("webm"):
-            name = "mp4";
-            break;
-        case H("png"):
-        case H("jpg"):
-        case H("jpeg"):
-        case H("gif"):
-        case H("bmp"):
-        case H("svg"):
-        case H("ico"):
-        case H("webp"):
-            name = "image";
-            break;
-        default:
+        // 图标同样从单一后缀表派生，不再自己维护一份 switch
+        const auto it = extensionTable().constFind(entity->suffix().toLower());
+        if (it == extensionTable().constEnd()) {
             return "qrc:/images/file-empty.png";
         }
-        return QString("qrc:/images/format/suffix-%1.png").arg(name);
+        return QString("qrc:/images/format/suffix-%1.png").arg(it->icon);
     };
 
     switch ((UserRoles)role) {
@@ -652,11 +619,56 @@ void FileManager::refreshPlayList() {
     auto& list = MusicPlayer::getInstance().getPlayListRef();
     list.clear();
     forEachLoadedEntities([&](const std::shared_ptr<QFileInfo>& file) {
-        const QString ext = file->suffix().toLower();
-        if (ext == "mp3" || ext == "flac" || ext == "m4a" || ext == "wav" || ext == "ogg" || ext == "aac") {
+        // 音频白名单同样从后缀表派生（以前这里另写一份，和图标表漂移过）
+        const auto it = extensionTable().constFind(file->suffix().toLower());
+        if (it != extensionTable().constEnd() && strcmp(it->handler, "play") == 0) {
             list.emplace_back(file);
         }
     });
+}
+
+// ---------------------------------------------------------------------------
+// 后缀表（单一来源）
+// ---------------------------------------------------------------------------
+
+const QHash<QString, FileManager::ExtensionEntry>& FileManager::extensionTable() {
+    static const QHash<QString, ExtensionEntry> table = {
+        // 音频
+        {"mp3", {"mp3", "play"}},    {"flac", {"mp3", "play"}},
+        {"m4a", {"mp3", "play"}},    {"wav", {"mp3", "play"}},
+        {"ogg", {"mp3", "play"}},    {"aac", {"mp3", "play"}},
+        // 文本
+        {"txt", {"txt", "text"}},    {"lrc", {"txt", "text"}},
+        {"md", {"md", "text"}},      {"json", {"json", "text"}},
+        {"yml", {"xml", "text"}},    {"yaml", {"xml", "text"}},
+        {"xml", {"xml", "text"}},    {"log", {"txt", "text"}},
+        // 视频
+        {"avi", {"mp4", "video"}},   {"mp4", {"mp4", "video"}},
+        {"mov", {"mp4", "video"}},   {"flv", {"mp4", "video"}},
+        {"mkv", {"mp4", "video"}},   {"webm", {"mp4", "video"}},
+        // 图片
+        {"png", {"image", "image"}}, {"jpg", {"image", "image"}},
+        {"jpeg", {"image", "image"}},{"gif", {"image", "image"}},
+        {"bmp", {"image", "image"}}, {"svg", {"image", "image"}},
+        {"ico", {"image", "image"}}, {"webp", {"image", "image"}},
+    };
+    return table;
+}
+
+QString FileManager::handlerFor(const QString& extension) const {
+    const auto it = extensionTable().constFind(extension.toLower());
+    return it == extensionTable().constEnd() ? QString() : QString::fromUtf8(it->handler);
+}
+
+QString FileManager::extensionTableText() const {
+    QStringList keys = extensionTable().keys();
+    std::sort(keys.begin(), keys.end());
+    QString out = QString("共 %1 个后缀（打开方式 / 图标）:").arg(keys.size());
+    for (const auto& k : keys) {
+        const auto e = extensionTable().value(k);
+        out += QString("\n  %1 -> %2 (%3)").arg(k, -6).arg(e.handler, -5).arg(e.icon);
+    }
+    return out;
 }
 
 void FileManager::executeFile(const QString& fileName) {

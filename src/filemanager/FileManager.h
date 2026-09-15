@@ -103,6 +103,13 @@ public:
 
     Q_INVOKABLE void executeFile(const QString& fileName);
 
+    // 后缀表查询：QML 侧打开文件时用。以前 QML 自己维护一份 fileHandlers，
+    // 加上 C++ 的图标表、音频白名单，"支持哪些后缀"有三份清单，已经漂移过。
+    Q_INVOKABLE QString handlerFor(const QString& extension) const;
+
+    // 打印后缀表：全部支持的后缀 + 打开方式 + 图标，一行一个（构造时也写进日志）。
+    Q_INVOKABLE QString extensionTableText() const;
+
 signals:
 
     void currentTitleChanged();
@@ -130,6 +137,15 @@ private:
     // FileManager
 
     enum class UserRoles { FileName = Qt::UserRole + 1, IsDirectory, SizeString, ExtensionName, ExtensionIcon, IsExecutable, IsSymLink };
+
+    // 单一后缀表：图标名 + 打开方式。getExtIcon / refreshPlayList / QML 打开分发
+    // 全部从这一处派生，避免"三份清单各自漂移"——历史上 wav/ogg/aac 在音频白名单里
+    // 却不在图标表里，列表里就是一片空白图标。
+    struct ExtensionEntry {
+        const char* icon;    // qrc:/images/format/suffix-<icon>.png
+        const char* handler; // play / text / video / image
+    };
+    static const QHash<QString, ExtensionEntry>& extensionTable();
 
     // Natural language comparison function for semantic sorting
     static bool naturalCompare(const QString &a, const QString &b);

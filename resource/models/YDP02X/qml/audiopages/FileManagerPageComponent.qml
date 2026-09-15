@@ -14,35 +14,38 @@ YPage {
     property string operatingFileName: ""
     property bool operatingIsDir: false
 
-    // 提取扩展名处理逻辑到查找表，避免巨大的 switch-case，提升查找速度
-    readonly property var fileHandlers: {
-        "mp3": "play",
-        "flac": "play",
-        "m4a": "play",
-        "wav": "play",
-        "ogg": "play",
-        "aac": "play",
-        "md": "text",
-        "txt": "text",
-        "json": "text",
-        "yml": "text",
-        "yaml": "text",
-        "xml": "text",
-        "lrc": "text",
-        "avi": "video",
-        "mp4": "video",
-        "mov": "video",
-        "flv": "video",
-        "mkv": "video",
-        "webm": "video",
-        "jpg": "image",
-        "jpeg": "image",
-        "gif": "image",
-        "svg": "image",
-        "ico": "image",
-        "png": "image",
-        "bmp": "image",
-        "webp": "image"
+    // 打开一个条目，唯一入口：
+    //   目录 -> 进目录；软链接 -> 先当目录试，进不去再当文件；可执行 -> 执行；
+    //   其余 -> 按 C++ 后缀表（fileManager.handlerFor）分发到播放器/文本/视频/图片。
+    // 以前这段逻辑在 onClicked 里抄了两遍（软链接一份、普通文件一份），后缀映射
+    // 也是 QML 自己维护的一份 fileHandlers，和 C++ 的图标表/音频白名单漂移过。
+    function openEntry(fileName, isDir, isSymLink, isExecutable, extName) {
+        if (isDir) {
+            fileManager.changeDir(fileName);
+            return;
+        }
+        if (isSymLink && fileManager.changeDir(fileName)) {
+            return; // 软链接指向目录
+        }
+        if (isExecutable) {
+            fileManager.executeFile(fileName);
+            return;
+        }
+        var type = fileManager.handlerFor(extName);
+        if (type === "play") {
+            fileManager.playFromView(fileName);
+        } else if (type === "text") {
+            textReader.open(fileName);
+            id_pop_container.show('FileManagerTextViewer');
+        } else if (type === "video") {
+            externalPlayer.select(fileName);
+            id_pop_container.show('ExternalPlayer');
+        } else if (type === "image") {
+            imageViewer.open(fileName);
+            id_pop_container.show('FileManagerImageViewer');
+        } else {
+            qmlGlobal.showToast("暂不支持该格式", YColors.yellow);
+        }
     }
 
     function showKeyboard() {
@@ -166,58 +169,8 @@ YPage {
                         return;
                     }
 
-                    // kNormal Mode Logic
-                    if (isDir) {
-                        fileManager.changeDir(model.fileName);
-                    } else if (model.isSymLink) {
-                        // 如果是软链接，尝试进入链接指向的目录或打开链接指向的文件
-                        let linkTarget = model.fileName; // 软链接本身作为文件名传入
-                        let fileInfo = Qt.createQmlObject("import QtQuick 2.0; QtObject { property string target: '" + fileManager.getCurrentPathString() + "/" + linkTarget + "' }", id_container_index);
-
-                        // 尝试切换到软链接指向的目录
-                        if (!fileManager.changeDir(model.fileName)) {
-                            // 如果不能切换目录（说明不是目录），则按文件处理
-                            if (model.isExecutable) {
-                                fileManager.executeFile(model.fileName);
-                            } else {
-                                // 使用 Map 查找代替 Switch
-                                let type = fileHandlers[model.extName];
-                                if (type === "play") {
-                                    fileManager.playFromView(model.fileName);
-                                } else if (type === "text") {
-                                    textReader.open(model.fileName);
-                                    id_pop_container.show('FileManagerTextViewer');
-                                } else if (type === "video") {
-                                    externalPlayer.select(model.fileName);
-                                    id_pop_container.show('ExternalPlayer');
-                                } else if (type === "image") {
-                                    imageViewer.open(model.fileName);
-                                    id_pop_container.show('FileManagerImageViewer');
-                                } else {
-                                    qmlGlobal.showToast("暂不支持该格式", YColors.yellow);
-                                }
-                            }
-                        }
-                    } else if (model.isExecutable) {
-                        fileManager.executeFile(model.fileName);
-                    } else {
-                        // 使用 Map 查找代替 Switch
-                        let type = fileHandlers[model.extName];
-                        if (type === "play") {
-                            fileManager.playFromView(model.fileName);
-                        } else if (type === "text") {
-                            textReader.open(model.fileName);
-                            id_pop_container.show('FileManagerTextViewer');
-                        } else if (type === "video") {
-                            externalPlayer.select(model.fileName);
-                            id_pop_container.show('ExternalPlayer');
-                        } else if (type === "image") {
-                            imageViewer.open(model.fileName);
-                            id_pop_container.show('FileManagerImageViewer');
-                        } else {
-                            qmlGlobal.showToast("暂不支持该格式", YColors.yellow);
-                        }
-                    }
+                    // kNormal Mode Logic：目录/软链接/可执行/普通文件的打开分发只有一个入口
+                    openEntry(model.fileName, isDir, model.isSymLink, model.isExecutable, model.extName);
                 }
             }
         }
