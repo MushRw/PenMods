@@ -25,20 +25,21 @@ import sys
 import zipfile
 
 # 原样带上的文件（路径相对 rime-ice 仓库根）
+# 注意：不带任何英文词库（melt_eng / en_dicts / cn_en）——笔上只用中文输入，
+# 而且 melt_eng 那张表在 librime 的部署流程里根本编译不出来（一直报
+# "Error opening table file .../melt_eng.table.bin"），索性去掉。
 KEEP_FILES = [
     "cn_dicts/8105.dict.yaml",
+    "cn_dicts/41448.dict.yaml",   # 大字表：覆盖到生僻字（无它则"有的字打不出来"）
     "cn_dicts/others.dict.yaml",
     "symbols_v.yaml",
     "custom_phrase.txt",
-    "melt_eng.dict.yaml",
-    "en_dicts/en.dict.yaml",
-    "en_dicts/en_ext.dict.yaml",
-    "en_dicts/cn_en.txt",
 ]
 
 NEW_IMPORTS = (
     "import_tables:\n"
     "  - cn_dicts/8105     # 字表（常用汉字单字）\n"
+    "  - cn_dicts/41448    # 大字表（41448 字，覆盖生僻字）\n"
     "  - cn_dicts/base     # 基础词库（按词频截取）\n"
     "  - cn_dicts/others   # 杂项\n"
 )
@@ -66,8 +67,6 @@ engine:
     - punct_translator
     - script_translator
     - table_translator@custom_phrase     # 自定义短语 custom_phrase.txt
-    - table_translator@melt_eng          # 英文输入
-    - table_translator@cn_en             # 中英混合词汇
   filters:
     - uniquifier                         # 去重
 """
@@ -102,12 +101,31 @@ def cut_block(text, key):
     return start, end
 
 
+def strip_key_block(text, key):
+    """删掉一个顶层键的整段（key: 到下一个顶层键之前），用于清掉英文翻译器的配置块。"""
+    lines = text.split("\n")
+    out = []
+    i = 0
+    while i < len(lines):
+        if lines[i].startswith(key + ":"):
+            i += 1
+            while i < len(lines):
+                ln = lines[i]
+                if ln and not ln[0].isspace() and ":" in ln and not ln.startswith("#"):
+                    break   # 下一个顶层键，停
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", required=True, help="rime-ice 仓库解包目录")
     ap.add_argument("--out", default="", help="staging 目录（默认 <zip 同级的 rime-pkg）")
     ap.add_argument("--zip", default="resource/rime/rime.zip", help="输出的数据包路径")
-    ap.add_argument("--weight-min", type=int, default=10000, help="base 词库保留的最低词频权重")
+    ap.add_argument("--weight-min", type=int, default=300, help="base 词库保留的最低词频权重（300 ≈ 29.7 万条）")
     ap.add_argument("--page-size", type=int, default=20, help="每页候选词数量（键盘 UI 横向滑动查看）")
     args = ap.parse_args()
 
@@ -166,10 +184,13 @@ def main():
         sys.exit("default.yaml 里没找到 'page_size: 5'，请检查上游是否改版")
     write(out, "default.yaml", text)
 
-    # 4) rime_ice.schema.yaml：裁剪 engine
+    # 4) rime_ice.schema.yaml：裁剪 engine，并清掉英文翻译器的配置块与开关
     text = read(src, "rime_ice.schema.yaml")
     start, end = cut_block(text, "engine:")
     text = text[:start] + TRIMMED_SCHEMA + text[end:]
+    text = strip_key_block(text, "melt_eng")
+    text = strip_key_block(text, "cn_en")
+    text = "\n".join(l for l in text.split("\n") if not l.strip().startswith("- melt_eng"))
     write(out, "rime_ice.schema.yaml", text)
 
     # 5) 打包
