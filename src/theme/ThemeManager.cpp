@@ -31,14 +31,22 @@ QVariantMap officialPalette() {
     };
 }
 
-// pureBlack：OLED 省电，灰阶整体下移（语义色不变）
+// pureBlack：OLED 省电，灰阶整体下移。
+//
+// 强调色不是简单"调暗"：底色已经是 #0A0A0C，再压暗只会让强调色和背景糊在一起
+// （对比度反而下降）。深色主题真正要动的是**饱和度**——高饱和在近黑底上会发闷、
+// 边缘发颤。所以这里走"同色相 + 降饱和 + 轻微提亮"，并守住 WCAG 对比度：
+//   * 当文字/图标用（orange/green/yellow/blueText/blueLink）：对 #0A0A0C >= 4.5
+//   * red 额外当填充用（聊天气泡），上面压白字，所以只做轻度削弱
+//     （#F03043 白字 4.03 → #E74D5D 白字 3.74，仍与 official 同档）
+//   * blueRect 是纯填充（按钮底），白字要更清楚 → 反而压深（4.57 → 5.51）
 QVariantMap pureBlackPalette() {
     return QVariantMap{
         {"black", "#000000"},        {"white", "#FFFFFF"},
-        {"red", "#F03043"},          {"orange", "#FF8B20"},
-        {"green", "#13B876"},        {"yellow", "#E9900C"},
-        {"blueText", "#509DEB"},     {"blueRect", "#2D73DC"},
-        {"blueLink", "#62A8EA"},     {"blueDeep", "#1E3A55"},
+        {"red", "#E74D5D"},          {"orange", "#E9A15F"},
+        {"green", "#2FC589"},        {"yellow", "#DC9E42"},
+        {"blueText", "#83B2E0"},     {"blueRect", "#3268B8"},
+        {"blueLink", "#93BCE2"},     {"blueDeep", "#1E3A55"},
         {"grayText", "#8C8D95"},     {"grayNormal", "#0A0A0C"},
         {"graySwitchOff", "#3C3D44"},{"grayButton", "#1A1B20"},
         {"border", "#2B2B30"},       {"pressed", "#33343B"},
