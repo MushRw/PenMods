@@ -36,6 +36,11 @@ public:
     // 静态全局初始化函数（现在由 ensureReady 惰性调用）
     static void globalInitialize();
 
+    // 空闲回收：输入页关掉、最后一个实例析构之后，延迟释放 librime 的全局状态
+    // （词库/表/prism 常驻几十 MB，笔上内存只有 460MB）。下次输入会重新初始化。
+    static void globalRelease();
+    static void scheduleIdleRelease(int delayMs = 5000);
+
 signals:
     void preeditTextChanged();
     void candidatesChanged();

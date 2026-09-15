@@ -6,10 +6,21 @@
 #include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QTimer>
 
 namespace mod::rime {
 
 RimeApi* RimeWrapper::s_api = nullptr;
+
+namespace {
+// librime 全局状态是否已初始化（原来写在 globalInitialize 里的函数内 static，
+// 但空闲回收需要复位它，所以提到文件作用域）
+bool    g_rimeInitialized  = false;
+// 空闲回收定时器（延迟释放，避免频繁开关输入页时反复重载词库）
+QTimer* g_idleReleaseTimer = nullptr;
+// 活着的 RimeWrapper 实例数：归零才安排回收，避免页面切换期间误释放
+int     g_liveInstances    = 0;
+} // namespace
 
 // Rime 通知回调
 void rimeNotificationHandler(
@@ -29,6 +40,7 @@ void rimeNotificationHandler(
 // ensureReady()，由第一次真正用输入法时触发。这样即使 QML 很早就 new 出实例，
 // 开机阶段也不会付这份代价。
 RimeWrapper::RimeWrapper(QObject* parent) : QObject(parent), Logger("RimeWrapper"), m_sessionId(0) {
+    ++g_liveInstances;
     if (!s_api) {
         s_api = rime_get_api();
     }
@@ -40,6 +52,11 @@ void RimeWrapper::ensureReady() {
         return;
     }
     m_rimeReady = true;
+
+    // 有实例在用，取消待执行的空闲回收
+    if (g_idleReleaseTimer) {
+        g_idleReleaseTimer->stop();
+    }
 
     globalInitialize();
 
@@ -56,7 +73,44 @@ void RimeWrapper::ensureReady() {
 RimeWrapper::~RimeWrapper() {
     if (m_sessionId && s_api && s_api->destroy_session) {
         s_api->destroy_session(m_sessionId);
+        m_sessionId = 0;
     }
+
+    // 最后一个实例没了就延迟回收全局状态：输入页关掉后不该让词库一直占着内存。
+    // 留 5 秒宽限，避免"关掉又立刻打开"时反复重载词库。
+    if (--g_liveInstances <= 0) {
+        g_liveInstances = 0;
+        scheduleIdleRelease();
+    }
+}
+
+// 释放 librime 全局状态（词典/表/prism/内部缓存）
+void RimeWrapper::globalRelease() {
+    if (!g_rimeInitialized) {
+        return;
+    }
+
+    if (s_api) {
+        // 维护线程还在跑（比如补 melt_eng 表的那次全量维护）时先等它结束，别在部署中途 finalize
+        if (s_api->join_maintenance_thread) {
+            s_api->join_maintenance_thread();
+        }
+        if (s_api->finalize) {
+            s_api->finalize();
+        }
+    }
+
+    g_rimeInitialized = false;
+    spdlog::info("Rime 全局状态已释放（空闲回收），下次输入会重新加载词库");
+}
+
+void RimeWrapper::scheduleIdleRelease(int delayMs) {
+    if (!g_idleReleaseTimer) {
+        g_idleReleaseTimer = new QTimer(); // 刻意不给 parent：整个 app 生命周期只此一个
+        g_idleReleaseTimer->setSingleShot(true);
+        QObject::connect(g_idleReleaseTimer, &QTimer::timeout, []() { RimeWrapper::globalRelease(); });
+    }
+    g_idleReleaseTimer->start(delayMs);
 }
 
 #include <cstring> // for memset, strlen, strcpy
@@ -71,8 +125,7 @@ static const char* allocateString(const char* source) {
 }
 
 void RimeWrapper::globalInitialize() {
-    static bool is_initialized = false;
-    if (is_initialized) return;
+    if (g_rimeInitialized) return;
 
     RimeApi* api = rime_get_api();
     if (!api) {
@@ -158,7 +211,7 @@ void RimeWrapper::globalInitialize() {
         }
     }
 
-    is_initialized = true;
+    g_rimeInitialized = true;
     spdlog::info("Rime Global Initialized Successfully");
 }
 
