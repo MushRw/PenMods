@@ -74,7 +74,6 @@ bool InputDaemon::_resetConfig() {
         util::setRootFileSystemWritable(wasWritable);
         return false;
     }
-    exec("killall input-event-daemon");
     ofile << QString::fromStdString(cfg.mContent)
                  .replace("{backlight_down}", mBackLightDown ? QString::number(mBackLightDown) : "#")
                  .replace("{screen_off}", mScreenOff ? QString::number(mScreenOff) : "#")
@@ -82,7 +81,11 @@ bool InputDaemon::_resetConfig() {
                  .toStdString();
     ofile.close();
     util::setRootFileSystemWritable(wasWritable);
-    exec("input-event-daemon");
+
+    // 重启守护进程一律走厂商自己的脚本（它支持 restart）：
+    // 它会 bind-mount 正确的配置、并以 `input-event-daemon -v` 加合适环境启动。
+    // 以前这里是自己 `killall` + 裸 `input-event-daemon`，见 _restartDaemon() 的说明。
+    exec("/etc/init.d/S99input-event-daemon restart");
     return true;
 }
 
@@ -313,9 +316,15 @@ bool InputDaemon::_restartDaemon() {
         warn("input-event-daemon 重启多次仍异常，看门狗已停用");
         return false;
     }
-    exec("killall input-event-daemon 2>/dev/null");
-    exec("input-event-daemon");
-    info("input-event-daemon 已由看门狗重启");
+    // 以前这里是 `killall input-event-daemon` + 裸 `input-event-daemon`。
+    // 这个 2021 年的老程序对"启动方式"敏感：被手工拉起时有时会卡进忙循环
+    // （实测 100% 一个核、wchan=0、纯用户态空转、且只在启动后出现），
+    // 看门狗于是反复"修"它、3 次无效后放弃 —— 最终留下一个 100% 的实例。
+    // 这就是"装了新版 PenMods 后放音乐会卡"的根因（1.0 没有这个看门狗，反而正常）。
+    // 改成调厂商自己的 init 脚本：它做 `mount --bind` 配置 + 以 `-v` 启动，
+    // 和开机时完全一致，不会再制造坏实例。
+    exec("/etc/init.d/S99input-event-daemon restart");
+    info("input-event-daemon 已通过厂商脚本重启");
     return true;
 }
 
