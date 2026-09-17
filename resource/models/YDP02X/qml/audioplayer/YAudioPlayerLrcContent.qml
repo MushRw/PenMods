@@ -318,7 +318,12 @@ Item {
                     anchors.margins: -10
                     onClicked: {
                         console.log("YAudioPlayerLrcContent.qml === id_play_previous_button.onClicked")
-                        mediaPlayerManager.onClickedPrev()
+                        // mod 接管时直接走 mod 的播放列表：厂商的 onClickedPrev 可能已被
+                        // 插件（lx-pen）hook 走，PenMods 的同名 hook 会失败（实测 Fail to hook）
+                        if (typeof musicPlayer !== "undefined" && musicPlayer.isTakeOver())
+                            musicPlayer.clickPrev()
+                        else
+                            mediaPlayerManager.onClickedPrev()
                         // 修复：添加 id_play_bar 存在的判断，防止 crash
                         if (typeof id_play_bar !== "undefined") {
                             id_play_bar.updatePlaybackRate()
@@ -341,7 +346,11 @@ Item {
                     anchors.margins: -10
                     onClicked: {
                         console.log("YAudioPlayerLrcContent.qml === id_play_next_button.onClicked")
-                        mediaPlayerManager.onClickedNext()
+                        // 同上：接管时走 mod 自己的 clickNext
+                        if (typeof musicPlayer !== "undefined" && musicPlayer.isTakeOver())
+                            musicPlayer.clickNext()
+                        else
+                            mediaPlayerManager.onClickedNext()
                         // 修复：添加 id_play_bar 存在的判断
                         if (typeof id_play_bar !== "undefined") {
                             id_play_bar.updatePlaybackRate()
