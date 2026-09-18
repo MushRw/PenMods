@@ -336,6 +336,12 @@ YBackground {
             // "靠近屏幕边缘时直接消失、拖回来又突然出现"。
             cacheBuffer: 5000
             clip: false
+            // 首页这份列表吃的是 Qt 默认 maximumFlickVelocity = 2500 px/s：实测一次
+            // fling 里 contentX 在 100ms 内从 88 跳到 339（≈2500px/s），格子几乎一帧
+            // 就飞出屏幕 —— 观感就是"接近边缘直接消失、回来时又突然出现"。
+            // 压速度上限 + 提高减速度，滚动变得可跟，格子会连续可见地滑出。
+            maximumFlickVelocity: 1000
+            flickDeceleration: 2000
 
             delegate: YHorizontalListViewDelegate {
                 id: id_item_delegate
