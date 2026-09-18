@@ -25,7 +25,7 @@ Item {
     // 保活超时：隐藏超过这么久就主动回收（0 = 不超时）。
     // 460MB 的设备上不能让插件页面无限期常驻 —— 当前 20 秒（便于测量；
     // 稳定后可调回 60~180 秒，或改成"内存吃紧时回收"）。
-    property int keepAliveTimeoutMs: 20000
+    property int keepAliveTimeoutMs: 180000
 
     signal closeSameItem(string popStackId)
 

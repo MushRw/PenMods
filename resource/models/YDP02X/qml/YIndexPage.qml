@@ -18,9 +18,12 @@ YBackground {
     // 插件页面保活白名单：只有这些插件的页面在关闭后保留实例（重开复用、
     // 后台状态不重建）。其余插件维持"关闭即销毁"——本机 460MB，内存优先。
     // 保活页面还有 3 分钟超时自动回收（YDynamicPageStack.keepAliveTimeoutMs）。
+    // 入列条件：插件自己实现 pageShown()/pageHidden()，能在复用后刷新页面数据。
+    // "笔里哔哩"（com.bilipocket.player）1.7.3 的搜索页只在 Component.onCompleted
+    // 里拉热搜，复用后不会刷新（表现为热搜不更新/空白），因此暂不入列；
+    // 等其实现 pageShown() 后可以再加回来。
     readonly property var keepAlivePlugins: [
-        "com.lxpen.music",        // LX Pen：播放队列/进度在页面里，重开要复用
-        "com.bilipocket.player"   // 笔里哔哩：同上
+        "com.lxpen.music"         // LX Pen：播放队列/进度在页面里，重开要复用
     ]
 
     MouseArea {

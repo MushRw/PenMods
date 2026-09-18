@@ -15,9 +15,9 @@ YBackButtonPage {
 
     // 插件页面保活白名单（与 YIndexPage.qml 保持一致）：只有这些插件关闭页面后保留实例。
     // 其余插件"关闭即销毁"，保活页面另有 3 分钟超时回收。
+    // 入列条件：插件实现了 pageShown()/pageHidden()（复用后能刷新数据）。
     readonly property var keepAlivePlugins: [
-        "com.lxpen.music",
-        "com.bilipocket.player"
+        "com.lxpen.music"
     ]
 
     // --- 动态加载器 ---

@@ -87,3 +87,25 @@
 
 - PenMods 的"输入守护进程重启"曾用 `killall input-event-daemon` + 裸启动，会把该进程拉进 100% 忙循环 → 已改为调用厂商脚本 `/etc/init.d/S99input-event-daemon restart`（提交 `7224799`）。教训：**动厂商进程的生命周期，一律走厂商自己的脚本**。
 - 插件与 PenMods 曾出现 hook 抢占（`onClickedPrev/Next/onSoundEnd` 被 lx-pen 先 hook，PenMods 后 hook 失败）→ 按钮已改为接管时直接调 `musicPlayer.clickNext()/clickPrev()`。教训：**框架不要依赖"可能被别人抢的符号"**。
+
+---
+
+## 7. 落地记录（阶段 1+2 已实现）与"该不该保活"的判定条件
+
+阶段 1+2 已实现于宿主侧：
+- **白名单**：`YIndexPage.qml` / `PluginManager.qml` 的 `keepAlivePlugins`。只有列在里面的插件才保活；`show()` 的第 3 个参数把 `keepAlive` 交给 `YDynamicPageStack.createPage()` 的 **options** —— 实测塞进 `properties` 会让白名单插件页面加载失败，别改。
+- **`commons/YDynamicPageStack.qml`**：`_keptAlive` 缓存 + 复用分支 + 超时回收（`keepAliveTimeoutMs`，当前 180s）+ 保活/复用时回调 `pageHidden()` / `pageShown()`，销毁/回收后调 `pluginManager.trimMemory()`。
+- **调试标记**：`KA_KEEP` / `KA_REUSE` / `KA_RELEASE` / `KA_DESTROY` 写入 `/tmp/ka.log`（QML 的 `console.*` 到不了笔上日志，只能用这个）。
+
+### 判定条件（踩坑后总结，务必遵守）
+
+**能不能进白名单只看一条：页面被复用后，界面数据会不会自己更新。**
+
+- ✓ 可以保活：状态由 C++ 模型信号驱动（`lx-pen` 的队列/进度，复用后 QML 绑定自己会刷新），或插件实现了 `pageShown()` 主动刷新。
+- ✗ 不能保活：数据只在 `Component.onCompleted` 里拉一次、之后没有任何刷新入口 —— 复用后界面会永远停在旧数据。
+
+### 案例：`com.bilipocket.player` 1.7.3 已移出白名单
+
+- 它的搜索页只在 `Component.onCompleted` 里 `controller.search.fetchHotSearch()`；页面被保活复用后 `onCompleted` 不再触发 → 热搜停在旧数据，用户反馈"刷新热搜不正常"。
+- 叠加一个上游既有缺陷：`BiliSearchModule::fetchHotSearch()` 有一条 `if (model.loading()) return;` 早退，而 `loading` 是**只读** Q_PROPERTY；`BiliNetwork::cancelAllRequests()` 丢弃"尚未发出的排队请求"时**不回调** → 只要有一次请求在关闸期间入队又被取消，`loading` 就永久卡 true，热搜再也拉不出来。唯一的解卡手段是 `BiliController::cancelAll()`（它会把所有 model 的 `loading` 复位）。
+- 处置：宿主侧把 bili 移出白名单（恢复"关闭即销毁"，不依赖插件更新）；插件侧补丁在 `tmp_diag/BiliPocket-hotsearch-refresh.patch`（加 `refreshHotSearch(force)` + 根节点 `pageShown()`，并在 `loading` 卡住时先 `cancelAll()`）。上游合入后可重新加回白名单。
