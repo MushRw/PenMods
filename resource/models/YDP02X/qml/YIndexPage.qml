@@ -331,6 +331,10 @@ YBackground {
             anchors.bottomMargin: 12
             spacing: 8
             model: mainMenuModel
+            // 原版其它横向列表（教材页）都写 5000，而 YBaseListView 默认只有 1000：
+            // 首页这份没设过，拖动时格子一超出缓存区就被销毁 —— 表现就是
+            // "靠近屏幕边缘时直接消失、拖回来又突然出现"。
+            cacheBuffer: 5000
             clip: false
 
             delegate: YHorizontalListViewDelegate {
@@ -574,7 +578,7 @@ YBackground {
             width: parent.width
             height: id_plugin_drawer.panelHeight
             y: id_plugin_drawer.closedY
-            color: "#252525"
+            color: YColors.glassStrong
             radius: 16
 
             MouseArea {
@@ -624,7 +628,7 @@ YBackground {
                             width: 54
                             height: 54
                             radius: 12
-                            color: "#333333"
+                            color: YColors.glassButton
                             anchors.horizontalCenter: parent.horizontalCenter
 
                             YImage {

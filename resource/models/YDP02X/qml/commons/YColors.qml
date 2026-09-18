@@ -39,4 +39,18 @@ QtObject {
     readonly property string scrim: theme.scrim
     readonly property string scrimStrong: theme.scrimStrong
     readonly property string scrimLight: theme.scrimLight
+
+    // ---- 透光（磨砂）表面 ----
+    // 原版界面里"透光"的地方其实是 8 位 ARGB：`#99` + 不透明底色（如 #991A1B1F
+    // = 60% 的 grayNormal）。这里不写死 8 位值，而是从主题令牌算出带 alpha 的版本，
+    // 这样切主题时透光面也跟着主题走（写死 8 位值做不到）。
+    // 用法：凡是"浮在壁纸/内容之上的容器"（抽屉、弹层、卡片）用它替不透明的
+    // grayNormal / grayButton。
+    readonly property color grayNormalAsColor: theme.grayNormal
+    readonly property color grayButtonAsColor: theme.grayButton
+
+    readonly property color glassLight: Qt.rgba(grayNormalAsColor.r, grayNormalAsColor.g, grayNormalAsColor.b, 0.40)
+    readonly property color glass: Qt.rgba(grayNormalAsColor.r, grayNormalAsColor.g, grayNormalAsColor.b, 0.60)
+    readonly property color glassStrong: Qt.rgba(grayNormalAsColor.r, grayNormalAsColor.g, grayNormalAsColor.b, 0.92)
+    readonly property color glassButton: Qt.rgba(grayButtonAsColor.r, grayButtonAsColor.g, grayButtonAsColor.b, 0.60)
 }
