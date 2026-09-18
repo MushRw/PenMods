@@ -93,6 +93,32 @@ bool AudioRecorder::start() {
     format.setByteOrder(QAudioFormat::LittleEndian);
     format.setCodec("audio/pcm");
 
+    // Create lame instance —— 先建编码器：失败就直接返回，不必再去碰音频设备。
+    mLame = lame_init();
+    if (!mLame) {
+        error("lame_init() 失败，无法创建 MP3 编码器");
+        showToast("录音初始化失败", "#E9900C");
+        return false;
+    }
+    // 码率必须落在采样率允许的档位内：MPEG-2（16/22.05/24 kHz）上限 160 kbps，
+    // 只有 MPEG-1（32/44.1/48 kHz）才支持 320。原来无条件写 320，lame 会**静默**
+    // 钳到 160 —— 于是代码里的数字和实际产物对不上。
+    const int sampleRate = format.sampleRate();
+    const int bitrate    = sampleRate >= 32000 ? 320 : 160;
+    lame_set_num_channels(mLame, format.channelCount());
+    lame_set_in_samplerate(mLame, sampleRate);
+    lame_set_brate(mLame, bitrate);
+    lame_set_mode(mLame, format.channelCount() >= 2 ? STEREO : MONO);
+    lame_set_quality(mLame, 2);
+    if (lame_init_params(mLame) < 0) {
+        error("lame_init_params() 失败（{} Hz / {} kbps / {} 声道）", sampleRate, bitrate, format.channelCount());
+        lame_close(mLame);
+        mLame = nullptr;
+        showToast("录音初始化失败", "#E9900C");
+        return false;
+    }
+    info("MP3 编码器就绪: {} Hz / {} kbps / {} 声道", sampleRate, bitrate, format.channelCount());
+
     // Init input device — 录音期间阻止音频输出自动关闭
     AudioDaemon::getInstance().acquire(AudioSource::SYSTEM);
     PEN_CALL(void*, "_ZN12YSoundCenter9forceStopEv", void*)(YPointer<YSoundCenter>::getInstance());
@@ -112,14 +138,6 @@ bool AudioRecorder::start() {
     // Start recording.
     mInputDevice = mInputAudio->start();
 
-    // Create lame instance.
-    mLame = lame_init();
-    lame_set_num_channels(mLame, format.channelCount());
-    lame_set_in_samplerate(mLame, format.sampleRate());
-    lame_set_brate(mLame, 320);
-    lame_set_mode(mLame, format.channelCount() >= 2 ? STEREO : MONO);
-    lame_set_quality(mLame, 2);
-    lame_init_params(mLame);
     mMp3Data = new char[LENGTH];
 
     // Connect to signals.

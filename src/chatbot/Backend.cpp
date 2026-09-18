@@ -46,6 +46,10 @@ namespace mod::chatbot {
 
 namespace {
 
+// 模型配置里没写 maxContextSize 时用的默认裁剪上限（0 = 不裁剪）。
+// 32k 对在用的模型都留了余量，又不会让 460MB 的机器把超长上下文整段发出去。
+constexpr int kDefaultMaxContextSize = 32000;
+
 // markdownToHtml 的结果缓存。键里带"主题 id + 链接色"：QTextDocument 会把链接色
 // 以死值 color:#0000ff 写进 HTML，所以同一份 markdown 在不同主题、不同视图
 // （AI 气泡用主题红、文件查看器用主题蓝链）下的产物并不相同。切主题时整体清空
@@ -339,9 +343,28 @@ QJsonArray ChatBot::buildApiMessages(const QVector<MessageData>& history,
     messages.append(sysMsg);
 
     // history（按模型 context 上限做粗略 token 估算，丢弃过旧消息，防止超限报错）
+    // 注意：裁剪只影响"这一次发出去的内容"——historyToSend 是副本，m_sessions 里的
+    // 完整记录不动。记录与上下文裁剪是分离的，用户回看历史不会被裁剪影响。
     QVector<MessageData> historyToSend = history;
     if (m_maxContextSize > 0) {
-        auto estTokens = [](const QString& s) { return (s.size() + 1) / 2; }; // 粗略估算，偏保守
+        // 中文/全角字符 ≈ 1 token，其余 ≈ 1/4 token。原来统一按"2 字符 = 1 token"
+        // 估算，对中文是**低估**：1000 字中文只算 500 token，长会话会顶穿 context 上限。
+        auto estTokens = [](const QString& s) {
+            int cjk = 0;
+            for (const QChar& c : s) {
+                const ushort u = c.unicode();
+                if ((u >= 0x3000 && u <= 0x303F)     // CJK 标点
+                    || (u >= 0x3040 && u <= 0x30FF)  // 假名
+                    || (u >= 0x3400 && u <= 0x4DBF)  // 扩展 A
+                    || (u >= 0x4E00 && u <= 0x9FFF)  // 基本区
+                    || (u >= 0xAC00 && u <= 0xD7AF)  // 谚文
+                    || (u >= 0xF900 && u <= 0xFAFF)  // 兼容表意
+                    || (u >= 0xFF00 && u <= 0xFFEF)) {  // 全角
+                    ++cjk;
+                }
+            }
+            return cjk + (s.size() - cjk + 3) / 4;
+        };
         int  budget    = m_maxContextSize;
         int  used      = estTokens(m_defaultPrompt);
         for (const auto& p : userParts) {
@@ -1420,6 +1443,7 @@ void ChatBot::handleNetworkReply(QNetworkReply* reply, bool isStream) {
         if (isStream) emit streamEnd();
 
         int        httpStatus   = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const auto netError     = reply->error();
         QByteArray responseBody = reply->readAll();
         QString    detailMsg;
         if (!responseBody.isEmpty()) {
@@ -1436,14 +1460,26 @@ void ChatBot::handleNetworkReply(QNetworkReply* reply, bool isStream) {
         if (httpStatus == 401 || httpStatus == 403) suggestion = "API 密钥无效或已过期";
         else if (httpStatus == 429) suggestion = "请求频率过高，请稍后再试";
         else if (httpStatus >= 500) suggestion = "AI 服务端异常，请稍后重试";
-        else if (reply->error() == QNetworkReply::ConnectionRefusedError
-                 || reply->error() == QNetworkReply::HostNotFoundError || reply->error() == QNetworkReply::TimeoutError)
+        else if (netError == QNetworkReply::OperationCanceledError && httpStatus == 0 && !m_cancelled)
+            suggestion = "请求超时（120 秒无响应）";
+        else if (netError == QNetworkReply::ConnectionRefusedError
+                 || netError == QNetworkReply::HostNotFoundError || netError == QNetworkReply::TimeoutError
+                 || netError == QNetworkReply::RemoteHostClosedError
+                 || netError == QNetworkReply::TemporaryNetworkFailureError)
             suggestion = "无法连接到 AI 服务，请检查网络连接";
         else suggestion = reply->errorString();
 
-        // 瞬时错误自动重试（429/5xx，最多 2 次；用户取消后不再重试）
+        // 瞬时错误自动重试（429/5xx + 网络层瞬时错误，最多 2 次；用户取消后不再重试）。
+        // 关键：120s 传输超时在 Qt 5.15 里是以 OperationCanceledError 结束的
+        // （不是 TimeoutError），原来不在重试范围内 —— 一超时就只能让用户手动重发。
+        const bool transientNet = (netError == QNetworkReply::OperationCanceledError && httpStatus == 0)
+                                  || netError == QNetworkReply::TimeoutError
+                                  || netError == QNetworkReply::ConnectionRefusedError
+                                  || netError == QNetworkReply::HostNotFoundError
+                                  || netError == QNetworkReply::RemoteHostClosedError
+                                  || netError == QNetworkReply::TemporaryNetworkFailureError;
         if (!m_cancelled && !m_retrying && m_retryCount < 2
-            && (httpStatus == 429 || (httpStatus >= 500 && httpStatus <= 504))) {
+            && (httpStatus == 429 || (httpStatus >= 500 && httpStatus <= 504) || transientNet)) {
             m_retrying   = true;
             m_retryCount++;
             QJsonArray retryMessages = m_lastRequestMessages;
@@ -1743,6 +1779,7 @@ void ChatBot::initModels() {
         defaultModel["modelId"]       = m_model.toStdString();
         defaultModel["temperature"]   = m_temperature;
         defaultModel["extraParams"]   = json::object();
+        defaultModel["maxContextSize"] = kDefaultMaxContextSize;
         defaultModel["proxyVisionModelId"] = "";
         defaultModel["proxyVisionPrompt"]  = "请详细描述这张图片的内容。如果图片中有文字，请完整转录。";
         m_modelsData["models"]        = json::array({defaultModel});
@@ -1779,7 +1816,9 @@ void ChatBot::applyModelConfig(const json& modelObj) {
         m_extraParams = modelObj["extraParams"];
     else m_extraParams = json::object();
 
-    m_maxContextSize = modelObj.value("maxContextSize", 0);
+    // 0 = 不裁剪（用户显式选择，保留该语义）；配置里没写时给安全默认值，
+    // 否则长会话会把 context 顶穿、直接变成 API 报错。
+    m_maxContextSize = modelObj.value("maxContextSize", kDefaultMaxContextSize);
 
     m_proxyVisionModelId = QString::fromStdString(modelObj.value("proxyVisionModelId", ""));
     m_proxyVisionPrompt  = QString::fromStdString(
@@ -1830,7 +1869,8 @@ bool ChatBot::addModel(const QString& modelJson) {
     newModel["apiKey"]         = input["apiKey"].toString().toStdString();
     newModel["modelId"]        = modelId;
     newModel["temperature"]    = input.contains("temperature") ? input["temperature"].toDouble() : 0.7;
-    newModel["maxContextSize"] = input.contains("maxContextSize") ? input["maxContextSize"].toInt() : 0;
+    newModel["maxContextSize"] = input.contains("maxContextSize") ? input["maxContextSize"].toInt()
+                                                                      : kDefaultMaxContextSize;
 
     // capabilities
     {
