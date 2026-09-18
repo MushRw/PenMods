@@ -5,6 +5,7 @@
 #include <QJSEngine>
 #include <QObject>
 #include <QQmlEngine>
+#include <QTimer>
 
 namespace mod {
 
