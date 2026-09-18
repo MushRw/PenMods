@@ -253,7 +253,7 @@ YBackButtonAudioPage {
                 if (!txt)
                     return "";
                 if (typeof chatbot !== "undefined" && chatbot !== null) {
-                    var html = chatbot.markdownToHtml(txt);
+                    var html = chatbot.markdownToHtml(txt, YColors.blueLink);
                     return html.replace(/^\s*<p>/i, "").replace(/<\/p>\s*$/i, "");
                 }
                 return txt;

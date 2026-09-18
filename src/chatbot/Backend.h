@@ -101,7 +101,7 @@ public:
     Q_INVOKABLE void    sanitizeConfig();
     Q_INVOKABLE void    clearHistory();
     Q_INVOKABLE void    saveMessages();
-    Q_INVOKABLE QString markdownToHtml(const QString& markdown);
+    Q_INVOKABLE QString markdownToHtml(const QString& markdown, const QString& linkColor = QString());
     Q_INVOKABLE void    truncateHistory(int index);
     Q_INVOKABLE void    editMessage(int index, const QString& newContent);
     Q_INVOKABLE void    deleteMessage(int index);

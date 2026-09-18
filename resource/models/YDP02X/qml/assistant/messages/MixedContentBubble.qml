@@ -396,7 +396,7 @@ Column {
             return "";
 
         if (typeof chatbot !== "undefined" && chatbot !== null && chatbot.markdownToHtml) {
-            var html = chatbot.markdownToHtml(raw);
+            var html = chatbot.markdownToHtml(raw, YColors.red);
             if (html && html.length > 0) {
                 html = html.replace(/^\s*<p[^>]*>/i, "");
                 html = html.replace(/<\/p>\s*$/i, "");

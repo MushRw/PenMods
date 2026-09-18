@@ -379,7 +379,7 @@ YPage {
             if (!lastItem.isUser && !lastItem.isComplete && !lastItem.isThinking && !lastItem.isToolCall) {
                 var raw = lastItem.raw_text || "";
                 chatModel.set(lastIdx, {
-                    "text": chatbot.markdownToHtml(raw),
+                    "text": chatbot.markdownToHtml(raw, YColors.red),
                     "raw_text": raw,
                     "isComplete": true,
                     "isThinking": false
@@ -457,7 +457,7 @@ YPage {
             }
             var isUser = m.role === 'user';
             chatModel.append({
-                "text": isUser ? m.content : chatbot.markdownToHtml(m.content),
+                "text": isUser ? m.content : chatbot.markdownToHtml(m.content, YColors.red),
                 "isUser": isUser,
                 "raw_text": m.content,
                 "isComplete": true,
@@ -1320,7 +1320,7 @@ YPage {
                     var item = chatModel.get(lastIndex);
                     if (!item.isUser && !item.isToolCall) {
                         chatModel.set(lastIndex, {
-                            "text": chatbot.markdownToHtml(content),
+                            "text": chatbot.markdownToHtml(content, YColors.red),
                             "raw_text": content,
                             "isComplete": true,
                             "isThinking": false
@@ -1360,7 +1360,7 @@ YPage {
                     }
                     var rawContent = item.raw_text;
                     chatModel.set(lastIndex, {
-                        "text": chatbot.markdownToHtml(rawContent),
+                        "text": chatbot.markdownToHtml(rawContent, YColors.red),
                         "raw_text": rawContent,
                         "isComplete": true,
                         "isThinking": false

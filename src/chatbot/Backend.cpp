@@ -12,6 +12,7 @@
 #include "common/util/System.h"
 #include "mod/Config.h"
 #include "mod/Mod.h"
+#include "theme/ThemeManager.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -43,18 +44,49 @@ namespace mod::chatbot {
 // Markdown → HTML
 // -----------------------------------------------------------------------
 
-QString ChatBot::markdownToHtml(const QString& markdown) {
+namespace {
+
+// markdownToHtml 的结果缓存。键里带"主题 id + 链接色"：QTextDocument 会把链接色
+// 以死值 color:#0000ff 写进 HTML，所以同一份 markdown 在不同主题、不同视图
+// （AI 气泡用主题红、文件查看器用主题蓝链）下的产物并不相同。切主题时整体清空
+// （见 ChatBot 构造函数里的连接）。
+struct MarkdownHtmlCache {
+    QHash<QString, QString> map;
+    QHash<QString, qint64>  cost;
+    QStringList             order;
+    qint64                  bytes = 0;
+
+    void clear() {
+        map.clear();
+        cost.clear();
+        order.clear();
+        bytes = 0;
+    }
+};
+
+MarkdownHtmlCache& markdownHtmlCache() {
+    static MarkdownHtmlCache cache;
+    return cache;
+}
+
+} // namespace
+
+QString ChatBot::markdownToHtml(const QString& markdown, const QString& linkColor) {
     // QTextDocument::setMarkdown + toHtml 是纯 CPU 的重活，而 QML 每条消息每次
     // 重绘都会调到这里（滚动/切换都会触发）。同一份内容只转换一次，缓存最近
     // 若干条；流式回复期间每段内容不同会自然淘汰旧条目。
-    static QHash<QString, QString> kHtmlCache;
-    static QStringList             kHtmlCacheOrder;
-    static qint64                  kHtmlCacheBytes = 0;
-    constexpr int                  kMaxEntries     = 16;
-    constexpr qint64               kMaxBytes       = 128 * 1024;
+    constexpr int    kMaxEntries = 16;
+    constexpr qint64 kMaxBytes   = 128 * 1024;
 
-    auto cached = kHtmlCache.constFind(markdown);
-    if (cached != kHtmlCache.constEnd()) {
+    auto& theme = mod::ThemeManager::getInstance();
+    // 链接色由调用方给（AI 气泡=主题红、文件查看器=主题蓝链）；没给就用主题链接色
+    const QString effectiveLink = linkColor.isEmpty() ? theme.blueLink() : linkColor;
+    // 键里带主题与链接色：换主题或换调用方颜色后产物不同，不能复用旧条目
+    const QString key = theme.getId() + QChar(0x1f) + effectiveLink + QChar(0x1f) + markdown;
+
+    auto& cache  = markdownHtmlCache();
+    auto  cached = cache.map.constFind(key);
+    if (cached != cache.map.constEnd()) {
         return cached.value();
     }
 
@@ -65,16 +97,25 @@ QString ChatBot::markdownToHtml(const QString& markdown) {
     doc.setDefaultFont(defaultFont);
     doc.setDefaultStyleSheet("body { line-height: 1; }");
     doc.setMarkdown(markdown);
-    const QString html = doc.toHtml();
+    QString html = doc.toHtml();
+
+    // QTextDocument 会给 <a> 里的 span 写死 color:#0000ff（Qt 默认调色板的链接色），
+    // 深色主题下纯蓝压在近黑底上几乎看不清，这里换成主题/调用方指定的链接色。
+    if (!effectiveLink.isEmpty()) {
+        static const QRegularExpression kAnchorColor(
+            QStringLiteral("color:\\s*#0000ff"), QRegularExpression::CaseInsensitiveOption);
+        html.replace(kAnchorColor, QStringLiteral("color:") + effectiveLink);
+    }
 
     if (markdown.size() <= kMaxBytes / 4) {
-        kHtmlCache.insert(markdown, html);
-        kHtmlCacheOrder.append(markdown);
-        kHtmlCacheBytes += markdown.size();
-        while (kHtmlCacheOrder.size() > kMaxEntries || kHtmlCacheBytes > kMaxBytes) {
-            const QString victim = kHtmlCacheOrder.takeFirst();
-            if (kHtmlCache.remove(victim) > 0) {
-                kHtmlCacheBytes -= victim.size();
+        cache.map.insert(key, html);
+        cache.cost.insert(key, markdown.size());
+        cache.order.append(key);
+        cache.bytes += markdown.size();
+        while (cache.order.size() > kMaxEntries || cache.bytes > kMaxBytes) {
+            const QString victim = cache.order.takeFirst();
+            if (cache.map.remove(victim) > 0) {
+                cache.bytes -= cache.cost.take(victim);
             }
         }
     }
@@ -110,6 +151,10 @@ ChatBot::ChatBot()
         m_uiReady = true;
         flushSessions();
     });
+
+    // 切主题时清掉 markdown→HTML 缓存：缓存里存的是带旧主题链接色的 HTML。
+    connect(&mod::ThemeManager::getInstance(), &mod::ThemeManager::themeChanged, this,
+            []() { markdownHtmlCache().clear(); });
 
     initModels();
     initPrompts();
