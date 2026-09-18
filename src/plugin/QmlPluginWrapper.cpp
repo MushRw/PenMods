@@ -1,12 +1,56 @@
 #include "QmlPluginWrapper.h"
+#include <QFile>
 #include <QJsonArray>
+#include <QTimer>
 #include <QUrl>
 
+#include <malloc.h> // malloc_trim
+
+#include "spdlog/spdlog.h"
+
 namespace mod {
+
+namespace {
+// 当前进程 VmRSS（KB）；读不到返回 -1
+qint64 currentRssKb() {
+    QFile f("/proc/self/status");
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return -1;
+    }
+    for (const auto& line : QString::fromUtf8(f.readAll()).split('\n')) {
+        if (line.startsWith("VmRSS:")) {
+            return line.mid(6).trimmed().section(' ', 0, 0).toLongLong();
+        }
+    }
+    return -1;
+}
+} // namespace
 
 QmlPluginWrapper::QmlPluginWrapper(QObject* parent) : QObject(parent), m_pluginManager(&PluginManager::getInstance()) {
     // 连接底层插件管理器的信号
     connect(m_pluginManager, &PluginManager::pluginsChanged, this, &QmlPluginWrapper::onPluginsChanged);
+
+    // 空闲内存整理：每 5 分钟一次。插件页反复开关会在 glibc arena 里留下碎片，
+    // 只 free 不 trim 时这部分不会还给内核，足迹会单调上涨（实测 1 小时涨 260MB）。
+    auto* periodicTrim = new QTimer(this);
+    periodicTrim->setInterval(5 * 60 * 1000);
+    connect(periodicTrim, &QTimer::timeout, this, [this]() { trimMemory(); });
+    periodicTrim->start();
+}
+
+void QmlPluginWrapper::trimMemory() {
+    if (!m_trimTimer) {
+        m_trimTimer = new QTimer(this);
+        m_trimTimer->setSingleShot(true);
+        // 防抖 3 秒：QML 的 destroy(1) 是延迟生效的，立刻 trim 会赶在对象析构之前
+        m_trimTimer->setInterval(3000);
+        connect(m_trimTimer, &QTimer::timeout, this, []() {
+            const qint64 before = currentRssKb();
+            malloc_trim(0);
+            spdlog::info("内存整理 malloc_trim(0): VmRSS {} KB -> {} KB", before, currentRssKb());
+        });
+    }
+    m_trimTimer->start();
 }
 
 int QmlPluginWrapper::getPluginCount() {

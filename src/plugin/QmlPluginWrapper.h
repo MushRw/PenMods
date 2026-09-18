@@ -25,6 +25,11 @@ public:
     Q_INVOKABLE void        uninstallPlugin(const QString& pluginName);
     Q_INVOKABLE void        requestPluginList();
 
+    // 内存整理：QML 在插件页销毁 / 保活释放后调用；构造时也会起一个每 5 分钟的定时器。
+    // 只 free 不 trim 的话 glibc 不会把内存还给内核（实测关掉插件页后 RSS 一点不降），
+    // 所以这里显式 malloc_trim(0)，并做成防抖（QML 的 destroy 是延迟生效的）。
+    Q_INVOKABLE void        trimMemory();
+
 signals:
     void pluginListUpdated();
     void pluginStateChanged(const QString& pluginName, bool newState);
@@ -34,6 +39,7 @@ private slots:
 
 private:
     PluginManager* m_pluginManager;
+    QTimer*        m_trimTimer = nullptr;   // 防抖用的单次定时器
     QString        resolvePluginId(const QString& idOrName) const;
     friend class Singleton<QmlPluginWrapper>;
 };

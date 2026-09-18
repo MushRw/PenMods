@@ -11,6 +11,21 @@ Item {
     property var _activeObjects: ({})
     property var _connectionCleanups: ({})
     property var _pendingCreates: ({})
+    // 保活缓存：声明 destroyOnBack === false 的页面关闭时不销毁，只隐藏；
+    // 同一个 popStackId 再次打开时复用同一个实例（插件后台逻辑不能重启，
+    // 否则会出现两份 runner）。见 docs/plugin-keepalive.md。
+    property var _keptAlive: ({})
+    property var _keptComponents: ({})
+    property var _keptAliveAt: ({})
+    // 宿主指定要保活的 popStackId（options.keepAlive）。
+    // 刻意**不**往页面对象上写属性：QML 的 QObject 型对象不可扩展，
+    // `obj.destroyOnBack = false` 会抛 "Cannot assign to non-existent property"，
+    // 页面就再也打不开了（实测踩过）。所以标记放在栈里，按 id 记。
+    property var _keepAliveIds: ({})
+    // 保活超时：隐藏超过这么久就主动回收（0 = 不超时）。
+    // 460MB 的设备上不能让插件页面无限期常驻 —— 当前 20 秒（便于测量；
+    // 稳定后可调回 60~180 秒，或改成"内存吃紧时回收"）。
+    property int keepAliveTimeoutMs: 20000
 
     signal closeSameItem(string popStackId)
 
@@ -122,15 +137,75 @@ Item {
             return
 
         const popStackId = incubatorObject.popStackId || ""
+
+        // 保活页面：对象自己声明了 destroyOnBack === false，或宿主用 options.keepAlive 指定。
+        // 只从可见栈里摘掉并隐藏，对象留着下次复用，这样插件后台逻辑不会被打断。
+        if ((incubatorObject.destroyOnBack === false || _keepAliveIds[popStackId] === true)
+                && popStackId !== "") {
+            if (!_releaseObject(incubatorObject, popStackId))
+                return
+            try {
+                incubatorObject.visible = false
+                if (typeof incubatorObject.pageHidden === "function")
+                    incubatorObject.pageHidden()
+            } catch (error) {
+                console.warn(logTag + " hide kept-alive page failed:", error)
+            }
+            _keptAlive[popStackId] = incubatorObject
+            _keptAliveAt[popStackId] = Date.now()
+            // 调试标记：QML 的 console.* 进不了 app 日志，所以落一个文件供外部核对
+            if (typeof shell !== "undefined")
+                shell.startDetached("echo KA_KEEP >> /tmp/ka.log")
+            return
+        }
+
         if (!_releaseObject(incubatorObject, popStackId))
             return
 
         try {
             incubatorObject.visible = false
+            if (typeof shell !== "undefined")
+                shell.startDetached("echo KA_DESTROY >> /tmp/ka.log")
             incubatorObject.destroy(1)
+            // 让 C++ 侧做一次 malloc_trim：glibc 不会自己把销毁后的内存还给内核
+            if (typeof pluginManager !== "undefined")
+                pluginManager.trimMemory()
         } catch (error) {
             console.warn(logTag + " destroy failed:", error)
         }
+    }
+
+    // 主动回收保活页面（内存吃紧 / 插件被禁用时用）
+    function releaseKeptAlive(popStackId) {
+        const obj = _keptAlive[popStackId]
+        if (!obj)
+            return
+        delete _keptAlive[popStackId]
+        delete _keptAliveAt[popStackId]
+        delete _keepAliveIds[popStackId]
+        try {
+            obj.visible = false
+            if (typeof obj.pageHidden === "function")
+                obj.pageHidden()
+            obj.destroy(1)
+        } catch (error) {
+            console.warn(logTag + " release kept-alive failed:", error)
+        }
+        if (_keptComponents[popStackId]) {
+            try {
+                _keptComponents[popStackId].destroy()
+            } catch (error) {}
+            delete _keptComponents[popStackId]
+        }
+        // 回收完顺手让 C++ 整理一次堆（glibc 不会自己还给内核）
+        if (typeof pluginManager !== "undefined")
+            pluginManager.trimMemory()
+    }
+
+    function releaseAllKeptAlive() {
+        const keys = Object.keys(_keptAlive)
+        for (let i = 0; i < keys.length; ++i)
+            releaseKeptAlive(keys[i])
     }
 
     function _registerObject(incubatorObject, popStackId, cleanups) {
@@ -222,6 +297,40 @@ Item {
     function createPage(componentUrl, popStackId, options, properties, onReady) {
         closeSameItem(popStackId)
 
+        // 复用保活实例：同一个 popStackId 之前被保活过就直接拿出来用，不再 createComponent。
+        // 插件重入必须是同一个实例，否则会起两份后台逻辑（例如 lx-pen 会起两个 runner）。
+        const keptObject = _keptAlive[popStackId]
+        if (keptObject) {
+            delete _keptAlive[popStackId]
+            delete _keptAliveAt[popStackId]
+            if (typeof shell !== "undefined")
+                shell.startDetached("echo KA_REUSE >> /tmp/ka.log")
+            const keptConfig = {}
+            const keptOptions = options || {}
+            Object.keys(keptOptions).forEach(function(key) {
+                keptConfig[key] = keptOptions[key]
+            })
+            // 注意：这里刻意不传 component —— 保活页面的 Component 由 _keptComponents 持有，
+            // 否则 registerPage 的清理函数会在页面隐藏时把它一起销毁，下次就复用不了了。
+            keptConfig.component = null
+
+            if (!registerPage(keptObject, popStackId, keptConfig)) {
+                releaseKeptAlive(popStackId)
+                return null
+            }
+
+            if (typeof keptObject.pageShown === "function")
+                keptObject.pageShown()
+            if (typeof keptObject.show === "function")
+                keptObject.show()
+            else if (keptObject.hasOwnProperty("visible"))
+                keptObject.visible = true
+
+            if (typeof onReady === "function")
+                onReady(keptObject)
+            return keptObject
+        }
+
         const component = Qt.createComponent(componentUrl)
         const pending = {
             "cancelled": false,
@@ -249,7 +358,17 @@ Item {
             Object.keys(sourceOptions).forEach(function(key) {
                 config[key] = sourceOptions[key]
             })
-            config.component = component
+
+            // 宿主指定的保活页面（options.keepAlive）：只记在栈里，**不碰页面对象**。
+            // Component 由 _keptComponents 持有，所以不走 registerPage 里那条销毁 component 的清理。
+            if (sourceOptions.keepAlive === true) {
+                _keepAliveIds[popStackId] = true
+                _keptComponents[popStackId] = component
+                config.component = null
+            } else {
+                delete _keepAliveIds[popStackId]
+                config.component = component
+            }
 
             if (!registerPage(incubatorObject, popStackId, config)) {
                 incubatorObject.destroy(1)
@@ -346,5 +465,28 @@ Item {
     onCloseSameItem: {
         _cancelPending(popStackId)
         _safeDestroy(_activeObjects[popStackId])
+    }
+
+    // 保活超时回收：每 5 秒扫一次（跟 keepAliveTimeoutMs 配合，便于快速观测），
+    // 隐藏超过 keepAliveTimeoutMs 的页面主动释放，避免插件页面在 460MB 的设备上无限期常驻。
+    Timer {
+        interval: 5000
+        running: true
+        repeat: true
+        onTriggered: {
+            if (root.keepAliveTimeoutMs <= 0)
+                return
+            const now = Date.now()
+            const keys = Object.keys(root._keptAlive)
+            for (let i = 0; i < keys.length; ++i) {
+                const id = keys[i]
+                const at = root._keptAliveAt[id] || 0
+                if (now - at > root.keepAliveTimeoutMs) {
+                    if (typeof shell !== "undefined")
+                        shell.startDetached("echo KA_RELEASE >> /tmp/ka.log")
+                    root.releaseKeptAlive(id)
+                }
+            }
+        }
     }
 }
