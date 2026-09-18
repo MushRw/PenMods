@@ -13,6 +13,13 @@ YBackButtonPage {
 
     ListModel { id: pluginListModel }
 
+    // 插件页面保活白名单（与 YIndexPage.qml 保持一致）：只有这些插件关闭页面后保留实例。
+    // 其余插件"关闭即销毁"，保活页面另有 3 分钟超时回收。
+    readonly property var keepAlivePlugins: [
+        "com.lxpen.music",
+        "com.bilipocket.player"
+    ]
+
     // --- 动态加载器 ---
     // 用于 "孵化" 插件的 UI。
     // 弹出层容器
@@ -40,7 +47,7 @@ YBackButtonPage {
          * @param tpage 页面名称或路径
          * @param properties 初始化属性
          */
-        function show(tpage, properties) {
+        function show(tpage, properties, keepAlive) {
             gc();
 
             var componentPath = tpage;
@@ -59,7 +66,9 @@ YBackButtonPage {
 
             createPage(componentPath, tpage, {
                 "pageIndex": PageIndex.PluginManager,
-                "closeOnHomeRelease": true
+                "closeOnHomeRelease": true,
+                // 同 YIndexPage：keepAlive 只能放 options，塞进 properties 会让页面打不开
+                "keepAlive": (keepAlive === true)
             }, properties || {}, function(incubatorObject) {
                 if (incubatorObject.hasOwnProperty("focus"))
                     incubatorObject.forceActiveFocus();
@@ -251,7 +260,9 @@ YBackButtonPage {
                             // 只有启用且加载成功时才显示打开按钮
                             visible: model.enabled && model.loaded
                             onClicked: {
-                                id_pop_container.show(model.mainQmlUrl, { "pluginName": model.name });
+                                id_pop_container.show(model.mainQmlUrl,
+                                                      { "pluginName": model.name },
+                                                      keepAlivePlugins.indexOf(model.id) >= 0);
                             }
                         }
 

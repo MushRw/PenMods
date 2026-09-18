@@ -15,6 +15,14 @@ YBackground {
     property int idleInterval: 15000
     property int dimInterval: 25000
 
+    // 插件页面保活白名单：只有这些插件的页面在关闭后保留实例（重开复用、
+    // 后台状态不重建）。其余插件维持"关闭即销毁"——本机 460MB，内存优先。
+    // 保活页面还有 3 分钟超时自动回收（YDynamicPageStack.keepAliveTimeoutMs）。
+    readonly property var keepAlivePlugins: [
+        "com.lxpen.music",        // LX Pen：播放队列/进度在页面里，重开要复用
+        "com.bilipocket.player"   // 笔里哔哩：同上
+    ]
+
     MouseArea {
         anchors.fill: parent
         z: 100
@@ -493,7 +501,7 @@ YBackground {
             onClicked: { mouse.accepted = true; }
         }
 
-        function show(tpage, properties) {
+        function show(tpage, properties, keepAlive) {
             var componentPath = tpage;
             const absoluteUrl = tpage.indexOf("/") === 0
                     || tpage.indexOf(":/") === 0
@@ -508,7 +516,12 @@ YBackground {
 
             createPage(componentPath, tpage, {
                 "pageIndex": YEnum.PageIndex.NonePage,
-                "closeOnHomeRelease": true
+                "closeOnHomeRelease": true,
+                // 只有白名单里的插件保活页面（关闭后保留实例，重开复用）；
+                // 其他插件维持"关闭即销毁"，不牺牲内存。见 docs/plugin-keepalive.md。
+                // 注意：keepAlive 只能放 options，绝不能塞进 properties ——
+                // 那会让 QML 尝试给页面对象赋一个没声明的属性，页面直接打不开（踩过）。
+                "keepAlive": (keepAlive === true)
             }, properties || {}, function(incubatorObject) {
                 if (incubatorObject.hasOwnProperty("focus"))
                     incubatorObject.forceActiveFocus();
@@ -635,9 +648,10 @@ YBackground {
                         anchors.fill: parent
                         onClicked: {
                             id_plugin_drawer.closeDrawer();
-                            id_plugin_pop_container.show(model.mainQmlUrl, {
-                                "pluginName": model.name
-                            });
+                            id_plugin_pop_container.show(model.mainQmlUrl,
+                                                         { "pluginName": model.name },
+                                                         // 只给有后台状态、需要"重开即复用"的插件开保活
+                                                         keepAlivePlugins.indexOf(model.id) >= 0);
                         }
                     }
                 }
