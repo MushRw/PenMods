@@ -18,12 +18,14 @@ YBackButtonAudioPage {
     Flickable {
         id: id_container
         anchors.fill: parent
-        anchors.leftMargin: 54
         anchors.rightMargin: 10
-        contentWidth: id_button_row.width
+        // 内容整体右移 54，等价于原来的 leftMargin: 54，
+        // 但列表本身铺满整宽，滚动时内容会从左侧毛玻璃栏底下滑过去（取景才对得上）
+        contentWidth: 54 + id_button_row.width
 
         Row {
             id: id_button_row
+            x: 54
             topPadding: 10
             bottomPadding: 10
             spacing: 8

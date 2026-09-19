@@ -59,14 +59,35 @@ Item {
         sourceRect: Qt.rect(id_glass.sourceX, id_glass.sourceY, id_glass.width, id_glass.height)
     }
 
-    FastBlur {
-        id: id_backdrop_blur
+    // 圆角裁剪用的遮罩（只喂给 OpacityMask，自己不显示）
+    Rectangle {
+        id: id_blur_mask
         anchors.fill: parent
-        source: id_backdrop_source
-        radius: YColors.glassEnabled ? id_glass.blurRadius : 0
-        cached: false
-        transparentBorder: true
+        radius: id_glass.radius
+        color: "white"
+        visible: false
+    }
+
+    // 模糊层：整层进 layer 再用 OpacityMask 裁成圆角。
+    // 不裁的话，圆角外那四个方角还留着模糊后的像素 —— 就是"漏光"。
+    Item {
+        id: id_blur_holder
+        anchors.fill: parent
         visible: id_glass.blurring
+        layer.enabled: id_glass.blurring && id_glass.radius > 0
+        layer.effect: OpacityMask {
+            maskSource: id_blur_mask
+        }
+
+        FastBlur {
+            id: id_backdrop_blur
+            anchors.fill: parent
+            source: id_backdrop_source
+            radius: YColors.glassEnabled ? id_glass.blurRadius : 0
+            cached: false
+            // 不能开 transparentBorder：边缘会按透明采样，圆角/边上也会漏光
+            transparentBorder: false
+        }
     }
 
     Rectangle {
