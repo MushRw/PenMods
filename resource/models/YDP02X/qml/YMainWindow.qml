@@ -62,10 +62,10 @@ YWindow {
     YMouseArea {
         id: id_drag_show_quick_setting
         anchors.left: parent.left
-        anchors.leftMargin: 80
+        anchors.leftMargin: 40
         anchors.right: parent.right
-        anchors.rightMargin: 80
-        height: 8
+        anchors.rightMargin: 40
+        height: 14
         drag.target: id_quick_setting_layer
         drag.axis: Drag.YAxis
         drag.minimumY: - id_quick_setting_layer.height
