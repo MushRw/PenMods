@@ -45,10 +45,38 @@
 | 术语 | 文件 | 说明 |
 | --- | --- | --- |
 | **配色令牌** | `commons/YColors.qml` | 全部绑定 C++ `theme.*`；含 `glassLight / glass / glassStrong / glassButton`（由令牌算出 alpha，切主题跟随） |
+| **表面令牌** | `commons/YColors.qml` | `surface`（卡片）/ `surfaceButton`（开关、标签按钮）/ `surfaceStrong`（抽屉、弹出菜单）/ `surfaceDark`（黑底浮层）/ `scrimPanel`（面板遮罩）—— 三档材质都由这几个令牌统一派生 |
+| 模糊门控 | `YColors.glassEnabled` / `YColors.glassRadius` | 只有「毛玻璃」档为真；`FastBlur` 一律写成 `radius: YColors.glassEnabled ? N : 0`，N 保留各处原有强度 |
 | 主题管理器（C++） | `src/theme/ThemeManager.{h,cpp}` | 预设 `official`（官方深灰）/ `pureBlack`（纯黑省电），持久化在 `config.json` 的 `theme.id` |
 | 磨砂组件 | `commons/YFastBlurRectangle.qml` | `FastBlur` + `OpacityMask` 的现成磨砂矩形 |
 | 列表基类 | `commons/YBaseListView.qml` | `cacheBuffer: 1000`（横向列表子类 `commons/YHorizontalListView.qml`，默认 `clip: true`） |
-| 通用弹窗 | `commons/YDialog.qml` | 遮罩 `#E6000000` |
+| 通用弹窗 | `commons/YDialog.qml` | 遮罩 `YColors.scrimPanel` |
+
+### 界面材质（不透明 / 半透明 / 毛玻璃）
+
+设置入口：**设置 → 界面材质**（`settingpages/SystemTweakSettingPage.qml`），
+写 `theme.surfaceStyle`，取值 `opaque` / `translucent`（默认）/ `glass`，存 `config.json`。
+
+| 档位 | `surfaceAlpha` | 模糊 | 说明 |
+| --- | --- | --- | --- |
+| `opaque` 不透明 | 1.0 | 关 | 所有表面实色（省电、最清晰） |
+| `translucent` 半透明 | 0.6（`surfaceStrong` 0.92、`scrimPanel` 0.9） | 关 | 原版「透光」观感 |
+| `glass` 毛玻璃 | 0.6 | 开 | 半透明 + `FastBlur`（各处 radius 见上表门控） |
+
+约定：新写界面时**不要**再写 8 位 ARGB 背景色，一律用表面令牌；
+功能性的半透明（裁剪遮罩、拖拽把手、阴影、按下态、图片上的文字色）保持硬编码。
+
+### 下拉快捷设置面板（`YQuickSettingLayer.qml`）
+
+坐标系原点 = 面板左上角，面板为整屏（320 宽）。
+
+| 元素 | 尺寸 | 位置 / 其它 |
+| --- | --- | --- |
+| 状态块（时间 + 日期） | 时间 20px Bold，日期 `M/D 周X` | 左上 (10, 8) |
+| 电量行 | 百分比 16px + 28×14 电池（圆角 10、描边 2）+ 14×14 充电标 | 状态块下方，行内 spacing 12 |
+| 音量条 / 亮度条 | `implicitWidth` 170 × `implicitHeight` 44，`rotation: -45` | 中心 (112, 85) / (185, 85)，法向间距 ≈ 7.6px；图标反向旋转 22×22 贴在滑条左端 margin 6 |
+| WiFi / 蓝牙圆钮 | 52×52 圆形 | (290, 54) / (290, 124)；底色 `surface`（关）/ `accentTop→accentBottom` 蓝渐变（开）；短按开关，长按进设置页 |
+| 下拉触发条 | 高 14，左右 margin 40 | `YMainWindow.qml` 的 `id_drag_show_quick_setting` |
 
 ## 四、页面
 
