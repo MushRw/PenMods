@@ -25,9 +25,9 @@ YItem {
     YFastBlurRectangle {
         id: id_bg
         anchors.fill: parent
-        maskItem.color: "#E6000000"
+        maskItem.color: YColors.scrimPanel
         maskItem.radius: 0
-        blurRadius: 64
+        blurRadius: YColors.glassEnabled ? 64 : 0
         state: "close"
 
         states: [

@@ -40,17 +40,30 @@ QtObject {
     readonly property string scrimStrong: theme.scrimStrong
     readonly property string scrimLight: theme.scrimLight
 
-    // ---- 透光（磨砂）表面 ----
-    // 原版界面里"透光"的地方其实是 8 位 ARGB：`#99` + 不透明底色（如 #991A1B1F
-    // = 60% 的 grayNormal）。这里不写死 8 位值，而是从主题令牌算出带 alpha 的版本，
-    // 这样切主题时透光面也跟着主题走（写死 8 位值做不到）。
-    // 用法：凡是"浮在壁纸/内容之上的容器"（抽屉、弹层、卡片）用它替不透明的
-    // grayNormal / grayButton。
+    // ---- 表面风格（跟随 theme.surfaceStyle：opaque / translucent / glass）----
+    // 全树所有"面板 / 卡片 / 浮层"的背景都应该用下面这些令牌，
+    // 不要再自己写 8 位 ARGB（历史上散落了 #992D2E33、#991A1B1F、#661A1B1F、#CC1A1B1F…）。
+    // glass 模式额外由 glassEnabled / glassRadius 打开毛玻璃模糊。
     readonly property color grayNormalAsColor: theme.grayNormal
     readonly property color grayButtonAsColor: theme.grayButton
 
+    readonly property string surfaceStyle: theme.surfaceStyle
+    readonly property bool glassEnabled: ("glass" === surfaceStyle)
+    readonly property real surfaceAlpha: theme.surfaceAlpha
+
+    readonly property color surface: Qt.rgba(grayNormalAsColor.r, grayNormalAsColor.g, grayNormalAsColor.b, surfaceAlpha)
+    readonly property color surfaceButton: Qt.rgba(grayButtonAsColor.r, grayButtonAsColor.g, grayButtonAsColor.b, surfaceAlpha)
+    // 面板/抽屉这类浮在最上层的表面比卡片更实一点（半透时 0.92）
+    readonly property color surfaceStrong: Qt.rgba(grayNormalAsColor.r, grayNormalAsColor.g, grayNormalAsColor.b,
+                                                   (1.0 === surfaceAlpha) ? 1.0 : 0.92)
+    // 面板遮罩：不透明模式下全黑，否则保留改造前的 90% 黑
+    readonly property color scrimPanel: Qt.rgba(0, 0, 0, ("opaque" === surfaceStyle) ? 1.0 : 0.9)
+    // 毛玻璃模糊半径（0 = 不模糊）
+    readonly property int glassRadius: glassEnabled ? 16 : 0
+
+    // ---- 兼容别名（改造期间旧名继续可用，逐文件替换后可删）----
     readonly property color glassLight: Qt.rgba(grayNormalAsColor.r, grayNormalAsColor.g, grayNormalAsColor.b, 0.40)
-    readonly property color glass: Qt.rgba(grayNormalAsColor.r, grayNormalAsColor.g, grayNormalAsColor.b, 0.60)
-    readonly property color glassStrong: Qt.rgba(grayNormalAsColor.r, grayNormalAsColor.g, grayNormalAsColor.b, 0.92)
-    readonly property color glassButton: Qt.rgba(grayButtonAsColor.r, grayButtonAsColor.g, grayButtonAsColor.b, 0.60)
+    readonly property color glass: surface
+    readonly property color glassStrong: surfaceStrong
+    readonly property color glassButton: surfaceButton
 }

@@ -82,17 +82,35 @@ void ThemeManager::setId(const QString& id) {
     emit themeChanged();
 }
 
+void ThemeManager::setSurfaceStyle(const QString& style) {
+    static const QStringList kValid{"opaque", "translucent", "glass"};
+    if (style == mSurfaceStyle || !kValid.contains(style)) {
+        return;
+    }
+    mSurfaceStyle = style;
+    _save();
+    emit themeChanged();
+}
+
+double ThemeManager::surfaceAlpha() const { return mSurfaceStyle == "opaque" ? 1.0 : 0.6; }
+
 void ThemeManager::_load() {
-    const auto cfg = Config::getInstance().read("theme");
-    const auto id  = QString::fromStdString(cfg.value("id", "official"));
+    const auto cfg    = Config::getInstance().read("theme");
+    const auto id     = QString::fromStdString(cfg.value("id", "official"));
+    const auto surf   = QString::fromStdString(cfg.value("surfaceStyle", "translucent"));
+    static const QStringList kValid{"opaque", "translucent", "glass"};
     if (mThemes.contains(id)) {
         mId = id;
+    }
+    if (kValid.contains(surf)) {
+        mSurfaceStyle = surf;
     }
 }
 
 void ThemeManager::_save() const {
-    auto cfg      = Config::getInstance().read("theme");
-    cfg["id"]     = mId.toStdString();
+    auto cfg             = Config::getInstance().read("theme");
+    cfg["id"]            = mId.toStdString();
+    cfg["surfaceStyle"]  = mSurfaceStyle.toStdString();
     Config::getInstance().write("theme", cfg);
 }
 

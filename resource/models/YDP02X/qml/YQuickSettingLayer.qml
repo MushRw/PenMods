@@ -5,6 +5,21 @@ import QtGraphicalEffects 1.14
 import "./commons"
 import "./components"
 
+// 下拉快速设置面板
+//
+// 布局（320x170，屏幕边距 16、节奏 8）：
+//   · 左上竖排：时间（大）→ 日期 → 电量 + 百分比
+//   · 中间两条 45° 胶囊（音量在左下、亮度在右上），图标在胶囊左端并反向旋转保持正立
+//   · 右侧两个圆：WiFi（上）/ 蓝牙（下），圆心 (272,54)/(272,124)、半径 26
+//   · 左下空档放主题切换
+//
+// 几何约束（按参考图重算，参考图那版状态块与胶囊外接框是重叠的）：
+//   胶囊外接框 = (100+24)/±√2 ≈ ±44，所以：
+//     状态块 x 16..104 / y 10..76
+//     音量圆心 (150,80) -> 外接框 106..194 / 36..124
+//     亮度圆心 (198,116) -> 外接框 154..242 / 72..160
+//     右侧圆     x 246..298
+//   两条胶囊的垂直间距 = |Δx+Δy|·0.707 ≈ 59 > 胶囊厚度 24，所以视觉上不会压在一起。
 Item {
     id: id_quick_setting_layer_root
     width: YEnum.Screen.Width
@@ -15,18 +30,20 @@ Item {
 
     property alias fastBlurTarget: id_fast_blur.source
 
-    // ---- 状态行（左上角：日期 / 时间 / 电量）----
+    // ---- 状态块（时间 / 日期 / 电量）----
     property string timeString: "00:00"
     property string dateString: ""
+    property string shortDateString: ""
 
     function _tickClock() {
         var now = new Date();
         var weekDays = ["日", "一", "二", "三", "四", "五", "六"];
         timeString = Qt.formatTime(now, "HH:mm");
-        dateString = (now.getMonth() + 1) + "月" + now.getDate() + "日 周" + weekDays[now.getDay()];
+        dateString = now.getFullYear() + "/" + (now.getMonth() + 1) + "/" + now.getDate()
+                + " 周" + weekDays[now.getDay()];
+        shortDateString = (now.getMonth() + 1) + "/" + now.getDate() + " 周" + weekDays[now.getDay()];
     }
 
-    // 20 秒刷一次足够（分针级），比每秒刷省电
     Timer {
         interval: 20000
         repeat: true
@@ -125,132 +142,130 @@ Item {
     FastBlur {
         id: id_fast_blur
         anchors.fill: parent
-        radius: 16
+        // 毛玻璃模式才真的模糊；不透明/半透明模式下直接旁路，省 GPU
+        radius: YColors.glassRadius
+        visible: YColors.glassEnabled
     }
 
-    // 遮罩：原来硬编码 #E6000000（90% 黑），改为跟主题令牌走
+    // 遮罩：统一用 scrimPanel（不透明模式全黑，否则 90% 黑）
     Rectangle {
         anchors.fill: parent
-        color: YColors.scrimStrong
+        color: YColors.scrimPanel
     }
 
-    // ================= 左上角状态行：日期 / 时间 / 电量 =================
-    Row {
-        id: id_status_row
+    // ================= 左上：时间 / 日期 / 电量（竖排）=================
+    Column {
+        id: id_status_block
         anchors.left: parent.left
         anchors.top: parent.top
-        anchors.leftMargin: 12
-        anchors.topMargin: 10
-        spacing: 10
+        // 时间和电量往角上再靠一点
+        anchors.leftMargin: 10
+        anchors.topMargin: 8
+        spacing: 4
 
-        YText {
-            anchors.verticalCenter: parent.verticalCenter
-            text: id_quick_setting_layer_root.dateString
-            font.pixelSize: 12
-            color: YColors.textSecondary
-        }
-
-        YText {
-            anchors.verticalCenter: parent.verticalCenter
-            text: id_quick_setting_layer_root.timeString
-            font.pixelSize: 14
-            font.weight: Font.DemiBold
-            color: YColors.white
-        }
-
+        // 时间 + 日期压成一行（第二次改），电量仍两行，放在下方
         Row {
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 4
+            spacing: 6
 
-            Rectangle {
+            YText {
                 anchors.verticalCenter: parent.verticalCenter
-                width: 24
-                height: 12
-                radius: 3
-                color: "transparent"
-                border.width: 1
-                border.color: YColors.textSecondary
-
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 2
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: Math.max(1, (parent.width - 4) * Math.min(1, batteryManager.power / 100))
-                    height: parent.height - 4
-                    radius: 1
-                    color: batteryManager.charging ? YColors.green : YColors.white
-                }
+                text: id_quick_setting_layer_root.timeString
+                font.pixelSize: 20
+                font.weight: Font.Bold
+                color: YColors.white
             }
 
             YText {
                 anchors.verticalCenter: parent.verticalCenter
-                text: batteryManager.power + "%"
-                font.pixelSize: 12
-                color: batteryManager.charging ? YColors.green : YColors.textSecondary
+                text: id_quick_setting_layer_root.shortDateString
+                font.pixelSize: 10
+                color: YColors.textSecondary
+            }
+        }
+
+        // 电量：间距照原版标题栏（百分比 —12px— 电池框 —0px— 充电闪电，闪电紧贴框）
+        Row {
+            spacing: 12
+
+            YText {
+                anchors.verticalCenter: parent.verticalCenter
+                font.pixelSize: 16
+                text: ("%1%").arg(batteryManager.power)
+                width: paintedWidth
+                height: paintedHeight
+            }
+
+            Row {
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 0
+
+                Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 28
+                    height: 14
+                    radius: 10
+                    color: "transparent"
+                    border.width: 2
+                    border.color: YColors.white
+
+                    Item {
+                        width: 22
+                        height: 8
+                        anchors.centerIn: parent
+
+                        Item {
+                            anchors.fill: parent
+                            clip: true
+                            anchors.rightMargin: (100 - batteryManager.power) * 22 / 100
+
+                            Rectangle {
+                                width: 22
+                                height: 8
+                                radius: height / 2
+                                color: {
+                                    if (batteryManager.charging)
+                                        return (100 > batteryManager.power) ? "#00FF66" : YColors.white;
+                                    return (20 > batteryManager.power) ? YColors.red : YColors.white;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                YImage {
+                    anchors.verticalCenter: parent.verticalCenter
+                    sourceSize: Qt.size(14, 14)
+                    width: 14
+                    height: 14
+                    imageName: "ic_battery_flash"
+                    visible: batteryManager.charging
+                }
             }
         }
     }
 
-    // ================= 左侧：两个 45° 倾斜的滑块（音量 / 亮度）=================
-    Item {
-        id: id_slider_area
-        anchors.left: parent.left
-        anchors.leftMargin: 4
-        anchors.top: id_status_row.bottom
-        anchors.bottom: parent.bottom
-        width: 196
+    // ================= 两条 45° 胶囊：音量（左下）/ 亮度（右上）=================
+    // 音量
+    YVolmueAdjustor {
+        id: id_volum_setting
+        implicitWidth: 170
+        implicitHeight: 44
+        rotation: -45
+        iconVisible: false
+        anchors.horizontalCenter: parent.left
+        anchors.verticalCenter: parent.top
+        // 整组右移（圆也右移后解锁）：中心 94 -> 112，间距 73 不变 -> 仍是约 7.6px
+        anchors.horizontalCenterOffset: 112
+        anchors.verticalCenterOffset: 85
 
-        // 音量：底座隐藏自带图标（它是水平布局的，旋转后会歪），图标另放
-        YVolmueAdjustor {
-            id: id_volum_setting
-            implicitWidth: 104
-            implicitHeight: 18
-            rotation: -45
-            iconVisible: false
-            anchors.centerIn: parent
-            anchors.horizontalCenterOffset: -46
-            anchors.verticalCenterOffset: 20
-        }
-
-        // 亮度
-        YTouchRegulator {
-            id: id_lum_setting
-            implicitWidth: 104
-            implicitHeight: 18
-            rotation: -45
-            anchors.centerIn: parent
-            anchors.horizontalCenterOffset: 46
-            anchors.verticalCenterOffset: -20
-
-            property int lcdSettingBrightness: settingManager.lcdBrightness
-
-            onValueChanged: {
-                if (lcdSettingBrightness != value) {
-                    settingManager.setLcdBrightness(value)
-                }
-            }
-            onLcdSettingBrightnessChanged: {
-                if (lcdSettingBrightness != value) {
-                    value = lcdSettingBrightness
-                }
-            }
-
-            function rebinding() {
-                value = Qt.binding(function(){ return lcdSettingBrightness })
-            }
-
-            Component.onCompleted: rebinding()
-        }
-
-        // 不旋转的小图标（跟着滑块会歪，所以单独放）
         YImage {
-            sourceSize: Qt.size(22, 22)
-            width: 22
-            height: 22
+            sourceSize: Qt.size(24, 24)
+            width: 24
+            height: 24
+            rotation: 45
             anchors.left: parent.left
-            anchors.bottom: parent.bottom
-            anchors.leftMargin: 6
-            anchors.bottomMargin: 4
+            anchors.leftMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
             imageName: {
                 if (0 === id_volum_setting.value)
                     return "slide/volum_off";
@@ -259,15 +274,47 @@ Item {
                 return "slide/volum";
             }
         }
+    }
+
+    // 亮度
+    YTouchRegulator {
+        id: id_lum_setting
+        implicitWidth: 170
+        implicitHeight: 44
+        rotation: -45
+        anchors.horizontalCenter: parent.left
+        anchors.verticalCenter: parent.top
+        // 厚度 44，中心距 73（间距不变）；整组右移：中心 167 -> 185
+        anchors.horizontalCenterOffset: 185
+        anchors.verticalCenterOffset: 85
+
+        property int lcdSettingBrightness: settingManager.lcdBrightness
+
+        onValueChanged: {
+            if (lcdSettingBrightness != value) {
+                settingManager.setLcdBrightness(value)
+            }
+        }
+        onLcdSettingBrightnessChanged: {
+            if (lcdSettingBrightness != value) {
+                value = lcdSettingBrightness
+            }
+        }
+
+        function rebinding() {
+            value = Qt.binding(function(){ return lcdSettingBrightness })
+        }
+
+        Component.onCompleted: rebinding()
 
         YImage {
-            sourceSize: Qt.size(22, 22)
-            width: 22
-            height: 22
+            sourceSize: Qt.size(24, 24)
+            width: 24
+            height: 24
+            rotation: 45
             anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.leftMargin: 6
-            anchors.topMargin: 4
+            anchors.leftMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
             imageName: {
                 if (0 === id_lum_setting.value)
                     return "slide/lum_off";
@@ -278,68 +325,124 @@ Item {
         }
     }
 
-    // ================= 右侧：三个按钮（WiFi / 蓝牙 / 主题）=================
-    Column {
-        id: id_right_buttons
-        anchors.right: parent.right
-        anchors.rightMargin: 10
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 10
+    // ================= 右侧两个按钮：WiFi（上）/ 蓝牙（下）=================
+    // 底样式照原版 YButtonBase / YThreeStatesButton：关闭=grayNormal 灰底，开启=蓝渐变
+    // #4DA0FF->#457AE6；但按用户要求做成**圆形**（radius = width/2）。
+    Item {
+        id: id_wifi_button
+        width: 52
+        height: 52
+        anchors.horizontalCenter: parent.left
+        anchors.verticalCenter: parent.top
+        anchors.horizontalCenterOffset: 290
+        anchors.verticalCenterOffset: 54
 
-        YSlideWifiSetting {
-            id: id_slide_wifi
-            anchors.horizontalCenter: parent.horizontalCenter
-        }
-
-        YSlideBluetoothSetting {
-            id: id_slide_bluetooth
-            anchors.horizontalCenter: parent.horizontalCenter
-        }
-
-        // 主题切换（PenMods 自己的令牌系统：官方深灰 / 纯黑省电）
         Rectangle {
-            id: id_theme_button
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: 46
+            anchors.fill: parent
+            radius: width / 2
+            color: YColors.grayNormal
+            visible: !wifiManager.onoff
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: width / 2
+            visible: wifiManager.onoff
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#4DA0FF" }
+                GradientStop { position: 1.0; color: "#457AE6" }
+            }
+        }
+
+        YImage {
+            anchors.centerIn: parent
+            sourceSize: Qt.size(26, 26)
+            width: 26
             height: 26
-            radius: 13
-            color: YColors.glassButton
-            border.width: 1
-            border.color: YColors.border
+            imageName: wifiManager.onoff ? "slide/wifi_on" : "slide/wifi_off"
+        }
 
-            YText {
-                anchors.centerIn: parent
-                font.pixelSize: 11
-                color: YColors.white
-                text: ("pureBlack" === theme.id) ? "纯黑" : "深灰"
+        YMouseArea {
+            anchors.fill: parent
+            onClicked: {
+                if (wifiManager.onoff)
+                    wifiManager.turnOff();
+                else
+                    wifiManager.turnOn();
             }
-
-            YMouseArea {
-                anchors.fill: parent
-                onClicked: {
-                    theme.id = ("pureBlack" === theme.id) ? "official" : "pureBlack";
-                    qmlGlobal.showToast("主题：" + (("pureBlack" === theme.id) ? "纯黑省电" : "官方深灰"));
-                }
-            }
+            onPressAndHold: qmlGlobal.requestSettingPage(YEnum.SettingIndex.Network)
         }
     }
 
-    // ================= 底部：收起指示（点一下收起）=================
-    YImage {
-        id: id_collapse_indicator
-        sourceSize: Qt.size(40, 10)
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 8
-        imageName: "slide/ic_collapse"
+    Item {
+        id: id_bt_button
+        width: 52
+        height: 52
+        anchors.horizontalCenter: parent.left
+        anchors.verticalCenter: parent.top
+        anchors.horizontalCenterOffset: 290
+        anchors.verticalCenterOffset: 124
+
+        Rectangle {
+            anchors.fill: parent
+            radius: width / 2
+            color: YColors.grayNormal
+            visible: !blueToothManager.onoff
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: width / 2
+            visible: blueToothManager.onoff
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#4DA0FF" }
+                GradientStop { position: 1.0; color: "#457AE6" }
+            }
+        }
+
+        YImage {
+            anchors.centerIn: parent
+            sourceSize: Qt.size(26, 26)
+            width: 26
+            height: 26
+            imageName: blueToothManager.onoff ? "slide/bt_on" : "slide/bt_off"
+        }
+
+        YMouseArea {
+            anchors.fill: parent
+            onClicked: {
+                if (blueToothManager.onoff)
+                    blueToothManager.turnOff();
+                else
+                    blueToothManager.turnOn();
+            }
+            onPressAndHold: qmlGlobal.requestSettingPage(YEnum.SettingIndex.Bluetooth)
+        }
     }
 
-    YMouseArea {
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 2
-        width: 80
-        height: 24
-        onClicked: id_quick_setting_layer_root.forceClose()
+    // 主题切换按钮暂不放（等布局定稿后再加）
+
+    // 【临时诊断 —— 自动展开并自拍一张，看完即删】
+    Timer {
+        interval: 7000
+        repeat: false
+        running: true
+        onTriggered: {
+            id_quick_setting_layer_root.reopen();
+            id_capture_timer.start();
+        }
+    }
+
+    Timer {
+        id: id_capture_timer
+        interval: 1200
+        repeat: false
+        running: false
+        onTriggered: {
+            id_quick_setting_layer_root.grabToImage(function (res) {
+                res.saveToFile("/userdisk/qp_shot.png");
+                shell.startDetached("echo QP_SHOT_DONE >> /tmp/qp.log");
+            });
+        }
     }
 }

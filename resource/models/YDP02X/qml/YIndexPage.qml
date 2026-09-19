@@ -584,7 +584,7 @@ YBackground {
             width: parent.width
             height: id_plugin_drawer.panelHeight
             y: id_plugin_drawer.closedY
-            color: YColors.glassStrong
+            color: YColors.surfaceStrong
             radius: 16
 
             MouseArea {
@@ -634,7 +634,7 @@ YBackground {
                             width: 54
                             height: 54
                             radius: 12
-                            color: YColors.glassButton
+                            color: YColors.surfaceButton
                             anchors.horizontalCenter: parent.horizontalCenter
 
                             YImage {

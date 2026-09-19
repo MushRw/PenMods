@@ -17,7 +17,8 @@ Item {
         id: id_fast_blur
         anchors.fill: id_mask_bg
         source: id_mask_bg
-        radius: 64
+        // 组件默认：只有毛玻璃模式才真模糊；调用方可用 blurRadius 覆盖
+        radius: YColors.glassEnabled ? 64 : 0
         visible: false
     }
 

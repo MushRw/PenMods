@@ -49,7 +49,9 @@ YWindow {
         id: id_effect_source
         anchors.fill: parent
         sourceItem: id_inner_item
-        sourceRect: Qt.rect(0 , 0 + id_quick_setting_layer.y, width, height)
+        // 原来写的是 Qt.rect(0, 0 + id_quick_setting_layer.y, ...)：按面板 y 取景，
+        // 于是面板下滑时背后那层模糊画面会"跟着滑一小段"再弹回。改成固定取景。
+        sourceRect: Qt.rect(0, 0, width, height)
         visible: false
     }
 

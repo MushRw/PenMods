@@ -28,6 +28,10 @@ class ThemeManager : public QObject, public Singleton<ThemeManager> {
 
     Q_PROPERTY(QString     id              READ getId              WRITE setId  NOTIFY themeChanged)
     Q_PROPERTY(QStringList availableThemes READ availableThemes                 CONSTANT)
+    // 表面风格：opaque=不透明 / translucent=半透明 / glass=毛玻璃。
+    // 各表面的具体色值由 QML 的 YColors 从这几个令牌派生（surface/surfaceStrong/...）。
+    Q_PROPERTY(QString     surfaceStyle    READ surfaceStyle    WRITE setSurfaceStyle NOTIFY themeChanged)
+    Q_PROPERTY(double      surfaceAlpha    READ surfaceAlpha                          NOTIFY themeChanged)
 
     // ---- 色板（全部随主题变化，统一用 themeChanged 通知）----
     Q_PROPERTY(QString black          READ black          NOTIFY themeChanged)
@@ -56,6 +60,12 @@ public:
     QString     getId() const { return mId; }
     void        setId(const QString& id);
     QStringList availableThemes() const;
+
+    QString surfaceStyle() const { return mSurfaceStyle; }
+    void    setSurfaceStyle(const QString& style);
+    // 表面不透明度：opaque 恒为 1.0，其余 0.6（glass 在此基础上再叠模糊）
+    double  surfaceAlpha() const;
+    Q_INVOKABLE bool glassEnabled() const { return mSurfaceStyle == "glass"; }
 
     // 取当前主题下某个色值（C++ 侧用，比如 markdownToHtml 需要把颜色拼进 HTML）
     QString color(const QString& name) const { return mThemes.value(mId).value(name).toString(); }
@@ -94,6 +104,8 @@ private:
     void _save() const;
 
     QString mId = "official";
+    // 默认半透明：与改造前大量 #99xxxxxx 的观感一致；opaque / glass 由用户在设置里切换
+    QString mSurfaceStyle = "translucent";
     // 主题 id -> (色名 -> 值)
     QHash<QString, QVariantMap> mThemes;
 };

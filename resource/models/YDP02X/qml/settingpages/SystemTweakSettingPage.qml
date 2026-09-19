@@ -144,6 +144,56 @@ YSettingItemPage {
                 }
             }
 
+            // 表面风格：全树统一从 theme.surfaceStyle 派生（YColors 的 surface 系列令牌 + glassEnabled）
+            YText {
+                font.pixelSize: 16
+                font.italic: true
+                color: YColors.grayText
+                wrapMode: YText.Wrap
+                lineHeightMode: YTextBase.FixedHeight
+                lineHeight: 24
+                width: parent.width
+                text: "界面材质"
+            }
+
+            Row {
+                spacing: 8
+
+                Repeater {
+                    model: ["opaque", "translucent", "glass"]
+
+                    Rectangle {
+                        width: 96
+                        height: 34
+                        radius: 8
+                        color: theme.surfaceStyle === modelData ? YColors.blueRect : YColors.surfaceButton
+                        border.width: 1
+                        border.color: YColors.border
+
+                        YText {
+                            anchors.centerIn: parent
+                            font.pixelSize: 13
+                            text: {
+                                if (modelData === "opaque")
+                                    return "不透明";
+                                if (modelData === "translucent")
+                                    return "半透明";
+                                return "毛玻璃";
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                theme.surfaceStyle = modelData;
+                                qmlGlobal.showToast("界面材质：" + (modelData === "opaque" ? "不透明"
+                                                                   : (modelData === "translucent" ? "半透明" : "毛玻璃")));
+                            }
+                        }
+                    }
+                }
+            }
+
             YText {
                 font.pixelSize: 14
                 color: YColors.grayText
