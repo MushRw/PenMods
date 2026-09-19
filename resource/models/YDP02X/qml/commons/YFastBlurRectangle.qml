@@ -94,9 +94,10 @@ Item {
         }
 
         GaussianBlur {
-            // 按"取景框在场景里的实际位置"摆放，和外扩后的取景框 1:1 对齐
-            x: id_glass.sourceX - id_backdrop_source.sourceRect.x
-            y: id_glass.sourceY - id_backdrop_source.sourceRect.y
+            // 取景框在场景里的左上角 = (sourceRect.x, sourceRect.y)；
+            // 它相对表面左上角的偏移 = sourceRect - (sourceX, sourceY)，直接 1:1 摆放。
+            x: id_backdrop_source.sourceRect.x - id_glass.sourceX
+            y: id_backdrop_source.sourceRect.y - id_glass.sourceY
             width: id_backdrop_source.sourceRect.width
             height: id_backdrop_source.sourceRect.height
             source: id_backdrop_source

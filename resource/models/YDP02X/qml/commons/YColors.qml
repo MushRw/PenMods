@@ -62,7 +62,7 @@ QtObject {
     readonly property color surfaceDark: Qt.rgba(0, 0, 0, ("opaque" === surfaceStyle) ? 1.0 : 0.72)
     // 毛玻璃模糊强度：三个浮层表面（下拉面板 / 插件抽屉 / 听力练习左侧栏）
     // 共用同一个值，不然三处"模糊程度不一样"
-    readonly property int glassBlurRadius: 24
+    readonly property int glassBlurRadius: 14
     // 浮层大表面（下拉面板 / 插件抽屉 / 听力练习左侧栏）：比卡片实，别太透；
     // 毛玻璃档留 25% 给背后的模糊透出来
     readonly property color surfacePanel: Qt.rgba(grayNormalAsColor.r, grayNormalAsColor.g, grayNormalAsColor.b,
