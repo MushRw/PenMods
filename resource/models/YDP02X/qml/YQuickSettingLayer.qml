@@ -147,7 +147,6 @@ Item {
         anchors.fill: parent
         backdrop: id_quick_setting_layer_root.backdropItem
         sourceY: id_quick_setting_layer_root.y
-        blurRadius: 48
     }
 
     // ================= 左上：时间 / 日期 / 电量（竖排）=================

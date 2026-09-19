@@ -99,7 +99,6 @@ YBackButtonAudioPage {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         backdrop: id_container
-        blurRadius: 32
     }
 
     YVerticalTitleBar {

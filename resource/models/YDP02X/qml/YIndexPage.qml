@@ -578,7 +578,6 @@ YBackground {
             // 不能拿 id_bg_image 当背景：壁纸模式为「无壁纸」时它是空图，糊出来什么都没有
             // id_main_content 是首页真正的内容（标题栏 + 菜单列表），且与抽屉同级不会递归
             backdrop: id_main_content
-            blurRadius: 48
 
             MouseArea {
                 anchors.fill: parent
