@@ -340,7 +340,7 @@ Item {
         Rectangle {
             anchors.fill: parent
             radius: width / 2
-            color: YColors.grayNormal
+            color: YColors.surface
             visible: !wifiManager.onoff
         }
 
@@ -349,8 +349,8 @@ Item {
             radius: width / 2
             visible: wifiManager.onoff
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#4DA0FF" }
-                GradientStop { position: 1.0; color: "#457AE6" }
+                GradientStop { position: 0.0; color: YColors.accentTop }
+                GradientStop { position: 1.0; color: YColors.accentBottom }
             }
         }
 
@@ -386,7 +386,7 @@ Item {
         Rectangle {
             anchors.fill: parent
             radius: width / 2
-            color: YColors.grayNormal
+            color: YColors.surface
             visible: !blueToothManager.onoff
         }
 
@@ -395,8 +395,8 @@ Item {
             radius: width / 2
             visible: blueToothManager.onoff
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#4DA0FF" }
-                GradientStop { position: 1.0; color: "#457AE6" }
+                GradientStop { position: 0.0; color: YColors.accentTop }
+                GradientStop { position: 1.0; color: YColors.accentBottom }
             }
         }
 
@@ -421,28 +421,4 @@ Item {
     }
 
     // 主题切换按钮暂不放（等布局定稿后再加）
-
-    // 【临时诊断 —— 自动展开并自拍一张，看完即删】
-    Timer {
-        interval: 7000
-        repeat: false
-        running: true
-        onTriggered: {
-            id_quick_setting_layer_root.reopen();
-            id_capture_timer.start();
-        }
-    }
-
-    Timer {
-        id: id_capture_timer
-        interval: 1200
-        repeat: false
-        running: false
-        onTriggered: {
-            id_quick_setting_layer_root.grabToImage(function (res) {
-                res.saveToFile("/userdisk/qp_shot.png");
-                shell.startDetached("echo QP_SHOT_DONE >> /tmp/qp.log");
-            });
-        }
-    }
 }

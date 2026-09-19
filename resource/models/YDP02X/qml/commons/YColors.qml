@@ -61,6 +61,11 @@ QtObject {
     // 毛玻璃模糊半径（0 = 不模糊）
     readonly property int glassRadius: glassEnabled ? 16 : 0
 
+    // 原版开关类按钮「开启」态的蓝渐变（YThreeStatesButton 的 #4DA0FF -> #457AE6），
+    // 按当前材质的透明度派生：不透明模式=实色，半透明/毛玻璃=60%，随设置自动变。
+    readonly property color accentTop: Qt.rgba(0x4D / 255, 0xA0 / 255, 0xFF / 255, surfaceAlpha)
+    readonly property color accentBottom: Qt.rgba(0x45 / 255, 0x7A / 255, 0xE6 / 255, surfaceAlpha)
+
     // ---- 兼容别名（改造期间旧名继续可用，逐文件替换后可删）----
     readonly property color glassLight: Qt.rgba(grayNormalAsColor.r, grayNormalAsColor.g, grayNormalAsColor.b, 0.40)
     readonly property color glass: surface
