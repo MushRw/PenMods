@@ -28,7 +28,8 @@ Item {
 
     readonly property bool isOpening: ("open" === state)
 
-    property alias fastBlurTarget: id_fast_blur.source
+    // 背景内容（YFastBlurRectangle 实时取景用），由 YMainWindow 注入
+    property Item backdropItem: null
 
     // ---- 状态块（时间 / 日期 / 电量）----
     property string timeString: "00:00"
@@ -139,18 +140,13 @@ Item {
         }
     }
 
-    FastBlur {
-        id: id_fast_blur
+    // 面板表面：统一走 commons/YFastBlurRectangle（与插件抽屉、听力练习左侧栏同一份实现）
+    // 毛玻璃档是实时模糊，取景框跟着面板位置重算，所以不会"跟着面板滑"
+    YFastBlurRectangle {
         anchors.fill: parent
-        // 毛玻璃模式才真的模糊；不透明/半透明模式下直接旁路，省 GPU
-        radius: YColors.glassRadius
-        visible: YColors.glassEnabled
-    }
-
-    // 遮罩：统一用 scrimPanel（不透明模式全黑，否则 90% 黑）
-    Rectangle {
-        anchors.fill: parent
-        color: YColors.scrimPanel
+        backdrop: id_quick_setting_layer_root.backdropItem
+        color: YColors.surface
+        blurRadius: 48
     }
 
     // ================= 左上：时间 / 日期 / 电量（竖排）=================

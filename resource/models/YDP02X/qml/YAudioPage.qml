@@ -89,31 +89,16 @@ YBackButtonAudioPage {
         }
     }
 
-    Item {
+    // 听力练习左侧栏：统一走 commons/YFastBlurRectangle
+    // （原来是自己搭 ShaderEffectSource + FastBlur + 半透明矩形，且取景框写成 x-54 取到屏外）
+    YFastBlurRectangle {
         id: id_effect_item
         implicitWidth: 54
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-
-        ShaderEffectSource {
-            id: id_effect_source
-            anchors.fill: parent
-            sourceItem: id_container
-            sourceRect: Qt.rect(x - 54, y , width, height)
-        }
-
-        FastBlur {
-            anchors.fill: parent
-            source: id_effect_source
-            radius: YColors.glassEnabled ? 32 : 0
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            color: YColors.scrimLight
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-        }
+        backdrop: id_container
+        color: YColors.surface
+        blurRadius: 32
     }
 
     YVerticalTitleBar {

@@ -579,13 +579,16 @@ YBackground {
             }
         }
 
-        Rectangle {
+        // 插件抽屉表面：统一走 commons/YFastBlurRectangle（毛玻璃档实时模糊壁纸背景）
+        YFastBlurRectangle {
             id: id_drawer_panel
             width: parent.width
             height: id_plugin_drawer.panelHeight
             y: id_plugin_drawer.closedY
-            color: YColors.surfaceStrong
+            color: YColors.surface
             radius: 16
+            backdrop: id_bg_image
+            blurRadius: 48
 
             MouseArea {
                 anchors.fill: parent

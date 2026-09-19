@@ -45,20 +45,12 @@ YWindow {
         anchors.fill: parent
     }
 
-    ShaderEffectSource {
-        id: id_effect_source
-        anchors.fill: parent
-        sourceItem: id_inner_item
-        // 原来写的是 Qt.rect(0, 0 + id_quick_setting_layer.y, ...)：按面板 y 取景，
-        // 于是面板下滑时背后那层模糊画面会"跟着滑一小段"再弹回。改成固定取景。
-        sourceRect: Qt.rect(0, 0, width, height)
-        visible: false
-    }
-
     YQuickSettingLayer {
         id: id_quick_setting_layer
         y: - id_quick_setting_layer.height
-        fastBlurTarget: id_effect_source
+        // 毛玻璃取景交给 YGlassSurface 实时做（live + mapToItem），
+        // 这里不再自己缓存一张 ShaderEffectSource，省一层 FBO
+        backdropItem: id_inner_item
     }
 
     YMouseArea {
