@@ -59,12 +59,12 @@ Item {
             FastBlur {
                 anchors.fill: parent
                 source: id_effect_source
-                radius: 32
+                radius: YColors.glassEnabled ? 32 : 0
             }
 
             Rectangle {
                 anchors.fill: parent
-                color: "#661A1B1F"
+                color: YColors.surface
             }
         }
 

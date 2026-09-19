@@ -83,7 +83,7 @@ Item {
     FastBlur {
         anchors.fill: parent
         source: root.blurSource
-        radius: 40
+        radius: YColors.glassEnabled ? 40 : 0
         opacity: root.opacity
         visible: opacity > 0
     }
@@ -105,7 +105,7 @@ Item {
             return buttonCount * 44 + (buttonCount > 1 ? (buttonCount - 1) * 0.5 : 0);
         }
         radius: 14
-        color: "#CC1A1B1F"
+        color: YColors.surfaceStrong
         scale: root.menuScale
         clip: true
         border.color: "#3F3F3F"

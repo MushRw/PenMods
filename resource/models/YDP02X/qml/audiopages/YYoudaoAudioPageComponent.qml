@@ -208,7 +208,7 @@ YBackButtonAudioPage {
         FastBlur {
             anchors.fill: parent
             source: id_effect_source
-            radius: 32
+            radius: YColors.glassEnabled ? 32 : 0
         }
 
         Rectangle {
@@ -229,7 +229,7 @@ YBackButtonAudioPage {
 
     YVerticalTitleBar {
         id: id_title_bar
-        iconButtonBackgroundItem.color: id_youdao_audio_page_view.contentX > 30 ? "#991A1B1F" : YColors.grayNormal
+        iconButtonBackgroundItem.color: id_youdao_audio_page_view.contentX > 30 ? YColors.surface : YColors.grayNormal
         onCallBack: {
             if (isDownloadManagerView && editing) {
                 editing = false
@@ -260,7 +260,7 @@ YBackButtonAudioPage {
             anchors.leftMargin: 10
             anchors.bottom: parent.bottom
             radius: height/2
-            color: id_youdao_audio_page_view.contentX > 30 ? "#991A1B1F" : YColors.grayNormal
+            color: id_youdao_audio_page_view.contentX > 30 ? YColors.surface : YColors.grayNormal
             sourceSize: Qt.size(24, 24)
             enabled: {
                 if (isDownloadManagerView) {

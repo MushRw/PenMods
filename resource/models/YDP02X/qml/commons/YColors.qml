@@ -58,6 +58,8 @@ QtObject {
                                                    (1.0 === surfaceAlpha) ? 1.0 : 0.92)
     // 面板遮罩：不透明模式下全黑，否则保留改造前的 90% 黑
     readonly property color scrimPanel: Qt.rgba(0, 0, 0, ("opaque" === surfaceStyle) ? 1.0 : 0.9)
+    // 菜单 / 浮层这类深色表面（原 "#AA000000" 一族）：不透明模式=实黑
+    readonly property color surfaceDark: Qt.rgba(0, 0, 0, ("opaque" === surfaceStyle) ? 1.0 : 0.72)
     // 毛玻璃模糊半径（0 = 不模糊）
     readonly property int glassRadius: glassEnabled ? 16 : 0
 

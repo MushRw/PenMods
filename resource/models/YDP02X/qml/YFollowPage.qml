@@ -288,7 +288,7 @@ YBackButtonPage {
         FastBlur {
             anchors.fill: parent
             source: id_effect_source
-            radius: 32
+            radius: YColors.glassEnabled ? 32 : 0
         }
     }
 

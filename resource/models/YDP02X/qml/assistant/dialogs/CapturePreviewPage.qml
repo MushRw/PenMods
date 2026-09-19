@@ -488,7 +488,7 @@ Item {
     Rectangle {
         anchors.centerIn: parent
         width: 80; height: 80; radius: 10
-        color: "#AA000000"
+        color: YColors.scrimPanel
         visible: processing
         z: 20
 
@@ -619,7 +619,7 @@ Item {
         id: bottomNavBar
         anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
         height: 30
-        color: "#CC000000"
+        color: YColors.scrimPanel
         z: 10
         visible: (imageLoaded || capturedImages.length > 0) && !processing
 

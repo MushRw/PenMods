@@ -41,7 +41,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "#CC000000"
+        color: YColors.scrimPanel
         MouseArea { anchors.fill: parent }
     }
 

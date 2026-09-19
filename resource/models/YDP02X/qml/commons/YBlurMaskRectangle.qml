@@ -29,7 +29,7 @@ Item {
         id: id_gaussian_blur
         anchors.fill: parent
         source: id_shader_effect_source
-        radius: 64
+        radius: YColors.glassEnabled ? 64 : 0
         visible: false
 
         Item {

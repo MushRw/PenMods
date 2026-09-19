@@ -232,7 +232,7 @@ YBackground {
         id: id_bg_blur
         anchors.fill: id_bg_image
         source: id_bg_image
-        radius: 64
+        radius: YColors.glassEnabled ? 64 : 0
         transparentBorder: true
         opacity: isDimmed ? 1.0 : 0.0
         visible: opacity > 0

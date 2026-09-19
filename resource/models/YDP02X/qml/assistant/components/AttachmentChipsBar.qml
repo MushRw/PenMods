@@ -10,7 +10,7 @@ Rectangle {
 
     height: 34
     radius: 8
-    color: "#CC1A1B1F"
+    color: YColors.surfaceStrong
     border.width: 1
     border.color: "#3F3F3F"
 

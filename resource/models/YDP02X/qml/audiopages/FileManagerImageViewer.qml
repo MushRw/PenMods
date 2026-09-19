@@ -429,7 +429,7 @@ YBackButtonAudioPage {
         Rectangle {
             anchors.fill: rowLayout
             anchors.margins: -4
-            color: "#60000000"
+            color: YColors.scrimPanel
             radius: 16
         }
 

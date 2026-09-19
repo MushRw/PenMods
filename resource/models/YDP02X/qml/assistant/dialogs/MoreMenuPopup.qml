@@ -33,7 +33,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "#AA000000"
+        color: YColors.surfaceDark
         MouseArea {
             anchors.fill: parent
             onClicked: root.hide()

@@ -400,7 +400,7 @@ YBackButtonPage {
     // ─── 视觉代理模型选择器覆盖层 ─────────────────
     Rectangle {
         anchors.fill: parent
-        color: "#AA000000"
+        color: YColors.scrimPanel
         visible: proxySelectorOpen
         z: 1500
 

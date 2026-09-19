@@ -22,7 +22,7 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            color: "#AA32325E"
+            color: YColors.surfaceButton
             radius: height/2
         }
     }

@@ -251,7 +251,7 @@ Item {
         FastBlur {
             anchors.fill: parent
             source: id_effect_source
-            radius: 64
+            radius: YColors.glassEnabled ? 64 : 0
         }
 
         Rectangle {

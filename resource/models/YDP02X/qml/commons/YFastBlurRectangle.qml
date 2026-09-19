@@ -8,7 +8,7 @@ Item {
     Rectangle {
         id: id_mask_bg
         anchors.fill: parent
-        color: "#99494A70"
+        color: YColors.surface
         radius: height/2
         visible: false
     }
