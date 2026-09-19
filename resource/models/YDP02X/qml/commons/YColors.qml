@@ -67,7 +67,7 @@ QtObject {
     // 毛玻璃档留 25% 给背后的模糊透出来
     readonly property color surfacePanel: Qt.rgba(grayNormalAsColor.r, grayNormalAsColor.g, grayNormalAsColor.b,
                                                   ("opaque" === surfaceStyle) ? 1.0
-                                                                              : (("glass" === surfaceStyle) ? 0.75 : 0.90))
+                                                                              : (("glass" === surfaceStyle) ? 0.82 : 0.90))
     // 毛玻璃模糊半径（0 = 不模糊）
     readonly property int glassRadius: glassEnabled ? 16 : 0
 

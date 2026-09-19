@@ -121,9 +121,13 @@ Item {
         }
     }
 
-    YAnimator {
+    // 用标准 NumberAnimation，不用 YAnimator：
+    // YAnimator 动画期间不保证发出 y 的变更通知，毛玻璃取景框绑定的是 y，
+    // 收不到更新就会停在松手那一刻 —— 面板回弹时模糊背景跟着面板一起跑。
+    NumberAnimation {
         id: id_open_close_animator
         target: id_quick_setting_layer_root
+        property: "y"
         from: id_quick_setting_layer_root.y
         to: - id_quick_setting_layer_root.height
         duration: 200
