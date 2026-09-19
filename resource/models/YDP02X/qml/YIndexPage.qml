@@ -563,17 +563,6 @@ YBackground {
             enabled: id_plugin_drawer.isOpen
             hoverEnabled: false
 
-            Rectangle {
-                anchors.fill: parent
-                color: "black"
-                opacity: id_plugin_drawer.isOpen ? 0.5 : 0.0
-                Behavior on opacity {
-                    NumberAnimation {
-                        duration: 250
-                    }
-                }
-            }
-
             onClicked: {
                 id_plugin_drawer.closeDrawer();
             }
@@ -585,7 +574,6 @@ YBackground {
             width: parent.width
             height: id_plugin_drawer.panelHeight
             y: id_plugin_drawer.closedY
-            color: YColors.surface
             radius: 16
             backdrop: id_bg_image
             blurRadius: 48

@@ -141,11 +141,12 @@ Item {
     }
 
     // 面板表面：统一走 commons/YFastBlurRectangle（与插件抽屉、听力练习左侧栏同一份实现）
-    // 毛玻璃档是实时模糊，取景框跟着面板位置重算，所以不会"跟着面板滑"
+    // 毛玻璃档是实时模糊：取景框用面板根节点的 y 显式绑定，面板滑动时跟着重算，
+    // 模糊内容钉在背景上（不能用 mapToItem：QML 依赖追踪抓不到它，取景框会永久停在屏外）
     YFastBlurRectangle {
         anchors.fill: parent
         backdrop: id_quick_setting_layer_root.backdropItem
-        color: YColors.surface
+        sourceY: id_quick_setting_layer_root.y
         blurRadius: 48
     }
 

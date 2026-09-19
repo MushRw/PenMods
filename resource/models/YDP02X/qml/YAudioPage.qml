@@ -97,7 +97,6 @@ YBackButtonAudioPage {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         backdrop: id_container
-        color: YColors.surface
         blurRadius: 32
     }
 
