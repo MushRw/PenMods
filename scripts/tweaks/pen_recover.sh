@@ -18,6 +18,17 @@ mount -o remount,rw / 2>/dev/null
 # 1) patchelf + glibc 库（misc/init.sh 会把 /lib/libm.so.6 等换成配套版本）
 cd /userdata/PenMods/misc && sh ./init.sh
 
+# 1.5) 系统 CA 库：切槽/OTA 之后可能整个消失（实测 /etc/ssl/certs 为空），
+#      症状是 Bili 插件这类 Go 程序所有 HTTPS 请求失败（包内不带证书，只认系统 CA）
+CA=/etc/ssl/certs/ca-certificates.crt
+SRC=/userdata/PenMods/misc/ca-certificates.crt
+if [ -f "$SRC" ] && [ "$(wc -c < "$SRC" 2>/dev/null)" != "$(wc -c < "$CA" 2>/dev/null)" ]; then
+    mkdir -p /etc/ssl/certs
+    cp -f "$SRC" "$CA"
+    chmod 644 "$CA"
+    echo "CA bundle restored: $(wc -c < "$CA") bytes"
+fi
+
 # 2) 主程序补丁（幂等：已带依赖就直接退出）
 PATH=/userdata/PenMods/misc:$PATH sh /userdata/PenMods/patch.sh
 
@@ -39,7 +50,8 @@ fi
 
 # 5) 上锁：不加这一步，厂商通道会把上面这些文件再写回原版
 for f in /usr/bin/patchelf /lib/libm.so.6 /usr/lib/libstdc++.so.6 /lib/libcrypt.so.1 \
-         /usr/bin/runDictPen /etc/init.d/S20zramswap /oem/YoudaoDictPen/output/YoudaoDictPen; do
+         /usr/bin/runDictPen /etc/init.d/S20zramswap /oem/YoudaoDictPen/output/YoudaoDictPen \
+         /etc/ssl/certs/ca-certificates.crt; do
     chattr +i "$f" 2>/dev/null
     printf "%-45s %s\n" "$f" "$(lsattr "$f" 2>/dev/null | awk '{print $1}')"
 done

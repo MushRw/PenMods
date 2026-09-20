@@ -26,6 +26,8 @@ REQUIRED_FILES = [
     "patch.sh",
     "misc/init.sh",
     "misc/patchelf",
+    # 系统 CA 库：切槽/OTA 后可能整个消失，导致 Bili 插件等 Go 程序 HTTPS 全失败
+    "misc/ca-certificates.crt",
 ]
 
 
