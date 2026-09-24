@@ -239,4 +239,43 @@ YWindow {
         }
         objectName: "YMainWindow.qml_id_sound_center_playing_check_timer"
     }
+
+    // ================= 屏幕四边描边光（漏光感）=================
+    // 窗口级、纯视觉层：没有 MouseArea，不吃事件。
+    //
+    // 为什么不用复现当年那个 transparentBorder "漏光" bug：那个是模糊取景越界
+    // 采样到透明导致的边缘混色，只在毛玻璃档出现、且颜色随背后内容变化 —— 拿它
+    // 当效果不稳定。这里把它的观感用固定的距离衰减重建：三档材质下表现一致。
+    //
+    // 做法：一个全屏 ShaderEffect，取到四边的最小距离 d，a = (1 - d/edge)^1.6，
+    // 越靠边越亮；四角 dx、dy 都小 → 自然叠加成更亮的角。
+    // 想调：只改 edgeWidth / glowAlpha / glowColor 三处。
+    ShaderEffect {
+        id: id_edge_glow
+        anchors.fill: parent
+
+        property real edgeWidth: 22.0
+        property real glowAlpha: 0.16
+        property color glowColor: YColors.white
+        property real viewW: width
+        property real viewH: height
+
+        fragmentShader: "
+            varying highp vec2 qt_TexCoord0;
+            uniform lowp float qt_Opacity;
+            uniform highp float edgeWidth;
+            uniform highp float glowAlpha;
+            uniform lowp vec4 glowColor;
+            uniform highp float viewW;
+            uniform highp float viewH;
+            void main() {
+                highp vec2 p = qt_TexCoord0 * vec2(viewW, viewH);
+                highp float dx = min(p.x, viewW - p.x);
+                highp float dy = min(p.y, viewH - p.y);
+                highp float d = min(dx, dy);
+                highp float a = clamp(1.0 - d / edgeWidth, 0.0, 1.0);
+                a = pow(a, 1.6) * glowAlpha;
+                gl_FragColor = vec4(glowColor.rgb * a, a) * qt_Opacity;
+            }"
+    }
 }
