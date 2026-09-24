@@ -32,14 +32,27 @@ fi
 # 2) 主程序补丁（幂等：已带依赖就直接退出）
 PATH=/userdata/PenMods/misc:$PATH sh /userdata/PenMods/patch.sh
 
-# 3) runDictPen 的 glibc 内存调参
+# 3) runDictPen 的 glibc 内存调参 + QML 数据目录改到可写分区
 F=/usr/bin/runDictPen
+chattr -i "$F" 2>/dev/null
 if ! grep -q MALLOC_ARENA_MAX "$F"; then
     cp -a "$F" /userdata/runDictPen.bak
     sed -i '/^export APP_ROOT_PATH=/a export MALLOC_ARENA_MAX=2' "$F"
     sed -i '/^export MALLOC_ARENA_MAX=2/a export MALLOC_TRIM_THRESHOLD_=131072' "$F"
 fi
 grep -n MALLOC "$F"
+
+# 3.5) QML LocalStorage / AppDataLocation 落到可写分区。
+#      rootfs 是 ext4 ro，默认数据目录是 /.local/share/... → 插件写配置/历史
+#      （lx-pen 的搜索历史、Bili 的 cookies 等）全部静默失败，表现为"状态永远不更新"。
+mkdir -p /userdata/pen-data/share
+if [ ! -d /userdata/pen-data/share/NeteaseYoudao ] && [ -d /.local/share/NeteaseYoudao ]; then
+    cp -a /.local/share/NeteaseYoudao /userdata/pen-data/share/ 2>/dev/null
+fi
+if ! grep -q XDG_DATA_HOME "$F"; then
+    sed -i '/^export APP_ROOT_PATH=/a export XDG_DATA_HOME=/userdata/pen-data/share' "$F"
+fi
+grep -n XDG_DATA_HOME "$F"
 
 # 4) zram swap（S20 必须早于 S21mountall，开机顺序才正确）
 if [ -f /userdata/PenMods/misc/S20zramswap ]; then

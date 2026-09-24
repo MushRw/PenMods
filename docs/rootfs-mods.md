@@ -102,3 +102,49 @@ killall YoudaoDictPen                            # 让插件 server 重启，重
 
 抽取思路：在 `system.img` 里找 `-----BEGIN CERTIFICATE-----` 最密的那一簇
 （最大连续块），从首块行首切到末块行尾，再逐块 `PEM → DER` 校验。
+
+## 附二：rootfs 只读 → 插件状态永远写不进去（2026-09-24 事故）
+
+症状：lx-pen 的**搜索历史每次打开都回到同一份旧样子**（不是空，而是老快照）。
+
+证据链：
+
+```
+/dev/root / ext4 ro,relatime                                  # rootfs 只读
+QML LocalStorage 库 = /.local/share/NeteaseYoudao/YoudaoDictPen/
+                      QML/OfflineStorage/Databases/<hash>.sqlite
+touch 同目录 → Read-only file system                           # 写不进去
+库内明文可见 history["gem","msr"] / quality320k                # 停在最后一次能写的时刻
+```
+
+QML `LocalStorage` 落在 `QStandardPaths::AppDataLocation`，而 app 是 `HOME=/`，
+所以默认数据目录在只读 rootfs 上：插件的 `saveSettings()` 每次都抛异常，
+被插件自己的 `try/catch` 吞掉（`console.warn` 到不了笔上日志）→ **表现为状态永远不更新**。
+这不是插件逻辑问题（lx-pen 在 `addHistory()` 里是立即落库的）。
+
+修法（一行环境变量，落在已经在恢复+锁清单里的 `/usr/bin/runDictPen`）：
+
+```sh
+mkdir -p /userdata/pen-data/share
+# 先把旧库拷过去，历史不丢
+cp -a /.local/share/NeteaseYoudao /userdata/pen-data/share/
+mount -o remount,rw /
+chattr -i /usr/bin/runDictPen
+sed -i '/^export APP_ROOT_PATH=/a export XDG_DATA_HOME=/userdata/pen-data/share' /usr/bin/runDictPen
+chattr +i /usr/bin/runDictPen
+killall YoudaoDictPen
+```
+
+验证：`tr '\0' '\n' < /proc/$(pidof YoudaoDictPen)/environ | grep XDG_DATA_HOME` 有值，
+且新目录可写。
+
+**故意不动 `XDG_CACHE_HOME`**：QML 磁盘缓存留在只读 rootfs 上 = 事实上不缓存，
+这样 PenMods 替换资源库后不会吃到过期 QML 缓存（这是我们快速迭代依赖的行为）。
+
+排查这类"插件状态不更新"的通用命令：
+
+```sh
+mount | grep ' / '                       # / 是不是 ro
+ls -l /.local/share/NeteaseYoudao/       # LocalStorage 在哪
+touch <该目录>/.wt && rm <该目录>/.wt     # 能不能写
+```
