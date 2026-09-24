@@ -575,8 +575,9 @@ YBackground {
             height: id_plugin_drawer.panelHeight
             y: id_plugin_drawer.closedY
             radius: 16
-            // 不能拿 id_bg_image 当背景：壁纸模式为「无壁纸」时它是空图，糊出来什么都没有
-            // id_main_content 是首页真正的内容（标题栏 + 菜单列表），且与抽屉同级不会递归
+            // 两层背景：壁纸（下层）+ 主页内容（上层）。
+            // 只传 id_main_content 的话，壁纸不在取景框里 → 只有字和图标被糊、背景是清楚的
+            backdrop2: id_bg_image
             backdrop: id_main_content
 
             MouseArea {
