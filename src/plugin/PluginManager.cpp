@@ -247,7 +247,24 @@ bool PluginManager::loadSo(PluginInfo& info) {
             return false;
         }
 
-        // ---- 阶段 2: 如果引擎已就绪，立即 attach ----
+        // ---- 阶段 2: 注册到 map，再初始化 Hook API ----
+        m_loadedLibraries.insert(info.id, lib);
+        info.isLoaded = true;
+        // PL-04：`.loading` 自愈标记原来是**在装 hook 之前**删的（先 remove、再
+        // initializePluginHookAPI）。而 hook 安装正是整个加载过程里最危险的一步
+        // （Dobby 要改写目标函数的代码页）—— 崩在这一步时标记已经没了，下次开机
+        // `scanAndLoadAll()` 看不到它，就不会触发"上次启动崩过 → 自动禁用"，
+        // 于是每次开机都崩在同一处，设备陷入开机循环，只能靠 adb 救。
+        // 标记必须等 hook 装完、确认活着之后再删。
+        initializePluginHookAPI(info.id, lib);
+
+        // PL-05: attach 必须放在 hook API **之后**。典型例子 lx-pen：`g_player`
+        // 在 init_plugin_with_hook_api 阶段才创建，attach_engine 里
+        // `if (qmlEngine && g_player)` 才成立。旧顺序（attach 在前）下运行时启用
+        // 插件时 g_player 还不存在 → `lxpenPlayer` 上下文属性注册不上，插件页报
+        // `lxpenPlayer is not defined`，还残留上一次禁用留下的悬垂属性。
+        // 开机路径不受影响：m_engine 为空时 attach 被推迟到 setEngine()，那时
+        // loadSo() 早已走完（见 attachEngineToLoadedPlugins）。
         if (m_engine) {
             typedef void (*AttachFunc)(QQmlEngine*);
             auto attach = reinterpret_cast<AttachFunc>(lib->resolve("attach_engine"));
@@ -259,16 +276,6 @@ bool PluginManager::loadSo(PluginInfo& info) {
             }
         }
 
-        // ---- 阶段 3: 注册到 map，再初始化 Hook API ----
-        m_loadedLibraries.insert(info.id, lib);
-        info.isLoaded = true;
-        // PL-04：`.loading` 自愈标记原来是**在装 hook 之前**删的（先 remove、再
-        // initializePluginHookAPI）。而 hook 安装正是整个加载过程里最危险的一步
-        // （Dobby 要改写目标函数的代码页）—— 崩在这一步时标记已经没了，下次开机
-        // `scanAndLoadAll()` 看不到它，就不会触发"上次启动崩过 → 自动禁用"，
-        // 于是每次开机都崩在同一处，设备陷入开机循环，只能靠 adb 救。
-        // 标记必须等 hook 装完、确认活着之后再删。
-        initializePluginHookAPI(info.id, lib);
         QFile::remove(loadingFlagPath);
         spdlog::info("Successfully loaded SO: {}", info.id.toStdString());
         return true;
@@ -476,6 +483,25 @@ static int unhookFunctionImpl(void* targetAddr) {
     return rc;
 }
 
+// PL-06: 供插件在 destroy_plugin 里移除自己设置的 rootContext 上下文属性。
+// 实现用"置空"而不是真移除：Qt 5 的 QQmlContext 没有公开的 remove API，
+// setContextProperty(name, nullptr QObject*) 后 QML 读到的是 null（报 TypeError 不断链），
+// 比挂着已析构指针的 use-after-free 安全得多。
+static int removeContextPropertyImpl(const char* name) {
+    if (!name || name[0] == '\0') {
+        spdlog::error("[PluginHookAPI] Context property name is null");
+        return -1;
+    }
+    QQmlEngine* engine = PluginManager::getInstance().engine();
+    if (!engine) {
+        spdlog::warn("[PluginHookAPI] No engine attached, cannot remove context property '{}'", name);
+        return -2;
+    }
+    engine->rootContext()->setContextProperty(QString::fromUtf8(name), static_cast<QObject*>(nullptr));
+    spdlog::info("[PluginHookAPI] Removed context property '{}'", name);
+    return 0;
+}
+
 void PluginManager::initializePluginHookAPI(const QString& id, QLibrary* lib) {
     if (!lib || !lib->isLoaded()) return;
 
@@ -490,7 +516,8 @@ void PluginManager::initializePluginHookAPI(const QString& id, QLibrary* lib) {
     }
 
     // static: 插件持有指向此结构体的指针，其生命周期必须覆盖插件整个运行期
-    static PluginHookAPI hookApi = { &querySymbolImpl, &hookFunctionImpl, &unhookFunctionImpl };
+    // 注意字段顺序必须与 PluginSDK.h 中 PluginHookAPI 的声明严格一致（旧插件按前缀读取，追加字段向后兼容）
+    static PluginHookAPI hookApi = { &querySymbolImpl, &hookFunctionImpl, &unhookFunctionImpl, &removeContextPropertyImpl };
 
     s_currentHookOwner = id;
     try {

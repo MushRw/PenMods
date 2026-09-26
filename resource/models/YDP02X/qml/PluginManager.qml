@@ -102,9 +102,13 @@ YBackButtonPage {
         onClickedConfirm: {
             console.log("执行卸载逻辑: " + targetName);
             if (typeof pluginManager !== 'undefined') {
-                pluginManager.uninstallPlugin(targetName);
-                // 卸载后通常需要刷新，清理旧数据
-                pluginManager.requestPluginList();
+                // PL-06: uninstallPlugin 现在返回成败；失败时不做全量 rescan
+                //（rescan 会在 UI 线程同步 dlopen，白卡一次还没结果）
+                if (pluginManager.uninstallPlugin(targetName)) {
+                    pluginManager.requestPluginList();
+                } else {
+                    console.warn("卸载失败: " + targetName);
+                }
             }
             close();
         }
@@ -293,11 +297,22 @@ YBackButtonPage {
         ignoreUnknownSignals: true
 
         function onPluginListUpdated() {
+            // PL-07: 先回收被禁用/卸载插件的保活页（popStackId == mainQmlUrl），
+            // 否则保活实例要等 180 秒超时才释放，期间引用着已卸载插件的悬垂属性。
+            var valid = [];
+            var count = pluginManager.getPluginCount();
+            for (var i = 0; i < count; i++) {
+                var info = pluginManager.getPluginInfo(i);
+                if (info && info.enabled && info.loaded && info.mainQmlUrl)
+                    valid.push(info.mainQmlUrl);
+            }
+            id_pop_container.releaseStaleKeptAlive(valid);
+
             // 必须先清空模型，否则每次刷新都会追加到旧列表后面
             pluginListModel.clear();
 
-            var count = pluginManager.getPluginCount();
-            for (var i = 0; i < count; i++) {
+            count = pluginManager.getPluginCount();
+            for (i = 0; i < count; i++) {
                 pluginListModel.append(pluginManager.getPluginInfo(i));
             }
         }

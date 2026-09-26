@@ -208,6 +208,18 @@ Item {
             releaseKeptAlive(keys[i])
     }
 
+    // PL-07: 回收所有 popStackId 不在 validIds 里的保活页面。
+    // 插件被禁用/卸载后，它的保活实例必须立刻回收（不能等超时定时器）——
+    // 实例里的 QML 引用着插件的上下文属性，插件 .so 已卸载时这就是悬垂。
+    // 用法：宿主把"仍然启用且已加载"的插件 mainQmlUrl 列表传进来。
+    function releaseStaleKeptAlive(validIds) {
+        const keys = Object.keys(_keptAlive)
+        for (let i = 0; i < keys.length; ++i) {
+            if (!validIds || validIds.indexOf(keys[i]) < 0)
+                releaseKeptAlive(keys[i])
+        }
+    }
+
     function _registerObject(incubatorObject, popStackId, cleanups) {
         if (!incubatorObject || !popStackId)
             return false

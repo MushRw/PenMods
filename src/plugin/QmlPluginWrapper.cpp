@@ -86,9 +86,11 @@ bool QmlPluginWrapper::setPluginEnabled(const QString& pluginId, bool enabled) {
     return result;
 }
 
-void QmlPluginWrapper::uninstallPlugin(const QString& pluginName) {
+// PL-06: 原来返回 void，QML 拿不到失败信息。改返回 bool。
+bool QmlPluginWrapper::uninstallPlugin(const QString& pluginName) {
     bool result = m_pluginManager->uninstallPlugin(resolvePluginId(pluginName));
     if (result) emit pluginListUpdated();
+    return result;
 }
 
 void QmlPluginWrapper::requestPluginList() {

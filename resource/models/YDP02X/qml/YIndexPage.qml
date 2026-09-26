@@ -486,10 +486,27 @@ YBackground {
         }
     }
 
+    // PL-07: 插件被禁用/卸载后，立刻回收它的保活页实例（popStackId == mainQmlUrl）。
+    // 原来全仓没有任何宿主调用 releaseKeptAlive 的地方，禁用后保活实例要等
+    // 180 秒超时才回收，期间它引用着已卸载插件的上下文属性（悬垂）。
+    function releaseDisabledPluginPages() {
+        if (typeof pluginManager === "undefined")
+            return;
+        var valid = [];
+        var count = pluginManager.getPluginCount();
+        for (var i = 0; i < count; i++) {
+            var info = pluginManager.getPluginInfo(i);
+            if (info && info.enabled && info.loaded && info.mainQmlUrl)
+                valid.push(info.mainQmlUrl);
+        }
+        id_plugin_pop_container.releaseStaleKeptAlive(valid);
+    }
+
     Connections {
         target: (typeof pluginManager !== 'undefined') ? pluginManager : null
         ignoreUnknownSignals: true
         function onPluginListUpdated() {
+            releaseDisabledPluginPages();
             refreshPluginDrawer();
         }
         function onPluginStateChanged(pluginName, newState) {

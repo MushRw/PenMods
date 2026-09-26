@@ -23,7 +23,7 @@ public:
     Q_INVOKABLE int         getPluginCount();
     Q_INVOKABLE QJsonObject getPluginInfo(int index);
     Q_INVOKABLE bool        setPluginEnabled(const QString& pluginName, bool enabled);
-    Q_INVOKABLE void        uninstallPlugin(const QString& pluginName);
+    Q_INVOKABLE bool        uninstallPlugin(const QString& pluginName); // PL-06: 返回成败，QML 才知道要不要刷新/提示
     Q_INVOKABLE void        requestPluginList();
 
     // 内存整理：QML 在插件页销毁 / 保活释放后调用；构造时也会起一个每 5 分钟的定时器。

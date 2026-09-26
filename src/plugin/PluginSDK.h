@@ -75,6 +75,17 @@ typedef struct {
      * @return 0 表示成功，非 0 表示失败
      */
     int (*unhookFunction)(void* targetAddr);
+
+    /**
+     * @brief 移除插件在 attach_engine 里设置的 rootContext 上下文属性
+     * @param name 当初 setContextProperty 使用的同一个属性名
+     * @return 0 表示成功，非 0 表示失败
+     *
+     * 插件必须在 destroy_plugin 里清掉自己设置过的所有上下文属性：
+     * rootContext 持有的是裸 QObject 指针，插件 .so 卸载后对象随代码段一起消失，
+     * 属性还挂在 context 上，QML 一读就是 use-after-free（PL-06）。
+     */
+    int (*removeContextProperty)(const char* name);
 } PluginHookAPI;
 
 // ==================== 便利宏定义（供插件使用） ====================
