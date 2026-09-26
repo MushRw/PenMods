@@ -224,8 +224,11 @@ int main() {
         auto r = mod::execWithResult("seq 1 5000");
         ok(r.out.size() > 20000, "seq 1 5000 输出 " + std::to_string(r.out.size()) + " 字节 > 20000");
         ok(std::count(r.out.begin(), r.out.end(), '\n') == 4999, "换行数 == 4999（5000 行，末尾那个被裁掉）");
-        ok(r.out.rfind("5000") != std::string::npos, "末行 5000 存在（没被截断）");
-        ok(r.out.rfind("1\n2") == 0, "首行完整");
+        ok(r.out.size() >= 4 && r.out.compare(r.out.size() - 4, 4, "5000") == 0, "末行 5000 恰好在末尾（没被截断）");
+        // ⚠️ 这里必须用 compare(0,…) 而不是 rfind()：`seq 1 5000` 的输出里 "1\n2"
+        // 会在 `21\n22`、`201\n202` 等处**再次出现**，而 rfind 取的是"最后一次出现"，
+        // 拿它跟 0 比会永远不成立（第一次跑 CI 就栽在这条上）。
+        ok(r.out.compare(0, 4, "1\n2\n") == 0, "首行完整（以 \"1\\n2\\n\" 开头）");
     }
 
     // ---------------------------------------------------------------- 5
@@ -337,12 +340,35 @@ int main() {
     }
 
     // ---------------------------------------------------------------- 11
-    section("11. 超时后是否留下后台进程（如实记录，不作判定）");
+    section("11. 超时按进程组清掉整棵子树（管道另一端的孙进程也要死）");
     {
-        auto r = mod::execWithResult("pgrep -x sleep", 3000);
-        note(std::string("超时测试全部结束后，pgrep -x sleep 的 pid 列表 = [") + escaped(r.out) + "]");
-        note("若列表为空 => sh 把 sleep exec 掉了，SIGKILL 直接命中它（最理想）");
-        note("若非空 => 只杀掉了直接子进程 sh，孙进程仍在；这是「只 kill 直接子进程」的已知边界");
+        // 用"数量差"而不是绝对值为 0：第 6 节**故意**留了后台 sleep（它们就是要占着
+        // 管道的），第 7 节的超时测试也可能留下一些 —— 只要本节这次超时没让 sleep
+        // **变多**，就说明整组被杀干净了。这样也不依赖 killall / pkill 是否存在。
+        auto sleepCount = [] {
+            const std::string s = mod::exec("pgrep -x sleep | wc -l", mod::kExecQuickMs);
+            return s.empty() ? 0 : std::stoi(s);
+        };
+        const int before = sleepCount();
+        note("本节开始前 pgrep -x sleep 计数 = " + std::to_string(before) + "（含前面故意的后台 sleep）");
+
+        // `sleep 12345 | cat`：管道两端**必然**是 fork 出来的进程，所以 sleep 12345
+        // 是 sh 的**孙进程** —— "只 kill 直接子进程"的实现会把它留在系统里继续跑。
+        // （实测：修复前这一节留下 4 个 sleep，见首次 CI 输出的 note。）
+        const auto t0 = ms();
+        auto       r  = mod::execWithResult("sleep 12345 | cat", 800);
+        const auto dt = ms() - t0;
+        ok(r.timedOut, "timedOut==true");
+        ok(dt < 4000, "耗时 " + std::to_string(dt) + "ms < 4000ms（没有等满 12345 秒）");
+
+        ::usleep(400 * 1000); // 等 SIGKILL 生效 + 进程被回收
+        const int after = sleepCount();
+        ok(after <= before,
+           "超时没有多出 sleep 进程（整组被清）：" + std::to_string(before) + " -> " + std::to_string(after));
+
+        // 对照组：正常结束的管道命令，本来就不该有残留
+        auto fine = mod::execWithResult("sleep 0.2 | cat", mod::kExecQuickMs);
+        ok(fine.ok(), "对照组 `sleep 0.2 | cat` 正常跑完");
     }
 
     std::printf("\n----------------------------------------\n");

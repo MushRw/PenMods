@@ -94,6 +94,11 @@ ExecResult execWithResult(const char* cmd, int timeoutMs) {
         // 子进程。多线程进程里 fork 出来的子进程只保证 async-signal-safe 的函数可用
         // （其它线程可能在 fork 那一刻正持有 malloc / stdio 的锁），所以从这里到
         // execv 之间：不开 C++ 流、不分配内存、不打日志。
+        //
+        // 自建进程组（下称 kill(-pid) 要用）：`sh -c` 背后往往还有孙进程 —— 管道的
+        // 两端、`&` 起的后台任务、复合命令 —— 超时时只 kill 直接子进程会把它们留在
+        // 系统里继续跑。实测：旧写法杀 `sleep 12345 | cat` 后 sleep 仍在。
+        ::setpgid(0, 0);
         ::close(fds[0]);
         if (::dup2(fds[1], STDOUT_FILENO) < 0) {
             ::_exit(127);
@@ -109,6 +114,11 @@ ExecResult execWithResult(const char* cmd, int timeoutMs) {
     }
 
     result.launched = true;
+
+    // 与子进程里那次 setpgid 是竞态关系，两边都做才能保证父进程准备 kill 之前
+    // 进程组一定已建立。子进程 exec 之后再调用会失败（EACCES），忽略即可 ——
+    // 那种情况下组早就建好了。
+    ::setpgid(pid, pid);
 
     // 关键：父进程必须关掉写端，否则永远等不到 EOF。
     ::close(fds[1]);
@@ -160,8 +170,11 @@ ExecResult execWithResult(const char* cmd, int timeoutMs) {
     if (!childGone) {
         // 走到这里只有两种可能：超时（子进程还在跑），或者刚读完 EOF、子进程正在退出的路上。
         if (timedOut) {
-            ::kill(pid, SIGKILL);
-            spdlog::warn("[exec] 命令超时（{} ms），已强制结束: {}", timeoutMs, cmd);
+            // 用**负 pid** 命中整个进程组（见子进程分支里 setpgid 的说明）：
+            // 这样管道另一端、`&` 起的后台任务、复合命令会一起被清掉，
+            // 而不是只杀掉 sh 这个替死鬼、把子孙丢在系统里继续跑。
+            ::kill(-pid, SIGKILL);
+            spdlog::warn("[exec] 命令超时（{} ms），已强制结束该进程组: {}", timeoutMs, cmd);
         }
         const auto reapDeadline = std::chrono::steady_clock::now() + kReapTimeout;
         while (true) {
