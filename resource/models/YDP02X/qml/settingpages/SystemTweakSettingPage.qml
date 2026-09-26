@@ -255,8 +255,8 @@ YSettingItemPage {
                 title: "重启界面"
                 value: "卡顿时点这里"
                 onClicked: {
-                    qmlGlobal.showToast("正在重启界面，请稍候…", YColors.yellow);
-                    mod.softReboot();
+                    // PM-13: 重启界面会杀掉整个主程序进程，必须二次确认防误触
+                    confirmSoftRebootDialog.show();
                 }
             }
 
@@ -271,6 +271,21 @@ YSettingItemPage {
             }
         }
 
+    }
+
+    // PM-13: 重启界面二次确认（原来一点就直接杀进程，没有任何确认）
+    YTwoButtonDialog {
+        id: confirmSoftRebootDialog
+        z: 1000
+        anchors.fill: parent
+        tipItem.text: "确定要重启界面吗？\n屏幕会黑几秒，随后自动恢复。"
+
+        onClickedConfirm: {
+            close();
+            qmlGlobal.showToast("正在重启界面，请稍候…", YColors.yellow);
+            mod.softReboot();
+        }
+        onClickedCancel: close();
     }
 
 }

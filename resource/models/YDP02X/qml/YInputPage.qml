@@ -14,6 +14,12 @@ YPage {
 
     property bool isPinyinMode: false
 
+    // KB-28: 拼音模式下切数字/符号页时挂起拼音用的状态位。
+    // 原来 switchNumber/switchSymbol 只改 currentInputStatus、不动 isPinyinMode，
+    // 数字页按键仍走 enterText 的拼音分支：`5` 被喂给 rime（1-9 是选词键）→
+    // 候选词被误选上屏，且 currentPinyinLen 自增导致之后回填多删字符。
+    property bool pinyinSuspended: false
+
     // KB-29: 多行输入才允许 ↵ 插换行。默认 false —— 键盘的调用方绝大多数是
     // WiFi/SSH/锁屏密码、API Key、文件名、兑换码这类**单行**值，原来 ↵ 一律插 '\n'，
     // 换行被写进值里，提交即失败且界面上看不出原因。单行场景 ↵ 等价「确定」直接提交。
@@ -109,6 +115,22 @@ YPage {
     }
 
     // 功能键统一在这里处理（退格/空格/回车/清空/切换键盘页）
+
+    // KB-28: 切到数字/符号页前挂起拼音。已上屏的拼音字母保留为字面文本
+    // （不删除用户输入），只清掉 rime 组合态与候选，之后数字/符号按键走直通分支。
+    function suspendPinyinIfActive() {
+        pinyinSuspended = isPinyinMode;
+        if (!isPinyinMode)
+            return;
+        isPinyinMode = false;
+        if (currentPinyinLen > 0) {
+            // 组合中的字母已 enterChar 进输入框：脱离 rime 管辖，转为普通文本
+            currentPinyinLen = 0;
+        }
+        id_rime_backend.clear();
+        id_candidate_model.clear();
+    }
+
     function handleKeyAction(action) {
         switch (action) {
         case "backspace":
@@ -147,13 +169,18 @@ YPage {
             }
             break;
         case "switchNumber":
+            // KB-28: 数字/符号页挂起拼音，切回字母页恢复
+            suspendPinyinIfActive();
             qmlGlobal.currentInputStatus = YEnum.InputStatus.Number;
             break;
         case "switchSymbol":
+            suspendPinyinIfActive();
             qmlGlobal.currentInputStatus = YEnum.InputStatus.Symbol;
             break;
         case "switchLetter":
             qmlGlobal.currentInputStatus = YEnum.InputStatus.Lower;
+            isPinyinMode = pinyinSuspended; // KB-28: 恢复挂起前的拼音模式
+            pinyinSuspended = false;
             break;
         }
     }

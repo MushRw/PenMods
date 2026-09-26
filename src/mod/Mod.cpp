@@ -21,6 +21,7 @@
 
 #include <QCryptographicHash>
 #include <QDir>
+#include <unistd.h> // _exit (PM-13 softReboot)
 #include <QFile>
 #include <QImage>
 #include <QProcessEnvironment>
@@ -128,7 +129,15 @@ void Mod::uninstall() {
     }
 }
 
-void Mod::softReboot() { std::terminate(); }
+void Mod::softReboot() {
+    // PM-13: 原来是 std::terminate()——故意造一次 abort。换成受控自杀：
+    // sync 落盘后 _exit(0) 立即结束进程（不走 atexit/析构链，也不触发
+    // terminate 的 abort 机制），runDictPen 照常把它当一次退出计数并拉起主程序，
+    // 效果一样是"重启界面"，但不再走异常终止路径。
+    spdlog::warn("softReboot: sync then _exit(0), main program will be restarted by runDictPen");
+    exec("sync", kExecQuickMs);
+    _exit(0);
+}
 
 void Mod::reboot() {
     // 同 changeSlot()：`reboot` 本身不会返回，设超时等于给系统关机流程添乱。
