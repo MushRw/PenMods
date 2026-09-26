@@ -8,8 +8,13 @@
 
 #include "common/Event.h"
 
+#include <QAbstractSocket>
+#include <QFile>
+#include <QHostAddress>
+#include <QNetworkInterface>
 #include <QNetworkProxy>
 #include <QQmlContext>
+#include <QStringList>
 
 namespace mod {
 
@@ -122,20 +127,72 @@ void NetworkSettings::_refreshApplicationProxy() {
     QNetworkProxy::setApplicationProxy(proxy);
 }
 
+// 下面三个都是 `Q_PROPERTY` 的 READ，`ConfigureNetworkPage.qml:39/45/51` **同一屏绑了三条**，
+// 而 `networkChanged` 由厂商的 WiFi hook `_ZN12YWifiManager22internetConnectChangedEv` 驱动
+// ⇒ **每次联网状态抖动，一屏就是三个 shell**（`getLocalIpAddress` 那条还是 5 段管道 / 6 个进程）。
+//
+// EX-08：三条信息都有无 fork 的来源（内核接口 / `/proc` / `/etc` 文件），逐个换掉。
+// Q_PROPERTY 的 READ 里不能 fork —— 这是同项目自己在 `Torch.cpp:29` 写下的规则。
+
 QString NetworkSettings::getLocalIpAddress() const {
-    auto ip = exec("/sbin/ifconfig -a|grep inet|grep -v 127.0.0.1|grep -v inet6|awk '{print $2}'|tr -d 'addr:'",
-                   kExecQuickMs);
-    return QString::fromStdString(ip.empty() ? "不可用" : ip);
+    for (const QHostAddress& addr : QNetworkInterface::allAddresses()) {
+        // 只取 IPv4、跳过 127.0.0.1（对应原来那三段 grep 的意图）。
+        // 多个网卡时返回第一个 —— UI 只有一行 describe，列出全部反而显示不下。
+        if (addr.protocol() == QAbstractSocket::IPv4Protocol && !addr.isLoopback()) {
+            return addr.toString();
+        }
+    }
+    return "不可用";
 }
 
 QString NetworkSettings::getNetGateway() const {
-    auto gateway = exec("ip route | grep default | awk '{print $3}'", kExecQuickMs);
-    return QString::fromStdString(gateway.empty() ? "不可用" : gateway);
+    // 默认路由 = `/proc/net/route` 里 Destination 为 `00000000` 的那行。
+    // ⚠️ Gateway 字段是**小端**十六进制：设备上实测 `0100A8C0` → 192.168.0.1。
+    QFile route("/proc/net/route");
+    if (!route.open(QIODevice::ReadOnly)) {
+        return "不可用";
+    }
+    const QStringList lines = QString::fromUtf8(route.readAll()).split('\n');
+    for (int i = 1; i < lines.size(); ++i) { // 第 0 行是表头
+        const QStringList fields = lines.at(i).simplified().split(' ');
+        if (fields.size() < 3 || fields.at(1) != "00000000") {
+            continue; // 不是默认路由
+        }
+        bool ok = false;
+        const quint32 gw = fields.at(2).toUInt(&ok, 16);
+        if (!ok || gw == 0) {
+            continue; // 网关为 0 表示直连，没有默认网关
+        }
+        // 小端：内核把 32 位地址按字节倒序写成 8 个十六进制字符，翻回来再输出。
+        const int b0 = static_cast<int>((gw >> 24) & 0xFF);
+        const int b1 = static_cast<int>((gw >> 16) & 0xFF);
+        const int b2 = static_cast<int>((gw >> 8) & 0xFF);
+        const int b3 = static_cast<int>(gw & 0xFF);
+        return QString::number(b3) + "." + QString::number(b2) + "." + QString::number(b1) + "."
+             + QString::number(b0);
+    }
+    return "不可用";
 }
 
 QString NetworkSettings::getDNS() const {
-    auto dns = exec("grep \"nameserver\" /etc/resolv.conf | awk '{print $2}'", kExecQuickMs);
-    return QString::fromStdString(dns.empty() ? "不可用" : dns);
+    QFile resolv("/etc/resolv.conf");
+    if (!resolv.open(QIODevice::ReadOnly)) {
+        return "不可用";
+    }
+    const QStringList lines = QString::fromUtf8(resolv.readAll()).split('\n');
+    QStringList       servers;
+    for (const QString& line : lines) {
+        const QStringList fields = line.simplified().split(' ');
+        if (fields.size() >= 2 && fields.at(0) == "nameserver") {
+            servers << fields.at(1);
+        }
+    }
+    if (servers.isEmpty()) {
+        return "不可用";
+    }
+    // 实测设备上有两条（223.5.5.5 / 223.6.6.6）。旧实现的 awk 是按行输出的，
+    // 这里用空格连起来 —— UI 只有一行 describe。
+    return servers.join(" ");
 }
 
 } // namespace mod

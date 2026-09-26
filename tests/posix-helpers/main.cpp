@@ -508,6 +508,28 @@ int main() {
            "不含换行 / 冒号（它们会破坏 /etc/shadow 的行与字段）");
     }
 
+    // ================================================================ 16
+    section("16. 进程探测（EX-07）：自己一定在，不存在的名字一定不在");
+    // 这一节看着朴素，但它守的是**最典型的两种写错方式**：
+    //   * 永远返回 false —— UI 上的 SSH 开关看起来永远是关的，且 `ssh_autorun` 会每次开机
+    //     都去 `sshd_sevice start` 一遍；
+    //   * 永远返回 true —— 反过来，永远不去拉起 sshd。
+    // 正反两例各一条断言就能同时挡住这两种。
+    {
+        // 正例用**自己的进程名**：从 /proc/self/comm 读，它必然出现在 /proc 扫描结果里，
+        // 不依赖容器里 init 叫什么（CI 上是 systemd/bash，真机上是 init，写死会飘）。
+        std::string self;
+        ok(readFileRaw("/proc/self/comm", self), "能读到自己的 comm");
+        const size_t nl = self.find('\n');
+        if (nl != std::string::npos) {
+            self = self.substr(0, nl); // comm 以换行结尾
+        }
+        note("自己的 comm = [" + self + "]");
+        ok(!self.empty(), "自己的 comm 非空");
+        ok(mod::_isProcessRunning(self.c_str()), "_isProcessRunning 能找到自己（正例）");
+        ok(!mod::_isProcessRunning("penmods-no-such-process-xyz"), "不存在的名字返回 false（反例）");
+    }
+
     std::printf("\n----------------------------------------\n");
     std::printf("PASS %d   FAIL %d\n", gPass, gFail);
     std::printf("----------------------------------------\n");

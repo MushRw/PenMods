@@ -14,6 +14,7 @@
 #include <QQmlContext>
 
 #include <crypt.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -22,6 +23,7 @@
 
 #include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 namespace mod {
@@ -180,6 +182,64 @@ bool _ensureShadowBackup(const char* path, const char* bakPath) {
                                  static_cast<size_t>(original.size()), 0600);
 }
 
+/// 有没有名字叫 `wanted` 的进程在跑 —— 扫 `/proc/*/comm`，**不 fork**。
+///
+/// EX-07：这个函数会被 `Q_PROPERTY` 的 READ 调用（`getSshStatus`），而 QML 每次重新求值
+/// 绑定都会调一次（`SSHManagePage.qml:34/36` 绑了它）⇒ **这里绝不能 fork**。
+/// 旧实现是 `exec("ps | grep [s]sh")`：一次求值 = `sh` + `ps` + `grep` 三个进程，
+/// 而且直接违反同项目自己在 `Torch.cpp:29` 写下的规则（"这是 Q_PROPERTY 的 READ，
+/// 会被 QML 轮询；不要用 exec()"）。
+///
+/// 扫 `/proc` 同样是一百多次 `open`，但比 fork+exec 便宜一个数量级，且不产生进程；
+/// 语义与 `ps | grep sshd` 等价（看进程名，不看命令行）。
+bool _isProcessRunning(const char* wanted) {
+    DIR* proc = ::opendir("/proc");
+    if (proc == nullptr) {
+        return false;
+    }
+    const size_t wantedLen = std::strlen(wanted);
+    bool         found     = false;
+    while (struct dirent* ent = ::readdir(proc)) {
+        // 只认纯数字的目录项（pid）。`/proc` 下还有 self / thread-self 这类软链，
+        // 跟着它们会重复统计；非数字的一律跳过。
+        bool allDigits = true;
+        for (const char* p = ent->d_name; *p != '\0'; ++p) {
+            if (*p < '0' || *p > '9') {
+                allDigits = false;
+                break;
+            }
+        }
+        if (!allDigits) {
+            continue;
+        }
+
+        char path[64];
+        std::snprintf(path, sizeof path, "/proc/%s/comm", ent->d_name);
+        const int fd = ::open(path, O_RDONLY);
+        if (fd < 0) {
+            continue; // 进程刚好退出，正常
+        }
+        char    comm[64]{};
+        ssize_t n = -1;
+        do {
+            n = ::read(fd, comm, sizeof comm - 1);
+        } while (n < 0 && errno == EINTR);
+        ::close(fd);
+        if (n <= 0) {
+            continue;
+        }
+        comm[static_cast<size_t>(n)] = '\0';
+        // `comm` 以换行结尾（内核就是这么给的），比到换行为止。
+        const size_t len = std::strcspn(comm, "\n");
+        if (len == wantedLen && std::strncmp(comm, wanted, len) == 0) {
+            found = true;
+            break;
+        }
+    }
+    ::closedir(proc);
+    return found;
+}
+
 } // namespace
 
 ServiceManager::ServiceManager() {
@@ -213,9 +273,11 @@ bool ServiceManager::getAdbStatus() const {
 }
 
 bool ServiceManager::getSshStatus() const {
-    // 注意：这个 READ 每被 QML 求值一次就 fork 一个 shell，本身是 EX-07（待修）。
-    // 这里先只保证它不会挂住 UI 线程。
-    return exec("ps | grep [s]sh", kExecQuickMs).find("sshd") != std::string::npos;
+    // EX-07：这是 `Q_PROPERTY(bool sshStatus READ ...)` 的 READ，`SSHManagePage.qml:34/36`
+    // 绑了它 ⇒ QML 每次重新求值这个绑定都会调一次，所以**这里不能 fork**。
+    // 旧实现 `exec("ps | grep [s]sh")` 一次求值就起 sh + ps + grep 三个进程。
+    // 现在扫 `/proc/*/comm`（见 `_isProcessRunning`），语义等价于 `ps | grep sshd`，零进程。
+    return _isProcessRunning("sshd");
 }
 
 bool ServiceManager::startAdb(bool dontShowToast) {

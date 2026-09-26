@@ -6,6 +6,9 @@
      还原失败、本来就 rw）在正常使用中一辈子走不到，只能把 remount 换成可控桩来构造。
   2. `_randomSalt` / `_replaceFileAtomically`（EX-18 / EX-19）—— 口令 salt 的随机源与
      `/etc/shadow` 的原子替换。失败路径（tmp 打不开、短写、rename 失败）同样走不到。
+  3. `_isProcessRunning`（EX-07）—— `Q_PROPERTY` READ 里判断 sshd 在不在的进程探测，
+     扫 `/proc/*/comm` 代替 `exec("ps | grep [s]sh")`。它每被 QML 求值一次就跑一遍，
+     写错了最典型的后果是"永远返回 false"⇒ UI 上的 SSH 开关看起来永远是关的。
 
 为什么不手抄一份：手抄的副本会跟真源码漂移，测出来的就不是要上机的东西了。这里所有
 片段都用「锚点 + 断言恰好命中一次」抽取，任何一个锚点找不到或命中多次都直接报错。
@@ -97,6 +100,13 @@ def main() -> int:
     replace = slice_between(sm, "bool _replaceFileAtomically", "/// 只在**不存在**时留一份", "原子替换")
     replace = replace.rstrip()
 
+    # ---- 6) 进程探测（EX-07）----
+    # 结束锚点取 `ServiceManager::ServiceManager()` 的定义，再用 strip_trailing_anon_close
+    # 摘掉匿名命名空间的闭合 —— 直接拿 `} // namespace` 当锚点会命中两次（文件末尾还有
+    # 一个 `} // namespace mod`，它是前者的**子串**）。
+    proc_scan = slice_between(sm, "/// 有没有名字叫 `wanted` 的进程在跑", "ServiceManager::ServiceManager()", "进程探测")
+    proc_scan = strip_trailing_anon_close(proc_scan, "进程探测")
+
     body = f"""// ============================================================================
 // 本文件由 tests/posix-helpers/extract.py 自动生成，请勿手改。
 // 内容是从 PenMods 的 src/common/util/System.{{h,cpp}} 与 src/helper/ServiceManager.cpp
@@ -111,7 +121,10 @@ def main() -> int:
 #include <atomic>
 #include <cerrno>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <dirent.h>
 #include <fcntl.h>
 #include <string>
 #include <sys/stat.h>
@@ -141,6 +154,8 @@ bool setRootFileSystemWritable(bool writable);
 
 {replace}
 
+{proc_scan}
+
 }} // namespace mod
 """
 
@@ -167,6 +182,10 @@ bool setRootFileSystemWritable(bool writable);
         problems.append("没抽到 _replaceFileAtomically 的定义（签名可能已经改过）")
     if "_ensureShadowBackup" in body:
         problems.append("把 _ensureShadowBackup 的注释一起带进来了（结束锚点应指向它的文档注释开头）")
+    if "bool _isProcessRunning(const char* wanted)" not in body:
+        problems.append("没抽到 _isProcessRunning 的定义（签名可能已经改过）")
+    if "::opendir(\"/proc\")" not in body:
+        problems.append("没抽到 /proc 扫描（_isProcessRunning 的实现体可能已过期）")
     if body.count("namespace mod {") != 1:
         problems.append("生成结果里 `namespace mod {` 不是恰好 1 处")
     if problems:
@@ -182,6 +201,7 @@ bool setRootFileSystemWritable(bool writable);
     print(f"  守卫实现     {len(guard_impl.splitlines())} 行")
     print(f"  salt 生成    {len(salt.splitlines())} 行")
     print(f"  原子替换     {len(replace.splitlines())} 行")
+    print(f"  进程探测     {len(proc_scan.splitlines())} 行")
     return 0
 
 
