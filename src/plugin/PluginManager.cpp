@@ -10,6 +10,8 @@
 #include <QLibrary>
 #include <QQmlContext>
 #include <QQuickView>
+#include <QSet>
+#include <cstdint>
 
 namespace mod {
 
@@ -143,6 +145,21 @@ void PluginManager::scanAndLoadAll() {
 
     m_scanning = false;
 
+    // PL-02: 卸载本次扫描中"不再出现或被禁用"的插件 SO。scanAndLoadAll 过去只清 m_plugins，
+    // 不清 m_loadedLibraries —— 插件目录被删或出现 .disabled 后，它从 UI 消失、uninstall 也找不到，
+    // 但 .so 永不卸载、detour 继续生效，且无任何 UI 途径能关掉（只能重启）。这里把孤儿库卸掉。
+    {
+        QSet<QString> wanted;
+        for (const auto& p : m_plugins)
+            if (p.isLoaded) wanted.insert(p.id);
+        for (const QString& id : m_loadedLibraries.keys()) {
+            if (!wanted.contains(id)) {
+                spdlog::info("Plugin {} is no longer present/enabled; unloading its SO.", id.toStdString());
+                unloadSo(id);
+            }
+        }
+    }
+
     // 清理 QML 引擎缓存以加载更新后的插件
     if (m_engine) {
         m_engine->clearComponentCache();
@@ -271,6 +288,20 @@ void PluginManager::setPluginPersistence(const PluginInfo& info, bool enable) {
 void PluginManager::unloadSo(const QString& pluginId) {
     QLibrary* lib = m_loadedLibraries.take(pluginId);
     if (!lib) return;
+
+    // PL-01: 先回滚该插件装的所有 Dobby detour。否则 detour 代码随 lib->unload() 被 unmap，
+    // 被 hook 的宿主函数再被调用即 SIGSEGV（"桌面重启"）。必须在 unload 之前做。
+    auto hooksIt = s_pluginHooks.find(pluginId);
+    if (hooksIt != s_pluginHooks.end()) {
+        for (uintptr_t target : hooksIt.value()) {
+            int rc = DobbyDestroy(reinterpret_cast<void*>(target));
+            if (rc != 0)
+                spdlog::warn("[PluginHookAPI] DobbyDestroy failed for plugin {} target {:#x} (rc={})",
+                             pluginId.toStdString(), target, rc);
+        }
+        s_pluginHooks.erase(hooksIt);
+    }
+
     if (lib->isLoaded()) {
         typedef void (*DestroyFunc)();
         auto destroy = reinterpret_cast<DestroyFunc>(lib->resolve("destroy_plugin"));
@@ -366,6 +397,14 @@ bool PluginManager::uninstallPlugin(QString pluginId) {
 // ------------------------------------------------------------------
 
 // Hook API 实现函数 - 供插件调用
+
+// PL-01: 插件卸载前必须回滚其 Dobby detour，否则 detour 仍指向已 unmap 的插件代码段，
+// 被 hook 的宿主函数一调用就是 SIGSEGV（触发"桌面重启"）。这里按插件登记每个 hook 的目标地址，
+// 由 unloadSo() 在 lib->unload() 之前统一 DobbyDestroy。
+// s_currentHookOwner 在 init_plugin_with_hook_api 调用期间指向当前插件。
+static QString s_currentHookOwner;
+static QMap<QString, QSet<uintptr_t>> s_pluginHooks;  // owner -> 该插件装的所有 hook 目标地址
+
 static void* querySymbolImpl(const char* symbolName) {
     if (!symbolName) {
         spdlog::error("[PluginHookAPI] Symbol name is null");
@@ -393,8 +432,30 @@ static int hookFunctionImpl(void* targetAddr, void* detourFunc, void** originalF
         spdlog::error("[PluginHookAPI] Failed to hook at {:#x}", reinterpret_cast<uint64_t>(targetAddr));
     } else {
         spdlog::info("[PluginHookAPI] Successfully hooked at {:#x}", reinterpret_cast<uint64_t>(targetAddr));
+        // PL-01: 登记，供卸载时回滚
+        if (!s_currentHookOwner.isEmpty())
+            s_pluginHooks[s_currentHookOwner].insert(reinterpret_cast<uintptr_t>(targetAddr));
     }
     return result;
+}
+
+// PL-01: 供插件主动摘掉某个 hook（SDK 原先只提供 hookFunction，没有反向 API）。
+static int unhookFunctionImpl(void* targetAddr) {
+    if (!targetAddr) {
+        spdlog::error("[PluginHookAPI] Invalid parameter for unhook (target is null)");
+        return -1;
+    }
+    int rc = DobbyDestroy(targetAddr);
+    if (rc != 0) {
+        spdlog::warn("[PluginHookAPI] Failed to destroy hook at {:#x} (rc={})",
+                     reinterpret_cast<uint64_t>(targetAddr), rc);
+    } else {
+        spdlog::info("[PluginHookAPI] Successfully destroyed hook at {:#x}", reinterpret_cast<uint64_t>(targetAddr));
+        for (auto it = s_pluginHooks.begin(); it != s_pluginHooks.end(); ++it) {
+            if (it.value().remove(reinterpret_cast<uintptr_t>(targetAddr))) break;
+        }
+    }
+    return rc;
 }
 
 void PluginManager::initializePluginHookAPI(const QString& id, QLibrary* lib) {
@@ -411,14 +472,16 @@ void PluginManager::initializePluginHookAPI(const QString& id, QLibrary* lib) {
     }
 
     // static: 插件持有指向此结构体的指针，其生命周期必须覆盖插件整个运行期
-    static PluginHookAPI hookApi = { &querySymbolImpl, &hookFunctionImpl };
+    static PluginHookAPI hookApi = { &querySymbolImpl, &hookFunctionImpl, &unhookFunctionImpl };
 
+    s_currentHookOwner = id;
     try {
         initWithHookApi(&hookApi);
         spdlog::info("Hook API initialized for plugin: {}", id.toStdString());
     } catch (const std::exception& e) {
         spdlog::error("Exception in init_plugin_with_hook_api for plugin {}: {}", id.toStdString(), e.what());
     }
+    s_currentHookOwner.clear();
 }
 
 } // namespace mod

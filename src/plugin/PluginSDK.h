@@ -68,6 +68,13 @@ typedef struct {
      *   hook_api->hookFunction(addr, (void*)detour_ocrStart, (void**)&original_ocrStart);
      */
     int (*hookFunction)(void* targetAddr, void* detourFunc, void** originalFunc);
+
+    /**
+     * @brief 撤销一个已注册的 Hook
+     * @param targetAddr 当初 hookFunction 使用的同一个目标地址
+     * @return 0 表示成功，非 0 表示失败
+     */
+    int (*unhookFunction)(void* targetAddr);
 } PluginHookAPI;
 
 // ==================== 便利宏定义（供插件使用） ====================
@@ -109,3 +116,12 @@ extern PluginHookAPI* g_hook_api;
  */
 #define PLUGIN_HOOK(target, detour, original) \
     (g_hook_api ? g_hook_api->hookFunction(target, (void*)(detour), (void**)&(original)) : -1)
+
+/**
+ * @brief 撤销一个 Hook 的便利宏
+ *
+ * 示例：
+ *   PLUGIN_UNHOOK(addr);
+ */
+#define PLUGIN_UNHOOK(target) \
+    (g_hook_api ? g_hook_api->unhookFunction(target) : -1)
