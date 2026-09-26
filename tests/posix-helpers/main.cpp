@@ -350,12 +350,24 @@ int main() {
 
     // ================================================================ 8
     section("8. 原子替换：成功路径（内容 / 权限 / 无 tmp 残留）");
-    char        tmpl[] = "/tmp/penmods-posix-XXXXXX";
-    const char* dirEnv = ::mkdtemp(tmpl);
-    if (dirEnv == nullptr) {
-        ok(false, "无法在 /tmp 建临时目录，后面的替换测试全部跳过");
+    // 临时目录根：默认 /tmp。允许用 PENMODS_TEST_TMPDIR 指向**真实 ext4 分区**
+    // （真机上就是 /userdata），这样原子替换那一节跑在真正要保护的文件系统上。
+    // 为什么在意：设备的 /tmp 是 tmpfs，rename/fsync 语义比 ext4 宽容得多 ——
+    // 只跑 tmpfs 测不出 data=ordered 下的顺序问题。真机验证时**两个都要跑**。
+    const char*       tmpRootEnv = std::getenv("PENMODS_TEST_TMPDIR");
+    const std::string tmpRoot    = (tmpRootEnv != nullptr && *tmpRootEnv != '\0') ? tmpRootEnv : "/tmp";
+    note("临时目录根 = " + tmpRoot + (tmpRoot == "/tmp" ? "（用 PENMODS_TEST_TMPDIR 可换到 ext4 分区）" : ""));
+
+    char tmpl[512];
+    bool tmpPrepared = false;
+    if (tmpRoot.size() + 32 < sizeof tmpl) {
+        std::snprintf(tmpl, sizeof tmpl, "%s/penmods-posix-XXXXXX", tmpRoot.c_str());
+        tmpPrepared = ::mkdtemp(tmpl) != nullptr;
+    }
+    if (!tmpPrepared) {
+        ok(false, "无法在 " + tmpRoot + " 建临时目录，后面的替换测试全部跳过");
     } else {
-        const std::string dir(dirEnv);
+        const std::string dir(tmpl);
         note("临时目录 " + dir);
 
         const std::string target = dir + "/shadow";
