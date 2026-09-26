@@ -15,6 +15,14 @@
 
 namespace mod {
 
+// PL-01: 插件卸载前必须回滚其 Dobby detour，否则 detour 仍指向已 unmap 的插件代码段，
+// 被 hook 的宿主函数一调用就是 SIGSEGV（触发"桌面重启"）。这里按插件登记每个 hook 的目标地址，
+// 由 unloadSo() 在 lib->unload() 之前统一 DobbyDestroy。
+// s_currentHookOwner 在 init_plugin_with_hook_api 调用期间指向当前插件。
+// （必须前置声明，因为 unloadSo() 早于下方 Hook API 实现段使用它们。）
+static QString s_currentHookOwner;
+static QMap<QString, QSet<uintptr_t>> s_pluginHooks;  // owner -> 该插件装的所有 hook 目标地址
+
 // ============================================================
 // 插件 SO 必须导出的函数签名
 // ============================================================
@@ -397,13 +405,6 @@ bool PluginManager::uninstallPlugin(QString pluginId) {
 // ------------------------------------------------------------------
 
 // Hook API 实现函数 - 供插件调用
-
-// PL-01: 插件卸载前必须回滚其 Dobby detour，否则 detour 仍指向已 unmap 的插件代码段，
-// 被 hook 的宿主函数一调用就是 SIGSEGV（触发"桌面重启"）。这里按插件登记每个 hook 的目标地址，
-// 由 unloadSo() 在 lib->unload() 之前统一 DobbyDestroy。
-// s_currentHookOwner 在 init_plugin_with_hook_api 调用期间指向当前插件。
-static QString s_currentHookOwner;
-static QMap<QString, QSet<uintptr_t>> s_pluginHooks;  // owner -> 该插件装的所有 hook 目标地址
 
 static void* querySymbolImpl(const char* symbolName) {
     if (!symbolName) {
