@@ -313,7 +313,9 @@ bool ServiceManager::setSshRootPasswd(const QString& val) {
         }
         while (!shadow.atEnd()) {
             const auto line = QString(shadow.readLine());
-            const auto data = line.split(':');
+            // 注意：**不能**写 `const auto data` —— 下面要把新散列写回 `data[1]`，
+            // 而 const QStringList 的 operator[] 返回 const QString&，赋值编不过。
+            auto data = line.split(':');
             if (data.length() < 2 || data[0] != "root" || isModified) {
                 updated.append(line);
                 continue;
@@ -357,7 +359,8 @@ bool ServiceManager::setSshRootPasswd(const QString& val) {
     //    没有任何备份。现在改成同目录 tmp + fsync + rename（与 Config::_save() 同一套做法），
     //    目标文件要么是完整的旧内容、要么是完整的新内容，不存在中间态（EX-18）。
     //
-    //    而且出厂时 / 是 ro：旧写法根本没处理，第 150 行的写打开必然 EROFS 失败 ——
+    //    而且出厂时 / 是 ro（真机实测 `/dev/root on / type ext4 (ro,...)`），旧写法根本没
+    //    处理这一点 —— 它的 `WriteOnly|Truncate` 打开必然 EROFS 失败。也就是说：
     //    这个功能在真机上**从来就没成功过**（EX-18 后半）。
     util::RootFileSystemWritableGuard guard;
     if (!guard.ok()) {
