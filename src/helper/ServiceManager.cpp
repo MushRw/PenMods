@@ -213,8 +213,11 @@ bool _isProcessRunning(const char* wanted) {
             continue;
         }
 
+        // `%.15s` 而不是 `%s`：pid 最多 7 位（Linux 默认上限 4194304），15 位足够；
+        // 显式给精度既让 `-Wformat-truncation` 闭嘴（`d_name` 名义上可有 255 字节），
+        // 也让"这个名字不可能是 pid 就被截掉"这件事发生在 open 之前而不是静默写歪。
         char path[64];
-        std::snprintf(path, sizeof path, "/proc/%s/comm", ent->d_name);
+        std::snprintf(path, sizeof path, "/proc/%.15s/comm", ent->d_name);
         const int fd = ::open(path, O_RDONLY);
         if (fd < 0) {
             continue; // 进程刚好退出，正常
