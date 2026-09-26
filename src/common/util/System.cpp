@@ -13,6 +13,9 @@
 #include <dlfcn.h>
 #include <unistd.h>
 
+#include <spdlog/spdlog.h>
+
+#include <atomic>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -41,6 +44,12 @@ std::optional<bool> _rootFileSystemWritableState() {
     }
     return std::nullopt;
 }
+
+// rootfs 可写窗口的引用计数（EX-05）。刻意不用一个 bool 表示"我持有窗口"：
+// 两个窗口交叠时，各自记下的"原状态"会互相踩，只有深度回到 0 的那个才应该真正
+// remount 回原状态。用原子量而不是裸 int/bool，是为了同一线程嵌套以外的场景也不出 UB。
+std::atomic<int>  gRootFsWindowDepth{0};
+std::atomic<bool> gRootFsWindowWasWritable{false};
 
 } // namespace
 
@@ -88,6 +97,34 @@ bool setRootFileSystemWritable(bool writable) {
         return false;
     }
     return *after == writable;
+}
+
+RootFileSystemWritableGuard::RootFileSystemWritableGuard() : mEntered(false) {
+    // fetch_add 返回"加之前"的值：0 表示我是最外层，需要真正打开窗口并记下原始状态；
+    // 非 0 表示已经有人在窗口里，/ 本来就是 rw，我只要把计数加一即可。
+    if (gRootFsWindowDepth.fetch_add(1, std::memory_order_acq_rel) == 0) {
+        gRootFsWindowWasWritable.store(isRootFileSystemWritable(), std::memory_order_relaxed);
+        if (!setRootFileSystemWritable(true)) {
+            // remount 失败：把计数退回去，让下一个进入者重新尝试。
+            gRootFsWindowDepth.fetch_sub(1, std::memory_order_acq_rel);
+            return; // mEntered 保持 false
+        }
+    }
+    mEntered = true;
+}
+
+RootFileSystemWritableGuard::~RootFileSystemWritableGuard() {
+    if (!mEntered) {
+        return; // 构造时就没进去，没有任何东西需要归还
+    }
+    // fetch_sub 返回"减之前"的值：1 表示我是关掉窗口的那个，负责还原。
+    if (gRootFsWindowDepth.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        if (!setRootFileSystemWritable(gRootFsWindowWasWritable.load(std::memory_order_relaxed))) {
+            // 归还失败 = / 停在 rw（这台设备唯一"改不坏"的保险失效）。析构函数里没地方
+            // 把错误返给调用方，只能喊出来 —— 调用方自己的成功路径日志已经写过了（SD-03）。
+            spdlog::error("Failed to restore rootfs mount state: / may be left writable!");
+        }
+    }
 }
 
 } // namespace mod::util

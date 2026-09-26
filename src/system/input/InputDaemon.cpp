@@ -65,22 +65,27 @@ void InputDaemon::resume() { PEN_CALL(void*, "start_auto_screen_off")(); }
 
 bool InputDaemon::_resetConfig() {
     auto cfg = _getConfig();
-    // 目标是 rootfs 上的 /etc/input-event-daemon_<model>.conf：只在真正写文件的
-    // 这段时间把 / 临时放开为可写，写完还原（原来是开机就整段会话保持 rw）。
-    const bool wasWritable = util::isRootFileSystemWritable();
-    util::setRootFileSystemWritable(true);
-    std::ofstream ofile(cfg.mPath);
-    if (!ofile.good()) {
-        util::setRootFileSystemWritable(wasWritable);
-        return false;
+    {
+        // 目标是 rootfs 上的 /etc/input-event-daemon_<model>.conf：只在真正写文件的
+        // 这段时间把 / 临时放开为可写，写完还原（原来是开机就整段会话保持 rw）。
+        // 用守卫而不是手写还原：中途 return / 抛异常也会还原（EX-04）。
+        util::RootFileSystemWritableGuard guard;
+        if (!guard.ok()) {
+            warn("Failed to remount / writable, abort writing {}.", cfg.mPath);
+            return false;
+        }
+        std::ofstream ofile(cfg.mPath);
+        if (!ofile.good()) {
+            warn("Failed to open {} for writing.", cfg.mPath);
+            return false; // 守卫在这里析构，/ 会被还原
+        }
+        ofile << QString::fromStdString(cfg.mContent)
+                     .replace("{backlight_down}", mBackLightDown ? QString::number(mBackLightDown) : "#")
+                     .replace("{screen_off}", mScreenOff ? QString::number(mScreenOff) : "#")
+                     .replace("{system_suspend}", mSystemSuspend ? QString::number(mSystemSuspend) : "#")
+                     .toStdString();
+        ofile.close();
     }
-    ofile << QString::fromStdString(cfg.mContent)
-                 .replace("{backlight_down}", mBackLightDown ? QString::number(mBackLightDown) : "#")
-                 .replace("{screen_off}", mScreenOff ? QString::number(mScreenOff) : "#")
-                 .replace("{system_suspend}", mSystemSuspend ? QString::number(mSystemSuspend) : "#")
-                 .toStdString();
-    ofile.close();
-    util::setRootFileSystemWritable(wasWritable);
 
     // 重启守护进程一律走厂商自己的脚本（它支持 restart）：
     // 它会 bind-mount 正确的配置、并以 `input-event-daemon -v` 加合适环境启动。

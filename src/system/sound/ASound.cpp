@@ -89,8 +89,11 @@ bool ASound::_resetConfig() {
     //    "改的是 rootfs 出厂文件"的由来，属已知产品决策，不在此处改动）。
     //    先写源头、再写运行时副本，任一步失败都不会留下"运行时已改、重启回旧"的不一致。
     if (!_contentAlreadyUpToDate(cfg.mPath, content)) {
-        const bool wasWritable = util::isRootFileSystemWritable();
-        if (!util::setRootFileSystemWritable(true)) {
+        // 写 rootfs 上的 /etc/asound.conf.<MODEL>，用守卫临时放开 / 并要求它一定还原：
+        // 以前手写的"记状态 → 置 rw → 写 → 还原"在中间 return / 抛异常时会漏掉还原，
+        // 把 / 带 rw 留给整台设备（EX-04）。归还失败由守卫自己 spdlog::error（SD-03）。
+        util::RootFileSystemWritableGuard guard;
+        if (!guard.ok()) {
             error("Failed to remount / writable, abort writing asound configuration.");
             return false;
         }
@@ -98,13 +101,6 @@ bool ASound::_resetConfig() {
         if (!_overwriteFile(cfg.mPath, content)) {
             error("Failed to open {} for writing.", cfg.mPath);
             ok = false;
-        }
-
-        // 无论写入成败都必须把 / 还原。归还失败 = rootfs 停在 rw（本设备唯一"改不坏"的保险
-        // 失效），这里必须让调用方看得见，不能像以前那样丢弃返回值然后 return true（SD-03）。
-        if (!util::setRootFileSystemWritable(wasWritable)) {
-            error("Failed to restore rootfs mount state (wasWritable={}). / may be left writable!", wasWritable);
-            return false;
         }
     }
 

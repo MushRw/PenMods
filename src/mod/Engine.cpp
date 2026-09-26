@@ -55,10 +55,28 @@ void clearQmlCacheIfResourcesChanged() {
         return; // 资源没变，什么都不做
     }
 
-    const bool wasWritable = mod::util::isRootFileSystemWritable();
-    mod::util::setRootFileSystemWritable(true);
-    const bool removed = QDir(QString::fromUtf8(kQmlCacheDir)).removeRecursively();
-    mod::util::setRootFileSystemWritable(wasWritable);
+    // 清 QML 编译缓存要写 rootfs，用守卫临时放开 / 并保证一定还原。
+    // 这里是**开机路径**：以前手写的"置 rw → 删 → 还原"如果在中间 return 或抛异常，
+    // / 会带着 rw 一路开到底，本设备唯一"改不坏"的保险就没了（EX-04）。
+    const bool cacheExisted = QFileInfo::exists(kQmlCacheDir);
+    bool       removed      = false;
+    bool       cleared      = true;
+    {
+        mod::util::RootFileSystemWritableGuard guard;
+        if (!guard.ok()) {
+            spdlog::warn("无法把根文件系统挂成可写，跳过 QML 编译缓存清理。");
+            cleared = false;
+        } else if (cacheExisted) {
+            removed = QDir(QString::fromUtf8(kQmlCacheDir)).removeRecursively();
+            cleared = removed;
+        }
+    }
+    if (!cleared) {
+        // 没清掉就**不要**更新资源戳：戳一旦更新，下次开机这里会直接 return，
+        // 陈旧的 .qmlc 就再也没有机会被清 —— 表现是"改了界面永远不生效"。
+        spdlog::warn("QML 编译缓存未能清理（目录存在: {}），本次不更新资源戳。", cacheExisted);
+        return;
+    }
     spdlog::info("资源已更新，QML 编译缓存已清理（目录存在: {}）", removed);
 
     QFile out(QString::fromUtf8(kResourceStamp));
