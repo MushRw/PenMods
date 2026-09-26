@@ -39,7 +39,7 @@ private:
 
     bool _fill_missing_defaults(json& target, const json& defaults);
 
-    void _strip_unknown_keys(json& target, const json& reference);
+    bool _strip_unknown_keys(json& target, const json& reference);
 };
 
 } // namespace mod

@@ -88,7 +88,11 @@ Config::Config() : Logger("Config") {
         {"screen", {
             {"sleep_duration", 30},
             {"intel_sleep", false},
-            {"intel_sleep_audio_lock", false}
+            {"intel_sleep_audio_lock", false},
+            // ScreenManager::setLockScreen() 会写这个键，而 ScreenManager.cpp 用
+            // mCfg.value("lock_screen", true) 读 —— 漏在 mDefaults 里的话，
+            // sanitize() 会把它当未知字段删掉，用户关掉的锁屏会在下次开机被改回 true。
+            {"lock_screen", true}
         }},
         {"battery", {
             {"suspend_duration", 600},
@@ -136,7 +140,11 @@ Config::Config() : Logger("Config") {
             {"enabled", false}
         }},
         {"theme", {
-            {"id", "official"}
+            {"id", "official"},
+            // ThemeManager::_save() 会写 surfaceStyle（opaque / translucent / glass），
+            // 默认值必须与 ThemeManager::_load() 的 cfg.value("surfaceStyle", ...) 一致。
+            // 漏在 mDefaults 里 = 用户的表面风格每次开机被静默重置（AP-10）。
+            {"surfaceStyle", "translucent"}
         }},
         {"ai", {
             {"auto_send_scan", true},
@@ -199,7 +207,16 @@ Config::Config() : Logger("Config") {
     // clang-format on
 
     mDefaults = mData;
-    _load();
+    if (_load()) {
+        // CF-1：_load() 只保证「文件能解析 + 版本已迁移」，不保证「字段合法」。
+        // 历史上各功能类都是各自写防御式读取来兜住字段缺失/多余（`mCfg["x"]` 裸读，
+        // 键不存在时 nlohmann 会插入 null，再转 bool/int 就抛 type_error），
+        // 而它们全都在开机路径上构造 —— 一个缺键就能让启动崩，进而被厂商崩溃保护
+        // 放大成 update_engine --misc=clear + 切槽。
+        // 在入口统一净化一次，等价于给 15 个类 / 60 个读点一次性上保险。
+        // 注意：mDefaults 就是白名单，任何新写的键都必须先补进 mDefaults（见 cfgkey_check.py）。
+        sanitize();
+    }
 
     // Config 初始化完成，后续 Logger 可以从 Config 读取日志级别
     Logger::s_configLoaded = true;
@@ -207,7 +224,10 @@ Config::Config() : Logger("Config") {
 
 json Config::read(const std::string& name) {
     if (!mData.contains(name)) {
-        return {};
+        // 返回空对象而不是 null：调用方普遍写成 cfg.value("x", default)，
+        // 而 nlohmann 的 value() 对 null 会抛 type_error.306（只有 object 才安全）。
+        // 段名写错 / 尚未补齐时会直接崩在读配置这一步，就是在开机路径上崩。
+        return json::object();
     }
     return mData.at(name);
 }
@@ -391,26 +411,34 @@ bool Config::_fill_missing_defaults(json& target, const json& defaults) {
     return changed;
 }
 
-// 递归删除 target 中不在 reference（mDefaults）里的字段
-void Config::_strip_unknown_keys(json& target, const json& reference) {
-    if (!target.is_object() || !reference.is_object()) return;
+// 递归删除 target 中不在 reference（mDefaults）里的字段，返回是否真的删了东西
+bool Config::_strip_unknown_keys(json& target, const json& reference) {
+    if (!target.is_object() || !reference.is_object()) return false;
+    bool                     changed = false;
     std::vector<std::string> to_remove;
     for (auto it = target.begin(); it != target.end(); ++it) {
         if (!reference.contains(it.key())) {
             to_remove.push_back(it.key());
         } else if (it->is_object() && reference[it.key()].is_object()) {
-            _strip_unknown_keys(*it, reference[it.key()]);
+            if (_strip_unknown_keys(*it, reference[it.key()])) changed = true;
         }
     }
     for (const auto& key : to_remove) {
         info("清洗配置：移除未知字段 '{}'", key);
         target.erase(key);
+        changed = true;
     }
+    return changed;
 }
 
 bool Config::sanitize() {
-    _strip_unknown_keys(mData, mDefaults);
-    _fill_missing_defaults(mData, mDefaults);
+    bool changed = _strip_unknown_keys(mData, mDefaults);
+    if (_fill_missing_defaults(mData, mDefaults)) changed = true;
+    if (!changed) {
+        // 没有变化就不写盘：sanitize() 现在每次开机都会跑，无条件 _save()
+        // 等于每次开机多一次 flash 写（配置在 /userdata，是实打实的磁盘 I/O）。
+        return true;
+    }
     return _save();
 }
 
