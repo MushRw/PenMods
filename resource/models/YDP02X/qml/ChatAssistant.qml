@@ -34,23 +34,10 @@ YPage {
             cameraCapture.captureEnabled = false;
     }
 
+    // 与 FileManagerTextViewer.qml 共用同一个入口：探测与启动都在 C++ 侧做完，
+    // 且**不经 shell**（EX-11）。QML 侧不再自己拼命令行。
     function _startMathServer() {
-        var serverPath = chatbot.mathServerPath.trim();
-        if (serverPath === "") {
-            console.log("[MathServer] server_path 未配置，跳过启动");
-            return;
-        }
-        var binName = serverPath.replace(/.*\//, "");
-        if (binName === "")
-            return;
-        var pattern = "[" + binName[0] + "]" + binName.slice(1);
-        var running = shell.exec("pgrep -f -- '" + pattern.replace(/'/g, "'\\''") + "'");
-        if (running !== "") {
-            console.log("[MathServer] 进程已在运行（pid:", running, "），跳过");
-            return;
-        }
-        console.log("[MathServer] 启动服务器：", serverPath);
-        shell.startDetached(serverPath);
+        chatbot.ensureMathServerRunning();
     }
 
     Connections {

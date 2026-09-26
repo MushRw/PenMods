@@ -2893,4 +2893,84 @@ void ChatBot::setMathRenderConfig(const QString& configJson) {
     info("Math render 配置已保存");
 }
 
+// -----------------------------------------------------------------------
+// 数学公式渲染服务器的拉起（EX-11：探测与启动都不经过 shell）
+// -----------------------------------------------------------------------
+
+namespace {
+
+/// 把 "程序 参数1 参数2" 这样的命令行切成 (程序, 参数列表)。
+///
+/// 用 Qt 自己的切分器而不是 `/bin/sh -c`：前者只会按空白和引号切词，
+/// `;` / `$(...)` / `>` / `&&` 都只是普通字符，无法改变命令语义。
+/// （`ShellExecutor::startDetached()` 走的是 `/bin/sh -c`，不适合吃用户输入。）
+std::pair<QString, QStringList> _splitCommandLine(const QString& commandLine) {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+    const QStringList parts = QProcess::splitCommand(commandLine);
+#else
+    // Qt < 5.15 没有 splitCommand：按空白切，够覆盖"一个可执行文件路径"这种主场景
+    const QStringList parts = commandLine.split(' ', Qt::SkipEmptyParts);
+#endif
+    if (parts.isEmpty()) {
+        return {};
+    }
+    return {parts.first(), parts.mid(1)};
+}
+
+} // namespace
+
+bool ChatBot::ensureMathServerRunning() {
+    if (!m_mathRenderEnabled) {
+        return false;
+    }
+    const QString serverPath = m_mathServerPath.trimmed();
+    if (serverPath.isEmpty()) {
+        info("[MathServer] server_path 未配置，跳过启动");
+        return false;
+    }
+
+    // ── 1. 探测：pgrep 的参数以数组传递，**不经 shell** ──────────────────
+    //    pgrep -f 匹配的是完整命令行，所以 pattern 用「程序名」去匹配就够。
+    //    这里不再需要 `[x]xxxx` 那种防自匹配写法：那是 `ps | grep` 时代的技巧，
+    //    pgrep 本身从不把自己算进结果（实测 `pgrep -f YoudaoDictPen` 只返回真进程）。
+    //    但 pattern 仍是**正则**，所以必须转义，否则路径里的 `.` `+` `[` 会改变匹配语义
+    //    （例如首字符是 `^` 时，原写法会把它变成否定字符类）。
+    const QString binName = serverPath.section('/', -1);
+    if (binName.isEmpty()) {
+        warn("[MathServer] 无法从 '{}' 解析出程序名", serverPath.toStdString());
+        return false;
+    }
+    const QString pattern = QRegularExpression::escape(binName);
+
+    QProcess proc;
+    proc.setProgram(QStringLiteral("pgrep"));
+    proc.setArguments({QStringLiteral("-f"), QStringLiteral("--"), pattern});
+    proc.start();
+    if (proc.waitForStarted(1000)) {
+        if (!proc.waitForFinished(3000)) {
+            proc.kill();
+            proc.waitForFinished(500);
+            // 探测不出来不等于没在跑，按"没在跑"处理，保持与旧行为一致的可用性
+            warn("[MathServer] pgrep 超时，按未运行处理");
+        } else if (proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
+            return true;  // 已在运行
+        }
+    } else {
+        warn("[MathServer] pgrep 无法启动（{}），按未运行处理", proc.errorString().toStdString());
+    }
+
+    // ── 2. 启动：命令行由 Qt 切分，不经 `/bin/sh -c` ─────────────────────
+    const auto [program, args] = _splitCommandLine(serverPath);
+    if (program.isEmpty()) {
+        return false;
+    }
+    const bool started = QProcess::startDetached(program, args);
+    if (started) {
+        info("[MathServer] 已启动：{}", serverPath.toStdString());
+    } else {
+        warn("[MathServer] 启动失败：{}", serverPath.toStdString());
+    }
+    return started;
+}
+
 } // namespace mod::chatbot

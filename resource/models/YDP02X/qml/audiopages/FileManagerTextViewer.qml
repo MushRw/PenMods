@@ -33,25 +33,13 @@ YBackButtonAudioPage {
     property var _blocks: _hasMath ? _parseBlocks(textReader.content || "") : []
 
     // ── 自动启动数学公式渲染服务器 ──
+    // 探测与启动都收口在 chatbot.ensureMathServerRunning()（C++ 侧，不经 shell）。
+    // 这里曾经是 shell.exec("pgrep -f " + pattern) —— 无引号、无 `--`、无转义，
+    // 而 serverPath 来自用户可配置的 chatbot.mathServerPath（EX-11）。
     function _tryStartMathServer() {
         if (typeof chatbot === "undefined" || chatbot === null)
             return;
-        if (!chatbot.mathRenderEnabled)
-            return;
-        var serverPath = chatbot.mathServerPath.trim();
-        if (serverPath === "")
-            return;
-        // 检查进程是否已在运行
-        var binName = serverPath.replace(/.*\//, "");
-        var pattern = "[" + binName[0] + "]" + binName.slice(1);
-        var running = typeof shell !== "undefined" && shell !== null ? shell.exec("pgrep -f " + pattern) : "";
-        if (running !== "")
-            return;
-        // 启动服务器
-        if (typeof shell !== "undefined" && shell !== null) {
-            console.log("[MathServer] 文件管理器启动服务器：", serverPath);
-            shell.startDetached(serverPath);
-        }
+        chatbot.ensureMathServerRunning();
     }
 
     Component.onCompleted: {

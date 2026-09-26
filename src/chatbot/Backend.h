@@ -91,6 +91,19 @@ class ChatBot : public QObject, public Singleton<ChatBot>, private Logger {
         bool mathRenderEnabled READ getMathRenderEnabled WRITE setMathRenderEnabled NOTIFY mathRenderConfigChanged)
     Q_PROPERTY(QString mathServerPath READ getMathServerPath WRITE setMathServerPath NOTIFY mathRenderConfigChanged)
 
+    /// 保证数学公式渲染服务器在跑：没在跑就拉起来，已在跑就什么都不做。
+    ///
+    /// QML 里曾有**两份**各自手写这段逻辑（`ChatAssistant.qml:37` 与
+    /// `FileManagerTextViewer.qml:36`），其中后者把用户可配置的 `mathServerPath`
+    /// 直接拼进 `shell.exec("pgrep -f " + pattern)` —— 无引号、无 `--`、无转义
+    /// （EX-11）。收口到这里，探测与启动**都不经过 shell**：
+    ///   * 探测：`pgrep` 的参数以数组传递，`pattern` 只是一个 argv 元素
+    ///   * 启动：命令行由 Qt 自己切分，不经 `/bin/sh -c`
+    /// 所以路径里的空格 / `;` / `$()` / 重定向都只是普通字符。
+    ///
+    /// @return true = 已在运行，或本次成功拉起
+    Q_INVOKABLE bool ensureMathServerRunning();
+
 public:
     // 基础接口
     Q_INVOKABLE void    sendMessage(const QString& message, const QString& fileRefs = QString());
