@@ -66,8 +66,16 @@ int MediaHookChain::subscribe(void* target, void* detour, void** outOriginal) {
         *outOriginal    = trueOrig;
     } else {
         // 后续订阅者：前置到链头；其 original 指向原链头，原链头成为它的下一跳。
-        *outOriginal                = it->second.head;
-        it->second.head             = detour;
+        // 去重守卫：同一 detour 重复订阅（如插件被 init_plugin 二次初始化）时
+        // 不再入链，直接把现有转发指针回填——重复入链会让退订语义混乱。
+        for (auto& s : it->second.subs) {
+            if (s.first == detour) {
+                *outOriginal = *s.second;
+                return 0;
+            }
+        }
+        *outOriginal                     = it->second.head;
+        it->second.head                  = detour;
         it->second.subs.push_back({detour, outOriginal});
     }
     return 0;
@@ -114,9 +122,12 @@ int MediaHookChain::unsubscribe(void* target, void* detour) {
     }
 
     if (wasHead) {
-        // 退订的是链头：新链头 = 现在最晚的订阅者，其转发指针改接被摘者的下一跳
-        n.head              = subs.back().first;
-        *subs.back().second = savedForward;
+        // 退订的是链头：新链头 = 现在最晚的订阅者。它的转发指针**不能动**——
+        // 它当初订阅时拿到的那一跳，连同被摘链头在内的所有更晚订阅者现在都已
+        // 被摘掉或绕开，修补循环已把指向它们的转发指针改写干净，所以新链头的
+        // orig 必然仍指向存活节点或 trueOrig。此处若把它改成被摘者的下一跳
+        // （savedForward），会让最早订阅者自指死循环（实测会导致播放链路卡死）。
+        n.head = subs.back().first;
     }
     return 0;
 }
