@@ -431,9 +431,50 @@ bool Config::_strip_unknown_keys(json& target, const json& reference) {
     return changed;
 }
 
+// 把"类型与默认值不符"的字段恢复成默认值。
+//
+// _fill_missing_defaults 只补缺失的 key，**不修错误的类型** —— 而 15 个功能类读配置用的是
+// `mCfg["k"]` + nlohmann 的隐式类型转换，类型不对就抛 type_error：
+// 例如用户手改 config.json 写成 {"locker": {"enabled": "yes"}}，`mCfg["enabled"]` 转 bool
+// 即抛，而 Locker 是在开机路径上构造的 → 启动崩 → 厂商崩溃保护放大成切槽（CF-01）。
+//
+// 判据按"类型大类"比较：整数 / 无符号 / 浮点一律视为同类（nlohmann 之间可 static_cast，
+// 例如 battery.suspend_duration 的默认值是 int 600 而写入侧是 uint32）；而 string / bool /
+// object / array / null 必须严格一致。
+// 已逐一核对全部 72 个写点：没有任何 setter 会往 bool 键写非 bool、或往 number 键写非数字。
+bool Config::_repair_types(json& target, const json& defaults) {
+    if (!target.is_object() || !defaults.is_object()) return false;
+    static const auto jsonKind = [](const json& v) -> char {
+        if (v.is_object()) return 'o';
+        if (v.is_array()) return 'a';
+        if (v.is_string()) return 's';
+        if (v.is_boolean()) return 'b';
+        if (v.is_number()) return 'n';
+        return '?'; // null / binary / discarded
+    };
+    bool changed = false;
+    for (auto it = defaults.begin(); it != defaults.end(); ++it) {
+        const auto& key = it.key();
+        if (!target.contains(key)) continue; // 缺失的键由 _fill_missing_defaults 负责
+        // 用 at() 而不是 operator[]：后者在键缺失时会插入 null（这里已判过 contains，
+        // 但读操作不该有写语义）。
+        const char want = jsonKind(*it);
+        const char have = jsonKind(target.at(key));
+        if (want == 'o' && have == 'o') {
+            if (_repair_types(target.at(key), *it)) changed = true;
+        } else if (want != have) {
+            warn("配置修复：字段 '{}' 类型不符（默认 {} / 当前 {}），已恢复为默认值", key, want, have);
+            target[key] = *it;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 bool Config::sanitize() {
     bool changed = _strip_unknown_keys(mData, mDefaults);
     if (_fill_missing_defaults(mData, mDefaults)) changed = true;
+    if (_repair_types(mData, mDefaults)) changed = true;
     if (!changed) {
         // 没有变化就不写盘：sanitize() 现在每次开机都会跑，无条件 _save()
         // 等于每次开机多一次 flash 写（配置在 /userdata，是实打实的磁盘 I/O）。

@@ -39,6 +39,8 @@ private:
 
     bool _fill_missing_defaults(json& target, const json& defaults);
 
+    bool _repair_types(json& target, const json& defaults);
+
     bool _strip_unknown_keys(json& target, const json& reference);
 };
 
