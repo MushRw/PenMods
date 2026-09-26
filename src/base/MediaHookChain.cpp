@@ -59,14 +59,64 @@ int MediaHookChain::subscribe(void* target, void* detour, void** outOriginal) {
                                   (dobby_dummy_func_t*)&trueOrig);
         if (rc != 0) return rc;
         Node n;
-        n.head     = detour;
         n.trueOrig = trueOrig;
+        n.head     = detour;
+        n.subs.push_back({detour, outOriginal});
         nodes()[target] = n;
         *outOriginal    = trueOrig;
     } else {
         // 后续订阅者：前置到链头；其 original 指向原链头，原链头成为它的下一跳。
-        *outOriginal       = it->second.head;
-        it->second.head    = detour;
+        *outOriginal                = it->second.head;
+        it->second.head             = detour;
+        it->second.subs.push_back({detour, outOriginal});
+    }
+    return 0;
+}
+
+int MediaHookChain::unsubscribe(void* target, void* detour) {
+    if (!s_resolved) resolve();
+
+    auto it = nodes().find(target);
+    if (it == nodes().end()) return -1;
+
+    Node& n           = it->second;
+    auto& subs        = n.subs;
+    auto  sub         = subs.end();
+    for (auto s = subs.begin(); s != subs.end(); ++s) {
+        if (s->first == detour) { sub = s; break; }
+    }
+    if (sub == subs.end()) return -2; // 不是本链的订阅者（可能已退订）
+
+    // 这个订阅者原本把调用转发给谁（下一跳）：链头订阅者是 trueOrig，其余是订阅当时的链头
+    void* savedForward = *sub->second;
+    bool  wasHead      = (n.head == detour);
+
+    // 修补「更晚订阅、下一跳指向本 detour」的订阅者：让它跳过本订阅者。
+    // （退订链头时不存在这样的订阅者——没人指向链头，由 wrapper 直接调用。）
+    for (auto s = subs.begin(); s != subs.end(); ++s) {
+        if (s != sub && *s->second == detour) {
+            *s->second = savedForward;
+            break;
+        }
+    }
+
+    subs.erase(sub);
+
+    if (subs.empty()) {
+        // 最后一个订阅者走了：现在才轮到拆 Dobby hook（目标字节还原、trampoline 释放），
+        // 并抹掉节点，保证下次 subscribe() 会重新 DobbyHook。
+        int rc = DobbyDestroy(target);
+        nodes().erase(it);
+        if (rc != 0)
+            spdlog::warn("[MediaHookChain] DobbyDestroy failed at {:#x} (rc={})",
+                         reinterpret_cast<uint64_t>(target), rc);
+        return rc;
+    }
+
+    if (wasHead) {
+        // 退订的是链头：新链头 = 现在最晚的订阅者，其转发指针改接被摘者的下一跳
+        n.head              = subs.back().first;
+        *subs.back().second = savedForward;
     }
     return 0;
 }

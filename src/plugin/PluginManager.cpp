@@ -22,7 +22,14 @@ namespace mod {
 // s_currentHookOwner 在 init_plugin_with_hook_api 调用期间指向当前插件。
 // （必须前置声明，因为 unloadSo() 早于下方 Hook API 实现段使用它们。）
 static QString s_currentHookOwner;
-static QMap<QString, QSet<uintptr_t>> s_pluginHooks;  // owner -> 该插件装的所有 hook 目标地址
+// owner -> 该插件装的所有 hook。值是 {目标地址, detour} 对：链管目标退订时必须知道
+// detour 才能从 MediaHookChain 里摘掉自己的节点（PL-22 轮：原来只存地址，卸载时
+// 直接 DobbyDestroy 会把宿主同目标的 hook 一起拆掉，且重启用后链节点残留导致 hook 失效）。
+struct PluginHookSite {
+    uintptr_t target;
+    void*     detour;
+};
+static QMap<QString, QVector<PluginHookSite>> s_pluginHooks;
 
 // ============================================================
 // 插件 SO 必须导出的函数签名
@@ -309,11 +316,23 @@ void PluginManager::unloadSo(const QString& pluginId) {
     // 被 hook 的宿主函数再被调用即 SIGSEGV（"桌面重启"）。必须在 unload 之前做。
     auto hooksIt = s_pluginHooks.find(pluginId);
     if (hooksIt != s_pluginHooks.end()) {
-        for (uintptr_t target : hooksIt.value()) {
-            int rc = DobbyDestroy(reinterpret_cast<void*>(target));
+        for (const PluginHookSite& site : hooksIt.value()) {
+            void* target = reinterpret_cast<void*>(site.target);
+            if (MediaHookChain::isChainedTarget(target)) {
+                // 链管目标：只把本插件的 detour 从链上摘掉，**绝不能 DobbyDestroy**——
+                // 那会拆掉唯一的 trampoline，宿主同目标的 hook 一起失效；且运行中拆除
+                // 是在音频线程可能正执行目标函数时改写代码页（实测禁用时桌面重启一次）。
+                // 链上只剩宿主时 hook 原样保留；插件下次加载会重新 subscribe。
+                int rc = MediaHookChain::unsubscribe(target, site.detour);
+                if (rc != 0)
+                    spdlog::warn("[PluginHookAPI] chain unsubscribe failed for plugin {} target {:#x} (rc={})",
+                                 pluginId.toStdString(), site.target, rc);
+                continue;
+            }
+            int rc = DobbyDestroy(target);
             if (rc != 0)
                 spdlog::warn("[PluginHookAPI] DobbyDestroy failed for plugin {} target {:#x} (rc={})",
-                             pluginId.toStdString(), target, rc);
+                             pluginId.toStdString(), site.target, rc);
         }
         s_pluginHooks.erase(hooksIt);
     }
@@ -445,9 +464,10 @@ static int hookFunctionImpl(void* targetAddr, void* detourFunc, void** originalF
         } else {
             spdlog::info("[PluginHookAPI] Successfully chained-hook at {:#x}",
                          reinterpret_cast<uint64_t>(targetAddr));
-            // PL-01: 登记，供卸载时回滚（DobbyDestroy 仍按目标地址清理整条链）
+            // PL-01: 登记 {目标, detour}，供卸载时退订（链管目标不能用 DobbyDestroy 回滚）
             if (!s_currentHookOwner.isEmpty())
-                s_pluginHooks[s_currentHookOwner].insert(reinterpret_cast<uintptr_t>(targetAddr));
+                s_pluginHooks[s_currentHookOwner].push_back(
+                    {reinterpret_cast<uintptr_t>(targetAddr), detourFunc});
         }
         return rc;
     }
@@ -459,7 +479,8 @@ static int hookFunctionImpl(void* targetAddr, void* detourFunc, void** originalF
         spdlog::info("[PluginHookAPI] Successfully hooked at {:#x}", reinterpret_cast<uint64_t>(targetAddr));
         // PL-01: 登记，供卸载时回滚
         if (!s_currentHookOwner.isEmpty())
-            s_pluginHooks[s_currentHookOwner].insert(reinterpret_cast<uintptr_t>(targetAddr));
+            s_pluginHooks[s_currentHookOwner].push_back(
+                {reinterpret_cast<uintptr_t>(targetAddr), detourFunc});
     }
     return result;
 }
@@ -470,6 +491,14 @@ static int unhookFunctionImpl(void* targetAddr) {
         spdlog::error("[PluginHookAPI] Invalid parameter for unhook (target is null)");
         return -1;
     }
+    if (MediaHookChain::isChainedTarget(targetAddr)) {
+        // 链管目标是多订阅者共享的：插件只知道目标地址、不知道 detour 身份，
+        // 按地址 DobbyDestroy 会把宿主的 hook 一起炸掉。拒绝并提示用卸载流程回收。
+        spdlog::warn("[PluginHookAPI] unhookFunction on chained target {:#x} is not allowed; "
+                     "hooks are released when the plugin is disabled/unloaded",
+                     reinterpret_cast<uint64_t>(targetAddr));
+        return -2;
+    }
     int rc = DobbyDestroy(targetAddr);
     if (rc != 0) {
         spdlog::warn("[PluginHookAPI] Failed to destroy hook at {:#x} (rc={})",
@@ -477,7 +506,16 @@ static int unhookFunctionImpl(void* targetAddr) {
     } else {
         spdlog::info("[PluginHookAPI] Successfully destroyed hook at {:#x}", reinterpret_cast<uint64_t>(targetAddr));
         for (auto it = s_pluginHooks.begin(); it != s_pluginHooks.end(); ++it) {
-            if (it.value().remove(reinterpret_cast<uintptr_t>(targetAddr))) break;
+            bool removed = false;
+            auto& sites  = it.value();
+            for (auto s = sites.begin(); s != sites.end(); ++s) {
+                if (s->target == reinterpret_cast<uintptr_t>(targetAddr)) {
+                    sites.erase(s);
+                    removed = true;
+                    break;
+                }
+            }
+            if (removed) break;
         }
     }
     return rc;

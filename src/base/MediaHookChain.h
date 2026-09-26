@@ -7,6 +7,8 @@
 
 #include <cstdint>
 #include <map>
+#include <utility>
+#include <vector>
 
 #include "base/StdInt.h"
 
@@ -26,6 +28,12 @@ public:
     // 订阅某个媒体目标的 detour。target 必须是 3 个已知目标之一，否则返回 -1（交给原 DobbyHook）。
     // 成功返回 0；outOriginal 收到「该订阅者应调用的下一跳」（链头订阅者拿到真原函数）。
     static int subscribe(void* target, void* detour, void** outOriginal);
+    // 退订：插件卸载时调用。只把该插件的 detour 从链上摘掉并修补其余订阅者的转发指针；
+    // **链上还有其他订阅者（如宿主）时绝不动 Dobby hook**——DobbyDestroy 会拆掉唯一
+    // 的 trampoline，宿主的 hook 就一起没了；而且运行中拆除 = 在音频线程可能正在执行
+    // 目标函数的同时改写代码页（实测禁用插件时桌面重启一次的候选成因）。链空了才
+    // DobbyDestroy 并抹掉节点，保证下次 subscribe 重新装钩。0 = 成功，非 0 = 失败。
+    static int unsubscribe(void* target, void* detour);
     // hookFunctionImpl 用来判断目标是否归本链管。
     static bool isChainedTarget(void* target);
 
@@ -38,6 +46,9 @@ private:
     struct Node {
         void* head     = nullptr;  // 当前链头 detour
         void* trueOrig = nullptr;  // DobbyHook 返回的真原函数
+        // 订阅者登记表（按订阅先后）：{detour, outOriginal 指针}。
+        // 退订时要靠 origPtr 修补「下一跳订阅者」的转发指针，所以必须存指针本身。
+        std::vector<std::pair<void*, void**>> subs;
     };
     static Node& nodeFor(void* target);
     // 函数局部静态：宿主 registrar 在静态初始化期就会调用 subscribe()，
