@@ -8,6 +8,11 @@
 
 #include <atomic>
 
+// 本头文件直接依赖 spdlog 的类型（spdlog::logger / sink_ptr / sinks::stdout_color_sink_mt），
+// 之前是靠包含顺序偶然编过的。显式引入，避免 Hook.h 之类只经 SymDB.h 间接包含它时炸掉。
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
+
 namespace mod {
 
 class Logger : public spdlog::logger {

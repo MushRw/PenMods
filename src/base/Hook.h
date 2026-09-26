@@ -17,10 +17,21 @@
 
 #define PEN_HOOK(ret_t, sym, args_t...) PEN_HOOK_ADDR(ret_t, sym, PEN_SYM(#sym), args_t)
 
+// 目标地址解析失败时**绝不能**把 nullptr 交给 DobbyHook：
+//   1) PEN_SYM 解析不到就返回 nullptr，而 DobbyHook(nullptr, …) 直接写地址 0 → 崩溃；
+//   2) 崩在启动路径上会被厂商崩溃保护放大成 `update_engine --misc=clear` + 切 A/B 槽，
+//      整个 rootfs 的 PenMods 补丁全丢（见 docs/rootfs-mods.md 里的事故记录）。
+// 所以这里降级为「不挂 hook、记一条 error、功能不可用」，而不是崩。
+// 自 2.1.2 起原版符号表已固定并入库（tools/penimg/ + symcheck.py），
+// 走到这个分支基本只有一个原因：符号名写错了。校验器能在提交前抓住。
 #define PEN_HOOK_ADDR(ret_t, name, addr, args_t...)                                                                    \
     class HookRegistrar_##name {                                                                                       \
     public:                                                                                                            \
         explicit HookRegistrar_##name() {                                                                              \
+            if ((addr) == nullptr) {                                                                                   \
+                spdlog::error("Hook target not found, hook skipped: {} (feature disabled, NOT a crash).", #name);       \
+                return;                                                                                                \
+            }                                                                                                          \
             if (DobbyHook(addr, (dobby_dummy_func_t)detour, (dobby_dummy_func_t*)&origin) != 0) {                      \
                 spdlog::error("Fail to hook: {} ({:#x}).", #name, reinterpret_cast<uint64>(addr));                     \
             }                                                                                                          \

@@ -10,10 +10,15 @@ using uint64 = unsigned long long;
 
 #define PEN_HOOK(ret_t, sym, args_t...) PEN_HOOK_ADDR(ret_t, sym, PEN_SYM(#sym), args_t)
 
+// 同 src/base/Hook.h：解析失败时降级为「不挂 hook」，不要把 nullptr 交给 DobbyHook。
 #define PEN_HOOK_ADDR(ret_t, name, addr, args_t...)                                                                    \
     class HookRegistrar_##name {                                                                                       \
     public:                                                                                                            \
         explicit HookRegistrar_##name() {                                                                              \
+            if ((addr) == nullptr) {                                                                                   \
+                spdlog::error("Hook target not found, hook skipped: {} (feature disabled, NOT a crash).", #name);       \
+                return;                                                                                                \
+            }                                                                                                          \
             if (DobbyHook(addr, (dobby_dummy_func_t)detour, (dobby_dummy_func_t*)&origin) != 0) {                      \
                 spdlog::error("Fail to hook: {} ({:#x}).", #name, reinterpret_cast<uint64>(addr));                     \
             }                                                                                                          \
