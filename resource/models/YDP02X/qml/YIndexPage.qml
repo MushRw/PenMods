@@ -236,11 +236,25 @@ YBackground {
         }
     }
 
-    FastBlur {
+    // AP-02: 原来是全树唯一的全屏裸 FastBlur（CPU 盒式模糊，radius 64 = 统一
+    // glassBlurRadius 的 4.5 倍，暗色渐变上出条带——正是 YFastBlurRectangle 注明的弃用
+    // 场景；且锁屏 800ms 渐暗动画期间每帧全屏重算）。
+    // 改为「降采样 + GaussianBlur」：先把壁纸取景成 1/4 面积的贴图再模糊，
+    // 视觉等效 radius≈64（小图上 32 ≈ 原图 64），代价约为原来的 1/16，条带也消失。
+    ShaderEffectSource {
+        id: id_bg_blur_source
+        sourceItem: id_bg_image
+        visible: isDimmed // 不渐暗时不取景，别让全屏 grab 常驻
+        live: true
+        textureSize: Qt.size(160, 240) // 320x480 的 1/4 面积
+    }
+
+    GaussianBlur {
         id: id_bg_blur
         anchors.fill: id_bg_image
-        source: id_bg_image
-        radius: YColors.glassEnabled ? 64 : 0
+        source: id_bg_blur_source
+        radius: YColors.glassEnabled ? 32 : 0
+        samples: 17
         transparentBorder: true
         opacity: isDimmed ? 1.0 : 0.0
         visible: opacity > 0

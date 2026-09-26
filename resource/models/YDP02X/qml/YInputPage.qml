@@ -14,6 +14,12 @@ YPage {
 
     property bool isPinyinMode: false
 
+    // KB-29: 多行输入才允许 ↵ 插换行。默认 false —— 键盘的调用方绝大多数是
+    // WiFi/SSH/锁屏密码、API Key、文件名、兑换码这类**单行**值，原来 ↵ 一律插 '\n'，
+    // 换行被写进值里，提交即失败且界面上看不出原因。单行场景 ↵ 等价「确定」直接提交。
+    // 多行调用方（聊天输入、消息编辑、提示词编辑）创建后显式置 true。
+    property bool multiline: false
+
     property int currentPinyinLen: 0
 
     // 320x170 一屏放完：
@@ -132,7 +138,13 @@ YPage {
                 id_rime_backend.clear();
                 currentPinyinLen = 0;
             }
-            id_input_text_title_area.enterChar('\n');
+            // KB-29: 单行场景 ↵ 直接提交（等价「确定」），不再把 '\n' 写进值里
+            if (multiline) {
+                id_input_text_title_area.enterChar('\n');
+            } else {
+                inputFinished(id_input_text_title_area.text);
+                backButtonClicked();
+            }
             break;
         case "switchNumber":
             qmlGlobal.currentInputStatus = YEnum.InputStatus.Number;

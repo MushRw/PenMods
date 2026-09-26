@@ -196,6 +196,7 @@ YBackButtonPage {
             var prefill     = currentPrefill;
 
             kbPage.placeHolderText = placeholder;
+            kbPage.multiline = true; // KB-29: 提示词内容是多行文本，↵ 保留换行语义
 
             kbPage.backButtonClicked.connect(function() {
                 qmlGlobal.inputPageShowing = false;

@@ -64,16 +64,30 @@ Item {
                 height: id_textbook_task_guide_item.height
                 property int intrImageIndex: 0
                 property var model: YEnum.TTT_Listen === id_textbook_task_guide_item.taskType ? id_listen_guide_image: id_follow_guide_image
+                // UI-01: 翻页上限原来硬编码 `< 2`（按 3 张图写死），引导图不足 3 张时
+                // 索引会累加越界，`model.get(2).image` 直接抛 TypeError。上限一律按
+                // model.count 推导；取图也判空兜底。
+                readonly property int intrImageLastIndex: (model && model.count > 0) ? model.count - 1 : 0
 
                 function initImageModel()
                 {
                     id_introduction_item.intrImageIndex = 0
                 }
 
+                // 越界/空模型时返回空串，不再抛 TypeError
+                function currentImageUrl() {
+                    var m = id_introduction_item.model;
+                    if (!m || m.count <= 0) return "";
+                    var idx = id_introduction_item.intrImageIndex;
+                    if (idx < 0 || idx >= m.count) return "";
+                    var it = m.get(idx);
+                    return (it && it.image !== undefined) ? it.image : "";
+                }
+
                 YImage {
                     id: id_image_bg
                     anchors.fill: parent
-                    imageName: model.get(id_introduction_item.intrImageIndex).image
+                    imageName: id_introduction_item.currentImageUrl()
 
                     MouseArea {
                         width: 100
@@ -95,7 +109,7 @@ Item {
                         anchors.top: parent.top
                         onClicked: {
                             console.log("YTextBookTaskGuide.qml === id_introduction_item.next.onClicked")
-                            if (id_introduction_item.intrImageIndex < 2) {
+                            if (id_introduction_item.intrImageIndex < id_introduction_item.intrImageLastIndex) {
                                 id_introduction_item.intrImageIndex += 1
                             } else {
                                 id_textbook_task_guide_item.visible = false

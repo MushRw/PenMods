@@ -246,6 +246,7 @@ YPage {
                         onDone(input);
                 });
                 kp.placeHolderText = placeholder || "";
+                kp.multiline = true; // KB-29: 聊天/消息编辑是多行输入，↵ 保留换行语义
                 if (prefill)
                     kp.enterText(prefill);
                 kp.show();
@@ -785,6 +786,7 @@ YPage {
                     handleUserSend(content.trim());
             });
             keyboardPage.placeHolderText = "输入消息...";
+            keyboardPage.multiline = true; // KB-29: 聊天输入多行，↵ 保留换行语义
             keyboardPage.enterText(messageContent);
             keyboardPage.show();
             qmlGlobal.inputPageShowing = true;
