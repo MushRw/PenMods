@@ -251,7 +251,7 @@ void ShellExecutor::finishTask(int taskId, bool timedOut) {
     invokeCallback(cb, result);
 }
 
-void ShellExecutor::invokeCallback(const QJSValue& cb, const QJsonObject& result) {
+void ShellExecutor::invokeCallback(QJSValue cb, const QJsonObject& result) {
     // execAsync 把 QJSValue **跨事件循环**持有在 AsyncTask 里（EX-15）：从发起命令
     // 到进程结束这段时间里，QML 引擎可能已经销毁，或 callback 所属对象已被 GC。
     // QJSValue 只保证"值"的生命周期，不保证它背后的 QJSEngine 还活着，而 Qt 没有

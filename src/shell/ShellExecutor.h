@@ -84,7 +84,11 @@ private:
 
     /// 安全地调用一个跨事件循环持有的 QML 回调（EX-15）。
     /// 见 .cpp 里的实现注释：QJSValue 不保证它背后的 QJSEngine 还活着。
-    void invokeCallback(const QJSValue& cb, const QJsonObject& result);
+    ///
+    /// 参数**按值**传：`QJSValue::call()` 不是 const 成员（调用可能改写这个
+    /// QJSValue），所以这里不能是 `const QJSValue&`。QJSValue 是隐式共享的，
+    /// 拷贝一个很便宜。
+    void invokeCallback(QJSValue cb, const QJsonObject& result);
 
     int  m_timeoutMs   = 5000;
     int  m_nextTaskId  = 1;
