@@ -6,9 +6,9 @@
 或者命中多次都直接报错 —— 源码一改动就立刻暴露，不会静默产出过期副本。
 
 用法：
-    python tools/exec-kernel-test/extract.py [--tree E:\\code\\youdao\\PenMods]
+    python3 tests/exec-kernel/extract.py [--tree <仓库根>]
 输出：
-    tools/exec-kernel-test/build/extracted.inc
+    tests/exec-kernel/build/extracted.inc
 """
 
 from __future__ import annotations
@@ -60,6 +60,13 @@ def main() -> int:
     result_struct = slice_between(h, "struct ExecResult {", "\n/// 执行 shell 命令", "ExecResult")
     result_struct = result_struct.rstrip() + "\n"
 
+    # ---- 2.5) 接口声明 ----
+    # 必须一起抽：C++ 里**默认参数只写在声明处**，`execWithResult(const char*, int)`
+    # 的定义（在 .cpp 里）是不带 `= kExecNoTimeout` 的。少了这几行声明，
+    # main.cpp 里 `execWithResult("...")` 就会以 "too few arguments" 编译失败。
+    decls = slice_between(h, "std::string exec(const char* cmd);", "\ndouble dec(double d, uint16 n);", "接口声明")
+    decls = "\n".join(line for line in decls.splitlines() if "QString" not in line).rstrip() + "\n"
+
     # ---- 3) 内核：匿名命名空间的辅助函数 + execWithResult / exec ----
     helpers = slice_between(cpp, "namespace {", "ExecResult execWithResult(const QString& cmd", "内核辅助函数")
     core = slice_between(cpp, "ExecResult execWithResult(const char* cmd, int timeoutMs) {",
@@ -76,20 +83,40 @@ def main() -> int:
     core = "".join(kept)
 
     body = f"""// ============================================================================
-// 本文件由 tools/exec-kernel-test/extract.py 自动生成，请勿手改。
+// 本文件由 tests/exec-kernel/extract.py 自动生成，请勿手改。
 // 内容是从 PenMods 的 src/common/Utils.h 与 src/common/Utils.cpp 原样抽取的
 // mod::exec() 内核 —— 除了剥掉两行 QString 重载（单测里没有 Qt），没有任何改动。
 // 源: {tree}
 // ============================================================================
 
+namespace mod {{
+
 {consts}
 
 {result_struct}
-namespace mod {{
-
+// ---- 接口声明（含默认参数；见 extract.py 里为什么必须抽这一段）----
+{decls}
 {helpers}{core}
 }} // namespace mod
 """
+    # ---- 3.5) 生成结果自检 ----
+    # 下面两条都是实际踩过的坑，在这里断言住，免得改动 Utils.{h,cpp} 时又静默复发：
+    #   1) 常量和 ExecResult 必须在 `namespace mod` 内部 —— 否则 main.cpp 里的
+    #      `mod::kExecQuickMs` 会以 "is not a member of 'mod'" 编译失败；
+    #   2) 必须抽到**带默认参数的那份声明** —— C++ 的默认参数只写在声明处（Utils.h），
+    #      只抽 .cpp 里的定义会让 `execWithResult("echo hi")` 少一个实参。
+    problems = []
+    if "namespace mod {" not in body:
+        problems.append("生成结果里找不到 `namespace mod {`")
+    elif body.index("namespace mod {") > body.index("constexpr int kExecQuickMs"):
+        problems.append("超时常量落在 `namespace mod` 之外（`mod::kExecQuickMs` 会解析不到）")
+    if "execWithResult(const char* cmd, int timeoutMs = kExecNoTimeout);" not in body:
+        problems.append("没抽到带默认参数的 `execWithResult` 声明")
+    if "ExecResult execWithResult(const char* cmd, int timeoutMs) {" not in body:
+        problems.append("没抽到 `execWithResult` 的定义")
+    if problems:
+        raise SystemExit("[抽取自检失败] 生成的内核与预期形态不符：\n  - " + "\n  - ".join(problems))
+
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(body, encoding="utf-8")
@@ -97,6 +124,7 @@ namespace mod {{
     print(f"已生成 {out}")
     print(f"  超时常量     {len(consts.splitlines())} 行")
     print(f"  ExecResult   {len(result_struct.splitlines())} 行")
+    print(f"  接口声明     {len(decls.splitlines())} 行")
     print(f"  内核         {len(helpers.splitlines()) + len(core.splitlines())} 行")
     if dropped:
         print("  已剔除的 QString 行:")
