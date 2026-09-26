@@ -342,15 +342,17 @@ int main() {
     // ---------------------------------------------------------------- 11
     section("11. 超时按进程组清掉整棵子树（管道另一端的孙进程也要死）");
     {
-        // 用"数量差"而不是绝对值为 0：第 6 节**故意**留了后台 sleep（它们就是要占着
-        // 管道的），第 7 节的超时测试也可能留下一些 —— 只要本节这次超时没让 sleep
-        // **变多**，就说明整组被杀干净了。这样也不依赖 killall / pkill 是否存在。
-        auto sleepCount = [] {
-            const std::string s = mod::exec("pgrep -x sleep | wc -l", mod::kExecQuickMs);
-            return s.empty() ? 0 : std::stoi(s);
-        };
-        const int before = sleepCount();
-        note("本节开始前 pgrep -x sleep 计数 = " + std::to_string(before) + "（含前面故意的后台 sleep）");
+        // 判据用「命令行里那个独一无二的数字」，而不是"数 sleep 进程个数"：
+        // 前者不受前面故意留下的后台 sleep 干扰，也不需要 killall / pkill ——
+        // 实测真机的 busybox `pgrep -x sleep` 和 `pgrep sleep` 都匹配不到进程，
+        // 只有 `pgrep -f` 可用，所以判据必须建立在 `-f` 上。
+        //
+        // pattern 写成 `123[4]5` 是经典的 [x] 技巧：正则匹配 "sleep 12345"，
+        // 但承载 pgrep 的那个 `sh -c` 命令行里是**字面量** "123[4]5"，不会自匹配。
+        constexpr const char* kProbe = R"(pgrep -f "sleep 123[4]5")";
+
+        const std::string leftBefore = mod::exec(kProbe, mod::kExecQuickMs);
+        ok(leftBefore.empty(), "开工前没有 sleep 12345 残留，实际 = [" + escaped(leftBefore) + "]");
 
         // `sleep 12345 | cat`：管道两端**必然**是 fork 出来的进程，所以 sleep 12345
         // 是 sh 的**孙进程** —— "只 kill 直接子进程"的实现会把它留在系统里继续跑。
@@ -362,9 +364,8 @@ int main() {
         ok(dt < 4000, "耗时 " + std::to_string(dt) + "ms < 4000ms（没有等满 12345 秒）");
 
         ::usleep(400 * 1000); // 等 SIGKILL 生效 + 进程被回收
-        const int after = sleepCount();
-        ok(after <= before,
-           "超时没有多出 sleep 进程（整组被清）：" + std::to_string(before) + " -> " + std::to_string(after));
+        const std::string left = mod::exec(kProbe, mod::kExecQuickMs);
+        ok(left.empty(), "超时后 sleep 12345 无残留（整组被清），实际 = [" + escaped(left) + "]");
 
         // 对照组：正常结束的管道命令，本来就不该有残留
         auto fine = mod::execWithResult("sleep 0.2 | cat", mod::kExecQuickMs);
