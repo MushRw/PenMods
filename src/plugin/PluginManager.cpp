@@ -234,10 +234,16 @@ bool PluginManager::loadSo(PluginInfo& info) {
         }
 
         // ---- 阶段 3: 注册到 map，再初始化 Hook API ----
-        QFile::remove(loadingFlagPath);
         m_loadedLibraries.insert(info.id, lib);
         info.isLoaded = true;
+        // PL-04：`.loading` 自愈标记原来是**在装 hook 之前**删的（先 remove、再
+        // initializePluginHookAPI）。而 hook 安装正是整个加载过程里最危险的一步
+        // （Dobby 要改写目标函数的代码页）—— 崩在这一步时标记已经没了，下次开机
+        // `scanAndLoadAll()` 看不到它，就不会触发"上次启动崩过 → 自动禁用"，
+        // 于是每次开机都崩在同一处，设备陷入开机循环，只能靠 adb 救。
+        // 标记必须等 hook 装完、确认活着之后再删。
         initializePluginHookAPI(info.id, lib);
+        QFile::remove(loadingFlagPath);
         spdlog::info("Successfully loaded SO: {}", info.id.toStdString());
         return true;
     }
@@ -277,7 +283,13 @@ void PluginManager::unloadSo(const QString& pluginId) {
 bool PluginManager::togglePlugin(QString pluginId, bool enable) {
     for (auto& plugin : m_plugins) {
         if (plugin.id == pluginId) {
-            if (plugin.isEnabled == enable) {
+            // PL-03：判据原来是"偏好 `isEnabled`"，可偏好和**实际**状态会脱节 ——
+            // 外部直接改了 `.disabled` 后 rescan、上次 loadSo() 失败、或 PL-02 那种
+            // "目录没了但库还在内存里"的幽灵插件，都会让 `isEnabled == true`
+            // 而库其实没加载。这种情形下点"启用"会直接 return true（UI 以为成功了，
+            // 功能却没回来）。判"已经是这个状态"要看实际加载情况。
+            const bool actuallyOn = plugin.isLoaded && plugin.isEnabled;
+            if (actuallyOn == enable) {
                 spdlog::info(
                     "Plugin {} is already {}. No action needed.",
                     pluginId.toStdString(),

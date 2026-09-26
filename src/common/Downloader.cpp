@@ -58,15 +58,34 @@ void Downloader::handleDownloadFinished(TaskId id, bool isOk, int stat) {
     }
     auto task   = mTasks[id];
     auto result = ResultStatus::SUCCEED;
-    switch (stat) {
-    case 1:
-        result = ResultStatus::ERROR_FAIL_STORAGE_INVALID;
-        break;
-    case 2:
-        result = ResultStatus::ERROR_FAIL_OPEN_FILE;
-        break;
-    default:
-        break;
+    // PM-03：`isOk` 是厂商给的"这次到底成没成"，errType 只是**错误分类**
+    // （0=No error / 1=Storage Invalid / 2=Can't open file）。原来只看 errType，
+    // 于是 `isOk == false && errType == 0`（最常见的失败：网络断了、HTTP 报错，
+    // 厂商没给分类码）被判成 **SUCCEED** —— 调用方拿到一个"下载成功"的空/半截文件
+    // （Updater::download() 会据此进 MD5 校验然后报校验失败，表象离根因很远）。
+    if (!isOk) {
+        switch (stat) {
+        case 1:
+            result = ResultStatus::ERROR_FAIL_STORAGE_INVALID;
+            break;
+        case 2:
+            result = ResultStatus::ERROR_FAIL_OPEN_FILE;
+            break;
+        default:
+            result = ResultStatus::ERROR_UNKNOWN;
+            break;
+        }
+    } else {
+        switch (stat) {
+        case 1:
+            result = ResultStatus::ERROR_FAIL_STORAGE_INVALID;
+            break;
+        case 2:
+            result = ResultStatus::ERROR_FAIL_OPEN_FILE;
+            break;
+        default:
+            break;
+        }
     }
     if (task.mFinishedCallback) {
         task.mFinishedCallback(id, task.mSavePath, result);

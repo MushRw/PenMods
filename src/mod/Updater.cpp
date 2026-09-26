@@ -37,7 +37,13 @@ QString Version::toString() const {
     return QString("%1.%2.%3").arg(QString::number(mMajor), QString::number(mMinor), QString::number(mRevision));
 }
 
-uint32 Version::toNumber() const { return mMajor * 100 + mMinor * 10 + mRevision; }
+uint32 Version::toNumber() const {
+    // PM-01：原来是 `mMajor * 100 + mMinor * 10 + mRevision` —— 每个字段只占**一位**
+    // 十进制，minor ≥ 10 就会串位：`0.12.0` 和 `1.2.0` 都等于 120，被 `operator==`
+    // 之外的 `>`/`<` 判成相等（而 `operator==` 是逐字段比的，两者结论自相矛盾）。
+    // 改成每字段固定两位，与逐字段比较的结论才一致（代价：单字段上限 99）。
+    return mMajor * 10000 + mMinor * 100 + mRevision;
+}
 
 bool Version::operator==(const Version b) const {
     return mMajor == b.mMajor && mMinor == b.mMinor && mRevision == b.mRevision;
@@ -63,17 +69,28 @@ void Updater::check() {
         UH_TEMP_PATH "version_list.temp",
         nullptr,
         [&](Downloader::TaskId, const QString& savedPath, Downloader::ResultStatus stat) {
+            // PM-02：原来四个 case **全部贯穿**（没有 break/return），所以任何一个
+            // 失败都会一路落到最先遇到的 `_setOtaStatus()`：用户主动取消被报成
+            // "无网络"、文件打不开被报成"空间不足"，而且一条日志打三遍。
             switch (stat) {
             case Downloader::ResultStatus::ERROR_FAIL_TO_START:
                 error("Checking for updates stalled: Fail to start.");
+                _setOtaStatus(ERROR_NO_CONNECTION);
+                return;
             case Downloader::ResultStatus::ERROR_STOPPED:
                 error("Checking for updates stalled: Stopped by user.");
+                // 用户自己停的，不是故障：回到中性态，别报成网络错误吓人
+                // （`stopTask()` 目前没有调用点，这条是给以后接取消按钮用的）
+                _setOtaStatus(LATEST_VERSION);
+                return;
             case Downloader::ResultStatus::ERROR_UNKNOWN:
                 error("Checking for updates stalled: Unknwon error.");
                 _setOtaStatus(ERROR_NO_CONNECTION);
                 return;
             case Downloader::ResultStatus::ERROR_FAIL_OPEN_FILE:
                 error("Checking for updates stalled: Fail to open file.");
+                _setOtaStatus(ERROR_NO_ENOUGH_MEMORY);
+                return;
             case Downloader::ResultStatus::ERROR_FAIL_STORAGE_INVALID:
                 error("Checking for updates stalled: No enough space(1).");
                 _setOtaStatus(ERROR_NO_ENOUGH_MEMORY);
