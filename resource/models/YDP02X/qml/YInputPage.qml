@@ -41,8 +41,7 @@ YPage {
         id: id_rime_backend
 
         onCommitText: {
-            console.log("Rime Commit: " + text + ", Current Raw Pinyin Len: " + currentPinyinLen);
-
+            // （原有一句 console.log("Rime Commit: ...")，每次上屏一个字写一条，KB-19）
             for (var i = 0; i < currentPinyinLen; i++) {
                 id_input_text_title_area.delChar();
             }
@@ -75,21 +74,21 @@ YPage {
         id_rime_backend.clear();
         id_candidate_model.clear();
         currentPinyinLen = 0;
-        console.log("=== 切换拼音模式: " + isPinyinMode + " ===");
     }
 
     ListModel {
         id: id_candidate_model
     }
 
+    // 下面两个函数是输入页最热的两条路径：selectCandidate 每选一个候选词一次，
+    // enterText **每按一个键一次**。原来的 console.log 就是每次按键往 flash 写一条
+    // 日志（KB-19；拼音模式下叠加 onCommitText 一共两条）。已删除。
+
     function selectCandidate(index, text) {
-        console.log("选中候选词索引: " + index + ", 内容: " + text);
         id_rime_backend.selectCandidate(index);
     }
 
     function enterText(text) {
-        console.log("Input: " + text + ", PinyinMode: " + isPinyinMode);
-
         if (isPinyinMode) {
             var lowerText = text.toLowerCase();
 
