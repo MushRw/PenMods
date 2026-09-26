@@ -223,6 +223,10 @@ bool FileManager::changeDir(const QString& dir) {
     reset();
     _initCurrentDir();
     loadMore();
+
+    // mEntities 已按新目录重建，若这正是"当前播放目录"，同步重建播放列表。
+    // 否则二者会脱节：列表看得到新歌、播放列表里没有 → 点击静默失败。
+    _syncPlayListIfPlaying();
     return true;
 }
 
@@ -251,6 +255,16 @@ void FileManager::reload() {
     reset();
     _initCurrentDir();
     loadMore();
+    // 同 changeDir：目录内容重建后把播放列表拉回一致，避免"新歌点不开"。
+    _syncPlayListIfPlaying();
+}
+
+// mEntities 是"当前目录的内容"，mPlayList 必须与它保持一致（且只在当前目录 == 播放目录时有意义）。
+// reload() / changeDir() 会重建前者，两者都必须顺手同步后者。
+void FileManager::_syncPlayListIfPlaying() {
+    if (!mCurrentPlayingPath.path().isEmpty() && mCurrentPath == mCurrentPlayingPath) {
+        refreshPlayList();
+    }
 }
 
 void FileManager::reset() {
@@ -603,23 +617,34 @@ void FileManager::setShowHiddenFiles(bool val) {
 }
 
 void FileManager::playFromView(const QString& fileName) {
-    if (mCurrentPlayingPath != mCurrentPath) {
-        refreshPlayList();
-        mCurrentPlayingPath = mCurrentPath;
+    // 播放列表必须反映"当前目录此刻的内容"，不能只在"目录变了"时才重建：
+    //   1) QML 的"重新加载"走 reload()、切目录走 changeDir()，两者都会重建 mEntities，
+    //      但都不会刷新 mPlayList；
+    //   2) inotify 路径里 dispatchDirChanged() 是**先** emit directoryChanged() 再刷新播放列表，
+    //      而 QML 收到该信号只是弹"重新加载"对话框 —— 这一刻 mEntities 还是旧的，
+    //      所以那次刷新拿到的也是旧列表。
+    // 于是"在已经播放过的目录里新增歌曲 → 点重新加载 → 点新歌"必然命中旧列表。
+    // 以前这里用 mCurrentPlayingPath != mCurrentPath 当"要不要刷新"的判据，正好跳过这种情况，
+    // 表现为"点了没反应、必须重启主程序"（重启后 mCurrentPlayingPath 为空，判据成立）。
+    // 改为无条件重建：一次遍历，且只在用户点击时发生，代价可忽略。
+    refreshPlayList();
+    mCurrentPlayingPath = mCurrentPath;
 
-        // 更新 inotify 监视（现在全在主线程，不需要锁）
-        addInotifyWatch(mCurrentPlayingPath.path());
-    }
-    size_t idx   = 0;
-    bool   valid = false;
-    for (auto& file : MusicPlayer::getInstance().getPlayListRef()) {
-        if (file->fileName() == fileName) {
-            valid = true;
-            break;
+    // 更新 inotify 监视（现在全在主线程，不需要锁）；重复添加同一目录是空操作。
+    addInotifyWatch(mCurrentPlayingPath.path());
+
+    auto& list = MusicPlayer::getInstance().getPlayListRef();
+    for (size_t idx = 0; idx < list.size(); ++idx) {
+        if (list.at(idx)->fileName() == fileName) {
+            MusicPlayer::getInstance().play(idx);
+            return;
         }
-        idx++;
     }
-    if (valid) MusicPlayer::getInstance().play(idx);
+
+    // 重建后仍然找不到：后缀不在可播放白名单里，或文件刚被删除/改名。
+    // 以前这里是静默返回，用户只看到"点了没反应"，只能重启主程序碰运气。
+    error("playFromView: 未找到可播放文件: {}", fileName.toStdString());
+    emit exception("无法打开该文件");
 }
 
 void FileManager::refreshPlayList() {

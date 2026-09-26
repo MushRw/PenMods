@@ -210,5 +210,9 @@ private:
     QDir mCurrentPlayingPath;
 
     void refreshPlayList();
+
+    // 目录内容被重建（reload/changeDir）后，若当前目录就是播放目录，同步重建播放列表。
+    // 少了这一步，mPlayList 会停留在旧内容上：列表里能看到新歌、却点不开（静默失败）。
+    void _syncPlayListIfPlaying();
 }; // namespace mod::filemanager
 } // namespace mod::filemanager
