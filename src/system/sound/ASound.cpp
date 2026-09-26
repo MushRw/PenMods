@@ -9,7 +9,44 @@
 #include "common/Utils.h"
 #include "common/util/System.h"
 
+#include <fstream>
+#include <sstream>
+
 namespace mod {
+
+namespace {
+
+/// 读整个文件（二进制读，避免任何换行翻译）。读不到（不存在 / 不可读）返回 false。
+bool _readWholeFile(const std::string& path, std::string& out) {
+    std::ifstream ifile(path, std::ios::binary);
+    if (!ifile.is_open()) {
+        return false;
+    }
+    std::ostringstream oss;
+    oss << ifile.rdbuf();
+    out = oss.str();
+    return true;
+}
+
+/// 目标文件的内容是否**已经**与期望一致。一致就不必再截断重写一次 flash。
+/// 读不到时一律当作"需要写"—— 不能因为读失败就把该写的配置漏掉。
+bool _contentAlreadyUpToDate(const std::string& path, const std::string& content) {
+    std::string existing;
+    return _readWholeFile(path, existing) && existing == content;
+}
+
+/// 截断重写。返回 false 表示打不开或写失败，由调用方记日志。
+bool _overwriteFile(const std::string& path, const std::string& content) {
+    std::ofstream ofile(path, std::ios::binary | std::ios::trunc);
+    if (!ofile.is_open()) {
+        return false;
+    }
+    ofile << content;
+    ofile.close();
+    return true;
+}
+
+} // namespace
 
 ASound::ASound() : Logger("ASound") {
 
@@ -43,44 +80,48 @@ bool ASound::_resetConfig() {
                        .replace("{mindb}", QString::number(mVoiceDb.min, 'f', 1))
                        .replace("{maxdb}", QString::number(mVoiceDb.max, 'f', 1))
                        .toStdString();
-    // cfg.mPath 是 rootfs 上的 /etc/asound.conf.<model>：只在真正写文件的这段
-    // 时间把 / 临时放开为可写，写完还原（原来是开机就整段会话保持 rw）。
-    const bool wasWritable = util::isRootFileSystemWritable();
-    if (!util::setRootFileSystemWritable(true)) {
-        error("Failed to remount / writable, abort writing asound configuration.");
-        return false;
-    }
 
     bool ok = true;
-    {
-        std::ofstream ofile(cfg.mPath);
-        if (!ofile.good()) {
+
+    // ① 先写 rootfs 上的 /etc/asound.conf.<MODEL>。它是厂商 /etc/init.d/S49_EQ_init 里
+    //    `cp /etc/asound.conf.<MODEL> /userdata/cfg/asound.conf` 的**源头**，也就是跨重启的
+    //    权威副本 —— 不写它，用户调的 dB 会被下一次开机的厂商拷贝覆盖掉（这正是 SD-07
+    //    "改的是 rootfs 出厂文件"的由来，属已知产品决策，不在此处改动）。
+    //    先写源头、再写运行时副本，任一步失败都不会留下"运行时已改、重启回旧"的不一致。
+    if (!_contentAlreadyUpToDate(cfg.mPath, content)) {
+        const bool wasWritable = util::isRootFileSystemWritable();
+        if (!util::setRootFileSystemWritable(true)) {
+            error("Failed to remount / writable, abort writing asound configuration.");
+            return false;
+        }
+
+        if (!_overwriteFile(cfg.mPath, content)) {
             error("Failed to open {} for writing.", cfg.mPath);
             ok = false;
-        } else {
-            ofile << content;
-            ofile.close();
         }
-    }
-    if (ok) {
-        // /etc/asound.conf 是指向 /userdata/cfg/asound.conf 的 bind mount，本身可写；
-        // 与厂商自己的做法一致，两个文件写同一份内容。
-        std::ofstream ofile("/etc/asound.conf");
-        if (!ofile.good()) {
-            error("Failed to open /etc/asound.conf for writing.");
-            ok = false;
-        } else {
-            ofile << content;
-            ofile.close();
+
+        // 无论写入成败都必须把 / 还原。归还失败 = rootfs 停在 rw（本设备唯一"改不坏"的保险
+        // 失效），这里必须让调用方看得见，不能像以前那样丢弃返回值然后 return true（SD-03）。
+        if (!util::setRootFileSystemWritable(wasWritable)) {
+            error("Failed to restore rootfs mount state (wasWritable={}). / may be left writable!", wasWritable);
+            return false;
         }
     }
 
-    // 无论写入成败都必须把 / 还原。归还失败 = rootfs 停在 rw（本设备唯一"改不坏"的保险
-    // 失效），这里必须让调用方看得见，不能像以前那样丢弃返回值然后 return true（SD-03）。
-    if (!util::setRootFileSystemWritable(wasWritable)) {
-        error("Failed to restore rootfs mount state (wasWritable={}). / may be left writable!", wasWritable);
-        return false;
+    // ② /etc/asound.conf 是厂商 S49_EQ_init 里
+    //    `mount --bind /userdata/cfg/asound.conf /etc/asound.conf` 建出来的**独立可写挂载**
+    //    （真机实测：`/dev/mmcblk1p12 on /etc/asound.conf type ext4 (rw,…)`，且它与
+    //    /userdata/cfg/asound.conf **同 inode**）→ 写它**根本不需要 rootfs rw**。
+    //    以前它被包在可写窗口里，于是每次 setDb 都白做一轮 remount,rw → remount,ro，
+    //    把只读 rootfs 反复置于可写；现在移到窗口外（SD-02）。
+    //    内容未变就跳过，稳态下省掉一次 /userdata 的 flash 截断写。
+    if (ok && !_contentAlreadyUpToDate("/etc/asound.conf", content)) {
+        if (!_overwriteFile("/etc/asound.conf", content)) {
+            error("Failed to open /etc/asound.conf for writing.");
+            ok = false;
+        }
     }
+
     return ok;
 }
 
@@ -1105,7 +1146,13 @@ pcm.2mic
 }
 
 ASound::Config ASound::_getConfig() {
-    auto pcba = exec("get_pcba_version");
+    // 板型是硬件跳线，运行期不变 → 嗅探一次就缓存（SD-08）。
+    // `get_pcba_version` 是 /bin/sh 脚本（读 GPIO/ADC），而本函数在每次 setDb 上都会被调用，
+    // 以前等于每次开机 / 每次切低音量都 fork 一个 shell + 一轮 sysfs 探测。
+    if (mPcba.empty()) {
+        mPcba = exec("get_pcba_version");
+    }
+    const std::string& pcba = mPcba;
     if (pcba == "Dictpen2.0_V4") {
         return {"/etc/asound.conf.V4", _getRawConfigure("V4")};
     }
