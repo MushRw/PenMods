@@ -8,10 +8,22 @@
 
 #include "common/Event.h"
 
+#include <QJSEngine>
+#include <QJSValueList>
 #include <QQmlContext>
 #include <QQuickView>
 
 namespace mod {
+
+namespace {
+
+/// `setTimeout(0)`（"关闭超时"）时给**异步**任务兜底用的超时。
+///
+/// 为什么异步不能用"不超时"：见 `setTimeout()` 的注释 —— 不建 timer 的话，
+/// 一个既不退出也不报错的子进程会让那个 task 永远留在 `m_tasks` 里。
+constexpr int kAsyncFallbackTimeoutMs = 5 * 60 * 1000;
+
+} // namespace
 
 ShellExecutor::ShellExecutor(QObject* parent)
     : QObject(parent), Logger("ShellExecutor") {
@@ -57,9 +69,16 @@ ShellExecutor::SyncResult ShellExecutor::runSync(QProcess& process, const QStrin
 }
 
 QString ShellExecutor::exec(const QString& command) {
-    QProcess process;
-    if (runSync(process, command) != SyncResult::Ok)
+    QProcess   process;
+    SyncResult sr = runSync(process, command);
+    if (sr != SyncResult::Ok) {
+        // 这里返回空串，而"命令成功但没有输出"也是空串 —— QML 侧无法区分（EX-14）。
+        // 至少让这条日志把话说清楚，别让看日志的人以为命令真的跑成功了。
+        warn("exec() 未能成功执行（{}），QML 侧将收到空串 —— 这与「成功但无输出」无法区分，"
+             "需要判断成败请改用 execWithResult()：{}",
+             sr == SyncResult::TimedOut ? "超时" : "启动失败", command.toStdString());
         return QString();
+    }
     return QString::fromUtf8(process.readAllStandardOutput()).trimmed();
 }
 
@@ -169,21 +188,19 @@ int ShellExecutor::execAsync(const QString& command, QJSValue callback) {
         emit finished(taskId, cmd, -1);
         emit errorOccurred(taskId, cmd, "Failed to start process");
 
-        if (cb.isCallable()) {
-            QJSValueList args;
-            args << cb.engine()->toScriptValue(result);
-            cb.call(args);
-        }
+        invokeCallback(cb, result);
     });
 
-    if (m_timeoutMs > 0) {
-        task->timer = new QTimer(this);
-        task->timer->setSingleShot(true);
-        connect(task->timer, &QTimer::timeout, this, [this, taskId]() {
-            finishTask(taskId, true);
-        });
-        task->timer->start(m_timeoutMs);
-    }
+    // 异步任务**总是**带一个超时，即使 m_timeoutMs == 0（"关闭超时"）也不例外：
+    // 不建 timer 的话，一个既不退出也不报错的子进程会让这个 task 永远留在 m_tasks 里
+    // （EX-13）。兜底值取 kAsyncFallbackTimeoutMs，见 setTimeout() 的注释。
+    const int asyncTimeoutMs = (m_timeoutMs > 0) ? m_timeoutMs : kAsyncFallbackTimeoutMs;
+    task->timer              = new QTimer(this);
+    task->timer->setSingleShot(true);
+    connect(task->timer, &QTimer::timeout, this, [this, taskId]() {
+        finishTask(taskId, true);
+    });
+    task->timer->start(asyncTimeoutMs);
 
     task->process->start();
     info("异步命令已发起 [taskId={}]: {}", taskId, command.toStdString());
@@ -231,10 +248,30 @@ void ShellExecutor::finishTask(int taskId, bool timedOut) {
     emit finished(taskId, cmd, exit);
     if (timedOut) emit errorOccurred(taskId, cmd, "Command timed out");
 
-    if (cb.isCallable()) {
-        QJSValueList args;
-        args << cb.engine()->toScriptValue(result);
-        cb.call(args);
+    invokeCallback(cb, result);
+}
+
+void ShellExecutor::invokeCallback(const QJSValue& cb, const QJsonObject& result) {
+    // execAsync 把 QJSValue **跨事件循环**持有在 AsyncTask 里（EX-15）：从发起命令
+    // 到进程结束这段时间里，QML 引擎可能已经销毁，或 callback 所属对象已被 GC。
+    // QJSValue 只保证"值"的生命周期，不保证它背后的 QJSEngine 还活着，而 Qt 没有
+    // 官方 API 能问"这个引擎还在不在"。能做的只有：
+    //   ① 调用前先判 `engine()` 非空（引擎销毁后 QJSValue::engine() 会返回 nullptr）
+    //   ② 无论回调发生什么，都不影响后续的清理 —— 所以调用点一律**先 cleanupTask 再回调**
+    if (!cb.isCallable()) {
+        return;
+    }
+    QJSEngine* engine = cb.engine();
+    if (engine == nullptr) {
+        warn("回调所属的 QML 引擎已不可用，跳过回调（命令结果已通过 finished 信号发出）");
+        return;
+    }
+
+    QJSValueList args;
+    args << engine->toScriptValue(result);
+    const QJSValue ret = cb.call(args);
+    if (ret.isError()) {
+        warn("回调抛出异常: {}", ret.toString().toStdString());
     }
 }
 
@@ -301,6 +338,19 @@ void ShellExecutor::setTimeout(int ms) {
     if (ms < 0) {
         warn("超时时间不能为负数，已忽略: {}", ms);
         return;
+    }
+    // `0` 在这里的语义是**关闭超时**，不是"立刻超时"（`QTimer` 的语义）。
+    // 这是留给插件作者的陷阱（EX-13），因为 QML 一行 `shell.timeout = 0` 就能踩到：
+    //   * 同步路径：`waitForFinished(-1)` —— 无限阻塞**调用线程**（通常是 UI 线程）
+    //   * 异步路径：原来不建 timer —— 一旦子进程既不退出也不报错
+    //     （例如 `sh -c 'sleep infinity'`），这个 task 就**永远不会被回收**，
+    //     `m_tasks` 与 `activeCount` 只增不减，还一直占着一个 QProcess
+    // 所以异步路径现在**总是**建 timer：`0` 时用一个兜底值（见 kAsyncFallbackTimeoutMs），
+    // 保证"挂住的任务最终会被清掉"这件事不依赖调用者的配置。
+    if (ms == 0) {
+        warn("setTimeout(0) = 关闭超时：同步 exec() 会无限阻塞调用线程；"
+             "异步 execAsync() 的任务改用 {} ms 兜底超时，避免挂住的任务永不回收",
+             kAsyncFallbackTimeoutMs);
     }
     m_timeoutMs = ms;
     emit timeoutChanged(ms);
