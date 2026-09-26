@@ -122,7 +122,7 @@ bool AudioRecorder::start() {
     // Init input device — 录音期间阻止音频输出自动关闭
     AudioDaemon::getInstance().acquire(AudioSource::SYSTEM);
     PEN_CALL(void*, "_ZN12YSoundCenter9forceStopEv", void*)(YPointer<YSoundCenter>::getInstance());
-    exec("amixer cset numid=2 1");
+    exec("amixer cset numid=2 1", kExecQuickMs);
     auto info = QAudioDeviceInfo::defaultInputDevice();
     if (!info.isFormatSupported(format)) {
         warn("Default format not supported, trying to use the nearest.");
@@ -185,7 +185,7 @@ bool AudioRecorder::stop() {
     AudioDaemon::getInstance().release(AudioSource::SYSTEM);
 
     // Reset audio device.
-    exec("amixer cset numid=2 0");
+    exec("amixer cset numid=2 0", kExecQuickMs);
     InputDaemon::getInstance().reset();
     mInputAudio->stop();
     // stateChanged 连接已在上面断开，这里显式同步停止状态，避免 UI 停留在录制中

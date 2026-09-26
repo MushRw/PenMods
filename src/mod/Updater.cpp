@@ -176,8 +176,9 @@ void Updater::install() {
         } else {
             _setOtaStatus(MD5_CHECK_SUCCESSFULLY);
             _setOtaStatus(INSTALLING);
-            exec(QString("chmod +x \"%1\"").arg(UH_TEMP_PATH "_do_update.sh"));
-            exec(QString("cd \"%1\" && bash _do_update.sh").arg(UH_TEMP_PATH));
+            exec(QString("chmod +x \"%1\"").arg(UH_TEMP_PATH "_do_update.sh"), kExecNormalMs);
+            // OTA 脚本**绝不能被超时掐断**：中断在升级中途比等下去危险得多。
+            exec(QString("cd \"%1\" && bash _do_update.sh").arg(UH_TEMP_PATH), kExecNoTimeout);
             _setInstallProgress(100);
             if (QFile(UH_TEMP_PATH "INSTALL_SUCCESSFULLY").exists()) {
                 _setOtaStatus(INSTALL_SUCCESSFULLY);
@@ -196,11 +197,11 @@ void Updater::onUiCompleted() {
 }
 
 std::string Updater::_calcFileMd5(const QString& path) {
-    return exec(QString(R"(md5sum -b "%1" | cut -d" " -f1)").arg(path));
+    return exec(QString(R"(md5sum -b "%1" | cut -d" " -f1)").arg(path), kExecLongMs);
 }
 
 void Updater::_unzip(QString zipPath, QString toWhere) {
-    exec(QString(R"(unzip -q -o "%1" -d "%2")").arg(zipPath, toWhere));
+    exec(QString(R"(unzip -q -o "%1" -d "%2")").arg(zipPath, toWhere), kExecVeryLongMs);
 }
 
 void Updater::_cleanupTemp() {

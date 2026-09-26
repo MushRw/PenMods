@@ -45,7 +45,11 @@ bool ServiceManager::getAdbStatus() const {
     return readFileNoLast("/tmp/.usb_config").find("usb_adb_en") != std::string::npos;
 }
 
-bool ServiceManager::getSshStatus() const { return exec("ps | grep [s]sh").find("sshd") != std::string::npos; }
+bool ServiceManager::getSshStatus() const {
+    // 注意：这个 READ 每被 QML 求值一次就 fork 一个 shell，本身是 EX-07（待修）。
+    // 这里先只保证它不会挂住 UI 线程。
+    return exec("ps | grep [s]sh", kExecQuickMs).find("sshd") != std::string::npos;
+}
 
 bool ServiceManager::startAdb(bool dontShowToast) {
     PEN_CALL(uint64, "adb_onoff", char)(1);
@@ -65,7 +69,7 @@ bool ServiceManager::stopAdb(bool dontShowToast) {
 }
 
 bool ServiceManager::startSsh(bool dontShowToast) {
-    exec("sshd_sevice start");
+    exec("sshd_sevice start", kExecNormalMs);
     if (!dontShowToast) {
         showToast("SSH服务已启用");
     }
@@ -74,7 +78,7 @@ bool ServiceManager::startSsh(bool dontShowToast) {
 }
 
 bool ServiceManager::stopSsh(bool dontShowToast) {
-    exec("sshd_sevice stop");
+    exec("sshd_sevice stop", kExecNormalMs);
     if (!dontShowToast) {
         showToast("SSH服务已停用");
     }
@@ -164,7 +168,7 @@ bool ServiceManager::setSshRootPasswd(const QString& val) {
     }
 }
 
-void ServiceManager::_passAdbVerification() { exec("touch /tmp/.adb_auth_verified"); }
+void ServiceManager::_passAdbVerification() { exec("touch /tmp/.adb_auth_verified", kExecQuickMs); }
 
 std::string ServiceManager::_getRandomString(uint32 length) {
     auto*       generator = QRandomGenerator::global();

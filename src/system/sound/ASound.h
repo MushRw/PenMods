@@ -39,11 +39,6 @@ private:
 
     bool _resetConfig();
 
-    // `get_pcba_version` 是个 /bin/sh 脚本（读 GPIO/ADC 判板型），每次 setDb 都 fork 一遍
-    // 是纯浪费；板型是硬件跳线，运行期不会变，嗅探一次即可（SD-08）。
-    // 失败（exec 抛异常 / 返回空）时不写入，下次调用会重试。
-    std::string mPcba;
-
     Config _getConfig();
 
     std::string _getRawConfigure(const char* model);

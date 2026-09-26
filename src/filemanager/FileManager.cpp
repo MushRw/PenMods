@@ -370,11 +370,11 @@ void FileManager::setMtpOnoff(bool onoff) {
         return;
     }
     if (onoff) {
-        exec("grep usb_mtp_en /tmp/.usb_config || echo usb_mtp_en >> /tmp/.usb_config");
+        exec("grep usb_mtp_en /tmp/.usb_config || echo usb_mtp_en >> /tmp/.usb_config", kExecQuickMs);
     } else {
-        exec("sed -i '/usb_mtp_en/d' /tmp/.usb_config");
+        exec("sed -i '/usb_mtp_en/d' /tmp/.usb_config", kExecQuickMs);
     }
-    exec("/etc/init.d/S98usbdevice restart");
+    exec("/etc/init.d/S98usbdevice restart", kExecNormalMs);
 }
 
 int FileManager::getOrder() const { return mOrder; }

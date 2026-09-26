@@ -54,15 +54,18 @@ void ensurePlayerInstalled() {
     }
 
     spdlog::info("[PlayerInstaller] 播放器缺失，从 {} 部署...", kPlayerArchive);
-    exec("rm -rf /tmp/player_install && mkdir -p /tmp/player_install");
-    exec(QString("unzip -q -o \"%1\" -d /tmp/player_install").arg(kPlayerArchive));
+    // 这 5 条是开机路径上的重活（解压 + 跨分区拷贝），全部在 UI 线程同步执行，
+    // 所以超时只当"永不返回"的兜底 —— 给足 5 分钟，不要真把它掐了。
+    // （真正的修法 —— 检查 exit code / 移出 UI 线程 —— 见 EX-12，另批处理。）
+    exec("rm -rf /tmp/player_install && mkdir -p /tmp/player_install", kExecVeryLongMs);
+    exec(QString("unzip -q -o \"%1\" -d /tmp/player_install").arg(kPlayerArchive), kExecVeryLongMs);
     if (!QFile::exists("/tmp/player_install/mpv/mpv")) {
         spdlog::error("[PlayerInstaller] 安装包内容不完整（缺少 mpv/mpv）");
         return;
     }
 
-    exec("rm -rf /userdisk/mpv && cp -r /tmp/player_install/mpv /userdisk/mpv");
-    exec("chmod +x /userdisk/mpv/mpv /userdisk/mpv/bin/mpv /userdisk/mpv/screen_watchdog");
+    exec("rm -rf /userdisk/mpv && cp -r /tmp/player_install/mpv /userdisk/mpv", kExecVeryLongMs);
+    exec("chmod +x /userdisk/mpv/mpv /userdisk/mpv/bin/mpv /userdisk/mpv/screen_watchdog", kExecVeryLongMs);
 
     if (!QFile::exists(kPlayerMarker)) {
         spdlog::error("[PlayerInstaller] 部署后仍缺少 {}", kPlayerMarker);
@@ -84,8 +87,8 @@ void ensureRimeInstalled() {
     }
 
     spdlog::info("[PlayerInstaller] Rime 数据缺失，从 {} 部署...", kRimeArchive);
-    exec("rm -rf /tmp/rime_install && mkdir -p /tmp/rime_install");
-    exec(QString("unzip -q -o \"%1\" -d /tmp/rime_install").arg(kRimeArchive));
+    exec("rm -rf /tmp/rime_install && mkdir -p /tmp/rime_install", kExecVeryLongMs);
+    exec(QString("unzip -q -o \"%1\" -d /tmp/rime_install").arg(kRimeArchive), kExecVeryLongMs);
     if (!QFile::exists(QString("/tmp/rime_install/") + kRimePayload)) {
         spdlog::error("[PlayerInstaller] rime.zip 内容不完整（缺少 {}）", kRimePayload);
         return;
@@ -94,7 +97,7 @@ void ensureRimeInstalled() {
     // 必须递归拷贝：雾凇拼音的词库在 cn_dicts/、en_dicts/ 子目录里，
     // 老版本的 `cp -f .../ *` 会把子目录直接丢掉。
     // `src/.` 的写法保证连同隐藏文件一起复制到目标目录内部。
-    exec("mkdir -p /userdisk/Music/Rime && cp -rf /tmp/rime_install/. /userdisk/Music/Rime/");
+    exec("mkdir -p /userdisk/Music/Rime && cp -rf /tmp/rime_install/. /userdisk/Music/Rime/", kExecVeryLongMs);
     if (QFile::exists(kRimeMarker)) {
         spdlog::info("[PlayerInstaller] Rime 数据部署完成（雾凇拼音）");
     } else {

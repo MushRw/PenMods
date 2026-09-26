@@ -79,11 +79,15 @@ int Mod::getCachedSymCount() const { return static_cast<int>(SymDB::getInstance(
 QString Mod::getBuildInfoStr() const { return BUILD_INFO_STRING; }
 
 QString Mod::getOtherSlot() const {
-    return exec("update_engine --misc=display").find("[0]->priority = 15") != std::string::npos ? "System B"
-                                                                                                : "System A";
+    return exec("update_engine --misc=display", kExecNormalMs).find("[0]->priority = 15") != std::string::npos
+               ? "System B"
+               : "System A";
 }
 
-void Mod::changeSlot() { exec("update_engine --misc=other --reboot"); }
+void Mod::changeSlot() {
+    // 切槽会让设备立刻重启：命令可能回不来，不能设超时把它掐了。
+    exec("update_engine --misc=other --reboot", kExecNoTimeout);
+}
 
 void Mod::uninstall() {
     try {
@@ -125,7 +129,10 @@ void Mod::uninstall() {
 
 void Mod::softReboot() { std::terminate(); }
 
-void Mod::reboot() { exec("sync && reboot"); }
+void Mod::reboot() {
+    // 同 changeSlot()：`reboot` 本身不会返回，设超时等于给系统关机流程添乱。
+    exec("sync && reboot", kExecNoTimeout);
+}
 
 void Mod::onCaptureTick() {
     // 兜底：Engine 在 initUi 钩子开头就会设置 YPointer<QQuickView>，
@@ -188,11 +195,13 @@ void Mod::onUiCompleted() const {
         bool repairNeeded = false;
         bool allRepaired  = true;
         for (auto i : list) {
-            if (exec(QString("vendor_storage -r %1 -t %2 2>&1").arg(i.mName, i.mType)).find("vendor read error -1")
+            if (exec(QString("vendor_storage -r %1 -t %2 2>&1").arg(i.mName, i.mType), kExecNormalMs)
+                    .find("vendor read error -1")
                 != std::string::npos) {
                 repairNeeded = true;
                 spdlog::warn("Automatically repairing vendor_storage: {}", i.mName.toStdString());
-                if (exec(QString("vendor_storage -w %1 -t %2 -i %3 2>&1").arg(i.mName, i.mType, i.mDefaultValue))
+                if (exec(QString("vendor_storage -w %1 -t %2 -i %3 2>&1").arg(i.mName, i.mType, i.mDefaultValue),
+                         kExecNormalMs)
                         .find("vendor write error")
                     != std::string::npos) {
                     allRepaired = false;

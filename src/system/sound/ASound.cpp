@@ -1146,13 +1146,10 @@ pcm.2mic
 }
 
 ASound::Config ASound::_getConfig() {
-    // 板型是硬件跳线，运行期不变 → 嗅探一次就缓存（SD-08）。
-    // `get_pcba_version` 是 /bin/sh 脚本（读 GPIO/ADC），而本函数在每次 setDb 上都会被调用，
-    // 以前等于每次开机 / 每次切低音量都 fork 一个 shell + 一轮 sysfs 探测。
-    if (mPcba.empty()) {
-        mPcba = exec("get_pcba_version");
-    }
-    const std::string& pcba = mPcba;
+    // 板型是硬件跳线，运行期不变 → 由 util::pcbaVersion() 全项目只探测一次并缓存
+    // （EX-10 / SD-08）。以前这里自己 fork 一个 /bin/sh 跑 get_pcba_version，而本函数
+    // 每次 setDb 都会被调用，等于每次开机 / 每次切低音量都白 fork 一轮。
+    const std::string pcba = util::pcbaVersion();
     if (pcba == "Dictpen2.0_V4") {
         return {"/etc/asound.conf.V4", _getRawConfigure("V4")};
     }

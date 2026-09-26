@@ -85,7 +85,7 @@ bool InputDaemon::_resetConfig() {
     // 重启守护进程一律走厂商自己的脚本（它支持 restart）：
     // 它会 bind-mount 正确的配置、并以 `input-event-daemon -v` 加合适环境启动。
     // 以前这里是自己 `killall` + 裸 `input-event-daemon`，见 _restartDaemon() 的说明。
-    exec("/etc/init.d/S99input-event-daemon restart");
+    exec("/etc/init.d/S99input-event-daemon restart", kExecNormalMs);
     return true;
 }
 
@@ -235,7 +235,9 @@ reset = screen_onoff on; sleep 1; killall -9 system_sleep_wakeup
 }
 
 InputDaemon::Config InputDaemon::_getConfig() {
-    auto pcba = exec("get_pcba_version");
+    // 与 ASound 共用同一个缓存过的板型探测（EX-10 / SD-08）：
+    // `get_pcba_version` 是 /bin/sh 脚本，以前两处各 fork 一遍。
+    const std::string pcba = util::pcbaVersion();
     if (pcba == "Dictpen2.0_V4") {
         return {"/etc/input-event-daemon_V4.conf", _getRawConfigure("V4")};
     }
@@ -260,7 +262,7 @@ void InputDaemon::onWatchdogTick() {
         return;
     }
 
-    auto pidStr = exec("pidof input-event-daemon");
+    auto pidStr = exec("pidof input-event-daemon", kExecQuickMs);
     pid_t pid   = -1;
     try {
         pid = std::stoi(pidStr);
@@ -323,7 +325,7 @@ bool InputDaemon::_restartDaemon() {
     // 这就是"装了新版 PenMods 后放音乐会卡"的根因（1.0 没有这个看门狗，反而正常）。
     // 改成调厂商自己的 init 脚本：它做 `mount --bind` 配置 + 以 `-v` 启动，
     // 和开机时完全一致，不会再制造坏实例。
-    exec("/etc/init.d/S99input-event-daemon restart");
+    exec("/etc/init.d/S99input-event-daemon restart", kExecNormalMs);
     info("input-event-daemon 已通过厂商脚本重启");
     return true;
 }

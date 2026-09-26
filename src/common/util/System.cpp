@@ -13,7 +13,9 @@
 #include <dlfcn.h>
 #include <unistd.h>
 
+#include <mutex>
 #include <optional>
+#include <string>
 
 namespace mod::util {
 
@@ -44,6 +46,21 @@ std::optional<bool> _rootFileSystemWritableState() {
 
 bool isRootFileSystemWritable() { return _rootFileSystemWritableState().value_or(false); }
 
+std::string pcbaVersion() {
+    static std::mutex  mutex;
+    static std::string cached;
+    static bool        probed = false;
+
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!probed) {
+        // 探测失败（返回空）时不置位 probed，下次调用会重试 —— 不能把一次偶发失败
+        // 永久缓存下来，否则整台设备的 asound / input-event-daemon 都会退到兜底分支。
+        cached = exec("get_pcba_version", kExecQuickMs);
+        probed = !cached.empty();
+    }
+    return cached;
+}
+
 QFileInfo getModuleFileInfo() {
     Dl_info info;
     if (dladdr((void*)getModuleFileInfo, &info) == 0) return {};
@@ -61,7 +78,9 @@ bool setRootFileSystemWritable(bool writable) {
     if (current.has_value() && *current == writable) {
         return true;
     }
-    exec(QString("mount -o remount,%1 /").arg(writable ? "rw" : "ro"));
+    // 给超时：remount 正常在百毫秒内完成，卡住时不能把 UI 线程或开机路径一起拖死。
+    // 失败（含超时）由下面的回读兜住 —— 回读不到/对不上就返回 false。
+    exec(QString("mount -o remount,%1 /").arg(writable ? "rw" : "ro"), kExecNormalMs);
     const auto after = _rootFileSystemWritableState();
     if (!after.has_value()) {
         // 回读不到状态就不能宣称成功。"归还 rootfs"这唯一一步静默失败 =

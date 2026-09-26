@@ -36,7 +36,7 @@ AntiEmbs::AntiEmbs() {
 
     connect(this, &AntiEmbs::lowVoiceModeChanged, [&]() {
         mLowVoiceMode ? ASound::getInstance().setDb({-80.0, -20.0}) : ASound::getInstance().setDb({-50.0, 0.0});
-        exec("killall SoundPlayer");
+        exec("killall SoundPlayer", kExecQuickMs);
     });
 
     connect(this, &AntiEmbs::autoPronLockChanged, [&]() {

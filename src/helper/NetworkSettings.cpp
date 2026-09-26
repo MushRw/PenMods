@@ -123,17 +123,18 @@ void NetworkSettings::_refreshApplicationProxy() {
 }
 
 QString NetworkSettings::getLocalIpAddress() const {
-    auto ip = exec("/sbin/ifconfig -a|grep inet|grep -v 127.0.0.1|grep -v inet6|awk '{print $2}'|tr -d 'addr:'");
+    auto ip = exec("/sbin/ifconfig -a|grep inet|grep -v 127.0.0.1|grep -v inet6|awk '{print $2}'|tr -d 'addr:'",
+                   kExecQuickMs);
     return QString::fromStdString(ip.empty() ? "不可用" : ip);
 }
 
 QString NetworkSettings::getNetGateway() const {
-    auto gateway = exec("ip route | grep default | awk '{print $3}'");
+    auto gateway = exec("ip route | grep default | awk '{print $3}'", kExecQuickMs);
     return QString::fromStdString(gateway.empty() ? "不可用" : gateway);
 }
 
 QString NetworkSettings::getDNS() const {
-    auto dns = exec("grep \"nameserver\" /etc/resolv.conf | awk '{print $2}'");
+    auto dns = exec("grep \"nameserver\" /etc/resolv.conf | awk '{print $2}'", kExecQuickMs);
     return QString::fromStdString(dns.empty() ? "不可用" : dns);
 }
 
