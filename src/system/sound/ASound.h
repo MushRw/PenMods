@@ -14,8 +14,6 @@ class ASound : public QObject, public Singleton<ASound>, private Logger {
     Q_OBJECT
 
 public:
-    void onUiCompleted();
-
     struct VoiceDb {
         float min;
         float max;
@@ -34,7 +32,10 @@ private:
         std::string mContent;
     };
 
-    VoiceDb mVoiceDb{};
+    // 默认值取厂商标定值（外级 softvol -40.0 / -1.8）。
+    // 原来是 {0.0, -50.0} —— min > max，一旦有人把它写进 rootfs 上的
+    // /etc/asound.conf.<model> 就会得到反的音量曲线，且穿透 bind mount 不可回滚（SD-06）。
+    VoiceDb mVoiceDb{-40.0f, -1.8f};
 
     bool _resetConfig();
 

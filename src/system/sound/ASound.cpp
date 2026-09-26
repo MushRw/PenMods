@@ -6,7 +6,6 @@
 
 #include "ASound.h"
 
-#include "common/Event.h"
 #include "common/Utils.h"
 #include "common/util/System.h"
 
@@ -14,12 +13,12 @@ namespace mod {
 
 ASound::ASound() : Logger("ASound") {
 
-    mVoiceDb = {0.0, -50.0};
-
-    connect(&Event::getInstance(), &Event::uiCompleted, this, &ASound::onUiCompleted);
+    // 这里不再连 Event::uiCompleted。
+    // AntiEmbs::onUiCompleted 在同一信号上会 emit lowVoiceModeChanged() → setDb()，
+    // 而 ASound 只是再写一遍刚被写过、内容完全相同的同一个文件：开机 3 次多余 popen
+    // （get_pcba_version + remount rw + remount ro）、2 次多余的 flash 截断写、
+    // 1 轮多余的 rootfs remount，纯冗余（SD-05）。
 }
-
-void ASound::onUiCompleted() { setDb(mVoiceDb); }
 
 bool ASound::setDb(VoiceDb val) {
     mVoiceDb = val;
@@ -29,7 +28,17 @@ bool ASound::setDb(VoiceDb val) {
 ASound::VoiceDb ASound::getDb() { return mVoiceDb; }
 
 bool ASound::_resetConfig() {
-    auto cfg     = _getConfig();
+    auto cfg = _getConfig();
+    // 机型不在匹配表里（现网会有 Dictpen2.0_V0 与 unkown_V?）：**宁可不写，也不能用自写的
+    // "default" 覆盖厂商的 asound.conf**。那份自写内容只有厂商版的 0.38 相似度，会把
+    // capture.pcm 从 hw:0,1 改成 plug/hw:0,0（录音采集链路）、playback.pcm 从 plug_ply
+    // 改成 rk_eqdrc，并丢掉 pcm.dmixer / 2mic / ana_phone / softvol_cap / fake_jack* 等
+    // 14 个块；更糟的是 /etc/asound.conf 是 /userdata/cfg/asound.conf 的 bind mount，
+    // 改动会穿透到可写分区、重启也回不去（SD-01）。
+    if (cfg.mPath.empty() || cfg.mContent.empty()) {
+        warn("No asound configuration matched this device, keep the vendor one untouched.");
+        return false;
+    }
     auto content = QString::fromStdString(cfg.mContent)
                        .replace("{mindb}", QString::number(mVoiceDb.min, 'f', 1))
                        .replace("{maxdb}", QString::number(mVoiceDb.max, 'f', 1))
@@ -37,23 +46,42 @@ bool ASound::_resetConfig() {
     // cfg.mPath 是 rootfs 上的 /etc/asound.conf.<model>：只在真正写文件的这段
     // 时间把 / 临时放开为可写，写完还原（原来是开机就整段会话保持 rw）。
     const bool wasWritable = util::isRootFileSystemWritable();
-    util::setRootFileSystemWritable(true);
-    std::ofstream ofile(cfg.mPath);
-    if (!ofile.good()) {
-        util::setRootFileSystemWritable(wasWritable);
+    if (!util::setRootFileSystemWritable(true)) {
+        error("Failed to remount / writable, abort writing asound configuration.");
         return false;
     }
-    ofile << content;
-    ofile.close();
-    ofile.open("/etc/asound.conf");
-    if (!ofile.good()) {
-        util::setRootFileSystemWritable(wasWritable);
+
+    bool ok = true;
+    {
+        std::ofstream ofile(cfg.mPath);
+        if (!ofile.good()) {
+            error("Failed to open {} for writing.", cfg.mPath);
+            ok = false;
+        } else {
+            ofile << content;
+            ofile.close();
+        }
+    }
+    if (ok) {
+        // /etc/asound.conf 是指向 /userdata/cfg/asound.conf 的 bind mount，本身可写；
+        // 与厂商自己的做法一致，两个文件写同一份内容。
+        std::ofstream ofile("/etc/asound.conf");
+        if (!ofile.good()) {
+            error("Failed to open /etc/asound.conf for writing.");
+            ok = false;
+        } else {
+            ofile << content;
+            ofile.close();
+        }
+    }
+
+    // 无论写入成败都必须把 / 还原。归还失败 = rootfs 停在 rw（本设备唯一"改不坏"的保险
+    // 失效），这里必须让调用方看得见，不能像以前那样丢弃返回值然后 return true（SD-03）。
+    if (!util::setRootFileSystemWritable(wasWritable)) {
+        error("Failed to restore rootfs mount state (wasWritable={}). / may be left writable!", wasWritable);
         return false;
     }
-    ofile << content;
-    ofile.close();
-    util::setRootFileSystemWritable(wasWritable);
-    return true;
+    return ok;
 }
 
 std::string ASound::_getRawConfigure(const char* model) {
@@ -1063,89 +1091,16 @@ pcm.2mic
     type plug
     slave.pcm "multi_2"
 })";
-    case H("default"):
     default:
-        return R"(defaults.pcm.rate_converter "speexrate_medium"
-pcm.!default
-{
-    type asym
-    playback.pcm "rk_eqdrc"
-#    playback.pcm {
-#        type plug
-#        slave.pcm "rk_eqdrc"
-#        #slave.pcm "hw:0,0"
-#	#slave.pcm "bluealsa:HCI=hci0,PROFILE=a2dp,DEV=C9:50:76:23:68:BB"
-#    }
-    capture.pcm {
-        type plug
-        slave.pcm "hw:0,0"
-    #slave.pcm "bluealsa:HCI=hci0,PROFILE=a2dp,DEV=C9:50:76:23:68:BB"
-    }
-}
-
-pcm.playback {
-    type dmix
-    ipc_key 5978293 # must be unique for all dmix plugins!!!!
-    ipc_key_add_uid yes
-    slave {
-        pcm "hw:0,0"
-        channels 2
-        format S16_LE
-        rate 48000
-        # period_size 1024
-        # buffer_size 4096
-    }
-    bindings {
-        0 0
-        1 1
-    }
-}
-
-pcm.dig_hp {
-    type plug
-    slave.pcm "hw:1,0"
-}
-
-pcm.rk_eqdrc {
-    type plug
-    slave {
-        pcm {
-            type softvol
-            slave.pcm "ladspa_plug"
-            control {
-                name "Master Playback Volume"
-                card 0
-            }
-            min_dB {mindb}
-            max_dB {maxdb}
-            resolution 256
-        }
-        channels 2
-        format S16_LE
-        rate 48000
-    }
-}
-
-pcm.ladspa_play {
-    type ladspa
-    # slave.pcm "hw:0,0"
-    slave.pcm "plug:playback"
-    path "/usr/share/alsa/"
-    playback_plugins [{
-        label eq_drc_stereo
-            input {
-                controls [0]
-            }
-    }]
-}
-
-pcm.ladspa_plug {
-    type plug
-    slave {
-        pcm "ladspa_play"
-    }
-}
-)";
+        // 以前这里返回一份自写的 75 行 "default" 配置，用来覆盖"型号不在匹配表"的
+        // 设备（现网确实存在 Dictpen2.0_V0 与 unkown_V?）。那份内容与厂商版相似度只有
+        // 0.38，会把 capture.pcm 从 hw:0,1 改成 plug/hw:0,0（录音采集链路）、
+        // playback.pcm 从 plug_ply 改成 rk_eqdrc，并丢掉 pcm.dmixer / 2mic /
+        // ana_phone / softvol_cap / fake_jack* 等 14 个块；而 /etc/asound.conf 是
+        // /userdata/cfg/asound.conf 的 bind mount，改动会穿透到可写分区且重启回不去。
+        // 已改为"宁可不写，也不覆盖厂商文件"（SD-01）。
+        warn("No built-in asound configuration for model '{}'.", model);
+        return "";
     }
 }
 
@@ -1169,7 +1124,10 @@ ASound::Config ASound::_getConfig() {
         return {"/etc/asound.conf.VExam", _getRawConfigure("Exam")};
     }
     warn("Unable to find a matching asound configuration file for this pcba({}).", pcba);
-    return {"/etc/asound.conf", _getRawConfigure("default")};
+    // 返回空表示"没有匹配的配置"：调用方据此放弃写入，保留厂商原文件（SD-01）。
+    // 这里以前返回 {"/etc/asound.conf", _getRawConfigure("default")}，等于用 75 行的
+    // 自写内容整体覆盖厂商 176 行 / 21 个定义块的文件。
+    return {"", ""};
 }
 
 } // namespace mod
