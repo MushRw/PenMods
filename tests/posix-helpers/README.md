@@ -49,6 +49,24 @@ CI 上跑的是宿主内核 + `tmpfs`。推到真机跑时用的是真实的定�
 （`data=ordered`），`fsync` / `rename` 的持久化语义才算数。原子替换那一节在真机上过，
 才算真的验证了"掉电不会留下半个 `/etc/shadow`"。
 
+⚠️ **但设备的 `/tmp` 是 tmpfs**，默认跑法测不到上面那件事。真机上要显式把临时目录
+指到真实分区：
+
+```sh
+PENMODS_TEST_TMPDIR=/userdata /tmp/posix_helpers_test_aarch64
+```
+
+否则第 8~11 节跑的还是 tmpfs，跟 CI 没区别。**两个都跑一遍**才有意义：默认跑法证明
+逻辑对，`/userdata` 跑法证明在真正要保护的文件系统上也对。
+
+⚠️ 因此测试必须**自己清理**临时目录（第 15 节）。早期版本没有清理逻辑，在
+`PENMODS_TEST_TMPDIR=/userdata` 下每次跑完都永久留下一个装着 256KB 文件的新目录
+—— 那可是用户数据分区。真机跑完顺手确认一下：
+
+```sh
+ls -d /userdata/penmods-posix-*   # 期望无输出
+```
+
 ## 真机上不会测到的部分
 
 `_getRandomString` 之外的加密部分（`crypt()` 生成的 `$6$` 散列能否被 `sshd` 接受）
