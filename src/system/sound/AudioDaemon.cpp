@@ -80,12 +80,14 @@ AudioDaemon::AudioDaemon() : Logger("AudioDaemon") {
 // ========== 引用计数接口 ==========
 
 int AudioDaemon::acquire(AudioSource source) {
-    if (!mEnabled) {
-        info("acquire({}) 忽略（daemon 未启用）", sourceToString(source));
-        return mRefCount;
-    }
+    // PM-04：计数（mRefCount / mSourceRefCounts / 锁文件）在任何 enabled 状态下都必须
+    // 对称维护——它们记录的是"谁在用音频"这一事实，与守护开关无关。此前 disabled 时
+    // acquire 不加、release 不减，一旦运行中关闭 daemon（setEnabled(false)），宿主侧
+    // releaseAudio() 的 while 循环永远等不到归零，UI 线程无限自旋、设备假死。
+    // 仅"主动打开音频输出"这个物理副作用仍只在启用时执行（禁用时输出由宿主自行管理）。
+    const bool wasIdle   = (mRefCount == 0 && mState == AudioDaemonState::IDLE);
+    const bool needsOpen = mEnabled && wasIdle;
 
-    bool needsOpen      = (mRefCount == 0 && mState == AudioDaemonState::IDLE);
     int& sourceRefCount = mSourceRefCounts[_sourceIndex(source)];
 
     // 每个 source 的首个引用持有对应锁文件，避免重复 acquire 被一次 release 提前解锁。
@@ -116,11 +118,8 @@ int AudioDaemon::acquire(AudioSource source) {
 }
 
 int AudioDaemon::release(AudioSource source) {
-    if (!mEnabled) {
-        info("release({}) 忽略（daemon 未启用）", sourceToString(source));
-        return mRefCount;
-    }
-
+    // PM-04：release 不再有 !mEnabled 早退——它只做簿记（计数/锁文件），无任何物理副作用，
+    // 必须无条件执行以与 acquire 对称。daemon 禁用时宿主仍可能持有此前启用期 acquire 的引用。
     int& sourceRefCount = mSourceRefCounts[_sourceIndex(source)];
     if (sourceRefCount <= 0) {
         warn("release({}) 调用时该 source 的引用已为 0！", sourceToString(source));

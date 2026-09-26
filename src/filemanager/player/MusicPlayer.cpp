@@ -245,7 +245,11 @@ AudioSequence MusicPlayer::getCurrentAudioSequence() {
 void MusicPlayer::releaseAudio() {
     info("QML 请求释放 MUSIC 引用");
     auto& audioDaemon = mod::AudioDaemon::getInstance();
-    while (audioDaemon.sourceRefCount(AudioSource::MUSIC) > 0) {
+    // PM-04：快照计数后精确释放 N 次。此前 while 每轮重查 sourceRefCount，
+    // 而 AudioDaemon::release 在 daemon 被运行中禁用时曾拒绝递减 → 循环永不终止，
+    // UI 线程无限自旋、设备假死。快照写法即使 release 再出回归也必然终止。
+    int refs = audioDaemon.sourceRefCount(AudioSource::MUSIC);
+    while (refs-- > 0) {
         audioDaemon.release(AudioSource::MUSIC);
     }
 }

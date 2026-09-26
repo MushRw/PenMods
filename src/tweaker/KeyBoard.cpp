@@ -63,7 +63,16 @@ void KeyBoard::setAutoSendScanConfig(bool value) {
 } // namespace mod
 
 static bool shouldBlockScan() {
-    bool inputPageShowing = PEN_CALL(bool, "_ZNK7YGlobal16inputPageShowingEv", void*)(mod::YPointer<YGlobal>::getInstance());
+    // KB-14：这是扫码热路径（4 个 hook 每次扫码各走一遍）。原实现每次都 PEN_CALL →
+    // SymDB::query：QString::fromUtf8 堆分配 + QHash 查找 ×4。符号地址用函数局部静态
+    // 只解析一次；顺带补 null 守卫（原实现符号缺失时会把 nullptr 当函数调用）。
+    // 注意：这里读宿主 YGlobal::inputPageShowing（全树几十处 QML 直接赋值的权威状态），
+    // 不是 KeyBoard::m_inputPageShowing（仅由 YInputPage 维护），两者语义不同，不可互换。
+    using InputPageShowingFn = bool (*)(void*);
+    static InputPageShowingFn s_fn = reinterpret_cast<InputPageShowingFn>(
+        mod::SymDB::getInstance().query("_ZNK7YGlobal16inputPageShowingEv"));
+    void* global = mod::YPointer<YGlobal>::getInstance();
+    bool  inputPageShowing = (s_fn && global) ? s_fn(global) : false;
     return inputPageShowing || mod::KeyBoard::getInstance().autoSendScan();
 }
 
