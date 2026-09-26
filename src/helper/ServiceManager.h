@@ -73,8 +73,6 @@ private:
     bool mSshAutoRun;
 
     void _passAdbVerification();
-
-    std::string _getRandomString(uint32 length);
 };
 
 } // namespace mod
