@@ -1,0 +1,82 @@
+name: exec kernel test
+
+# 只测 `mod::exec()` 这一个内核。它是所有 shell 调用点的公共依赖（其中不少在开机
+# 路径和 UI 线程上），而它的关键分支 —— 超时、子进程已退出但后台孙进程还占着管道、
+# 启动失败 —— 在正常使用中根本走不到，只能主动构造。
+#
+# 为什么不做成 xmake 的一个 target：这份测试不链接 Qt、不参与 `libPenMods.so` 的构建，
+# 就是一个几秒钟的小程序；而它要跑的地方（宿主机 / qemu / 真机）都跟 Qt 无关。
+# 被测代码由 tests/exec-kernel/extract.py 从 src/common/Utils.{h,cpp} **原样抽取**，
+# 不是手抄副本，所以源码漂移会立刻在这里暴露。
+#
+# 注意 `on.push` 不限定分支：`paths` 已经把触发面收得很窄（只有内核本身或测试文件
+# 变了才跑），任何分支上动了内核都该立刻验证。
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/common/Utils.h'
+      - 'src/common/Utils.cpp'
+      - 'tests/exec-kernel/**'
+      - '.github/workflows/exec-kernel-test.yaml'
+  pull_request:
+    paths:
+      - 'src/common/Utils.h'
+      - 'src/common/Utils.cpp'
+      - 'tests/exec-kernel/**'
+
+jobs:
+  native:
+    name: 原生 x86_64（全部断言有效）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 从源码抽取内核
+        run: python3 tests/exec-kernel/extract.py --tree .
+
+      - name: 编译
+        run: |
+          g++ -std=c++20 -O1 -g -Wall -Wextra -pthread \
+            -I tests/exec-kernel/build \
+            tests/exec-kernel/main.cpp \
+            -o tests/exec-kernel/build/exec_test_native
+
+      - name: 运行
+        run: ./tests/exec-kernel/build/exec_test_native
+
+  aarch64:
+    name: aarch64 静态（qemu 冒烟 + 产出真机可用的二进制）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装交叉编译器与 qemu
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq g++-aarch64-linux-gnu qemu-user-static
+
+      - name: 从源码抽取内核
+        run: python3 tests/exec-kernel/extract.py --tree .
+
+      # 必须 `-static`：真机的 glibc 是 2.27（见 build.yaml 里的 aarch64-linux-gnu.2.27），
+      # 而 runner 上 gcc 链接出来的动态可执行要求 glibc 2.38+，真机根本起不来。
+      - name: 交叉编译（全静态）
+        run: |
+          aarch64-linux-gnu-g++ -std=c++20 -O1 -g -static -pthread \
+            -I tests/exec-kernel/build \
+            tests/exec-kernel/main.cpp \
+            -o tests/exec-kernel/build/exec_test_aarch64
+          file tests/exec-kernel/build/exec_test_aarch64
+          ls -la tests/exec-kernel/build/exec_test_aarch64
+
+      - name: qemu 冒烟（指令集侧）
+        run: qemu-aarch64-static ./tests/exec-kernel/build/exec_test_aarch64
+
+      - name: 上传真机可用的二进制
+        uses: actions/upload-artifact@v4
+        with:
+          name: exec-kernel-test-aarch64-${{ github.sha }}
+          path: tests/exec-kernel/build/exec_test_aarch64
+          retention-days: 7
