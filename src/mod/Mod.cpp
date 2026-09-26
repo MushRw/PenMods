@@ -9,6 +9,7 @@
 #include "mod/PlayerInstaller.h"
 #include "helper/AvatarProvider.h"
 
+#include "mod/Config.h"
 #include "wallpaper/WallpaperManager.h"
 
 #include "base/YPointer.h"
@@ -33,6 +34,11 @@ namespace mod {
 Mod::Mod() {
 
     spdlog::info("[Mod] 构造函数开始");
+
+    // 合并上游：语音聊天开关
+    const auto aiConfig = Config::getInstance().read("ai");
+    mVoiceChatEnabled  = aiConfig.value("speech_assistant", false);
+
     connect(&Event::getInstance(), &Event::uiCompleted, this, &Mod::onUiCompleted);
     connect(&Event::getInstance(), &Event::beforeUiInitialization, [this](QQuickView& view, QQmlContext* context) {
         mCaptureWindow = &view;
@@ -176,6 +182,29 @@ void Mod::onCaptureTick() {
     }
 }
 
+bool Mod::getVoiceChatEnabled() const { return mVoiceChatEnabled; }
+
+void Mod::setVoiceChatEnabled(bool enabled) {
+    if (mVoiceChatEnabled == enabled)
+        return;
+
+    auto aiConfig = Config::getInstance().read("ai");
+    aiConfig["speech_assistant"] = enabled;
+    if (!Config::getInstance().write("ai", std::move(aiConfig)))
+        return;
+    mVoiceChatEnabled = enabled;
+    emit voiceChatEnabledChanged();
+}
+
+QString Mod::getPendingVoiceChatText() const { return mPendingVoiceChatText; }
+
+void Mod::setPendingVoiceChatText(const QString& text) {
+    if (mPendingVoiceChatText == text)
+        return;
+    mPendingVoiceChatText = text;
+    emit pendingVoiceChatTextChanged();
+}
+
 void Mod::onUiCompleted() const {
 
     // AutoFix vendor_storage.
@@ -273,8 +302,6 @@ PEN_HOOK(bool, license_verify) { return true; }
 
 #include "locker/Locker.h"
 
-#include "mod/Config.h"
-#include "mod/Mod.h"
 #include "mod/Updater.h"
 
 #include "recorder/AudioRecorder.h"

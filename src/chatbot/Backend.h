@@ -10,12 +10,15 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMap>
+#include <QMutex>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QObject>
 #include <QProcess>
 #include <QQueue>
+#include <QSet>
+#include <QThreadPool>
 #include <QTimer>
 #include <QVector>
 
@@ -28,17 +31,23 @@ namespace mod::chatbot {
 
 // 消息内容部分（多模态）
 struct MessagePart {
-    QString type;   // "text" | "image_url" | "input_audio"
-    QString text;   // type=text
-    QString url;    // type=image_url：HTTP URL 或 data:image/...;base64,...
-    QString data;   // type=input_audio：base64 音频数据
-    QString format; // type=input_audio：格式 (mp3/wav/ogg 等)
+    QString type;      // "text" | "image_url" | "input_audio"
+    QString text;      // type=text
+    QString url;       // type=image_url：HTTP URL 或 data:image/...;base64,...
+    QString data;      // type=input_audio：base64 音频数据
+    QString format;    // type=input_audio：格式 (mp3/wav/ogg 等)
+    QString localPath; // 持久化附件的绝对路径
+    QString name;      // 附件显示名称
+    QString mimeType;  // 附件 MIME 类型
+    QString language;  // 文本附件的语法语言
+    qint64  size = 0;  // 附件字节数
 };
 
 // 单条消息（纯文本或多模态）
 struct MessageData {
     QString              role;          // "user" | "assistant" | "system" | "tool"
     QString              content;       // 纯文本（无多模态时使用）
+    QString              reasoning;     // 模型推理摘要（不发送回 API）
     QVector<MessagePart> parts;         // 多模态内容（非空时优先于 content）
     QString              toolCallId;    // role=tool 时
     QString              toolCallsJson; // role=assistant 且有 tool_calls 时，原始 JSON 字符串
@@ -61,12 +70,14 @@ class ChatBot : public QObject, public Singleton<ChatBot>, private Logger {
     Q_PROPERTY(QString apiKey READ getApiKey WRITE setApiKey NOTIFY apiKeyChanged)
     Q_PROPERTY(QString apiEndpoint READ getApiEndpoint WRITE setApiEndpoint NOTIFY apiEndpointChanged)
     Q_PROPERTY(QString model READ getModel WRITE setModel NOTIFY modelChanged)
+    Q_PROPERTY(QString apiProtocol READ getApiProtocol NOTIFY apiProtocolChanged)
     Q_PROPERTY(qreal temperature READ getTemperature WRITE setTemperature NOTIFY temperatureChanged)
     Q_PROPERTY(QString defaultPrompt READ getDefaultPrompt WRITE setDefaultPrompt NOTIFY defaultPromptChanged)
     Q_PROPERTY(bool isStreaming READ getIsStreaming WRITE setIsStreaming NOTIFY isStreamingChanged)
     Q_PROPERTY(bool isAvailable READ isAvailable CONSTANT)
     Q_PROPERTY(QVariantList messages READ getMessages NOTIFY messagesChanged)
     Q_PROPERTY(QString currentSessionId READ getCurrentSessionId NOTIFY sessionSwitched)
+    Q_PROPERTY(QVariantMap apiCacheStats READ getApiCacheStats NOTIFY apiCacheStatsChanged)
 
     // AI 工具调用（Tavily 搜索 / Shell 执行）编译开关：
     // 默认构建不启用（xmake f --ai-tools=y 开启），代码保留但不会编译进产物。
@@ -78,9 +89,15 @@ class ChatBot : public QObject, public Singleton<ChatBot>, private Logger {
     Q_PROPERTY(bool capAudio READ getCapAudio NOTIFY activeModelCapabilitiesChanged)
     Q_PROPERTY(bool capToolCall READ getCapToolCall NOTIFY activeModelCapabilitiesChanged)
     Q_PROPERTY(bool capReasoning READ getCapReasoning NOTIFY activeModelCapabilitiesChanged)
+    Q_PROPERTY(bool capImageGeneration READ getCapImageGeneration NOTIFY activeModelCapabilitiesChanged)
 
-    Q_PROPERTY(QString proxyVisionModelId READ getProxyVisionModelId WRITE setProxyVisionModelId NOTIFY proxyVisionSettingsChanged)
-    Q_PROPERTY(QString proxyVisionPrompt READ getProxyVisionPrompt WRITE setProxyVisionPrompt NOTIFY proxyVisionSettingsChanged)
+    Q_PROPERTY(
+        QString proxyVisionModelId READ getProxyVisionModelId WRITE setProxyVisionModelId NOTIFY
+            proxyVisionSettingsChanged
+    )
+    Q_PROPERTY(
+        QString proxyVisionPrompt READ getProxyVisionPrompt WRITE setProxyVisionPrompt NOTIFY proxyVisionSettingsChanged
+    )
 
     Q_PROPERTY(bool tavilyEnabled READ getTavilyEnabled WRITE setTavilyEnabled NOTIFY tavilyConfigChanged)
     Q_PROPERTY(bool tavilyConfigured READ getTavilyConfigured NOTIFY tavilyConfigChanged)
@@ -88,8 +105,12 @@ class ChatBot : public QObject, public Singleton<ChatBot>, private Logger {
     Q_PROPERTY(bool shellToolEnabled READ getShellToolEnabled WRITE setShellToolEnabled NOTIFY shellToolConfigChanged)
 
     Q_PROPERTY(
-        bool mathRenderEnabled READ getMathRenderEnabled WRITE setMathRenderEnabled NOTIFY mathRenderConfigChanged)
+        bool mathRenderEnabled READ getMathRenderEnabled WRITE setMathRenderEnabled NOTIFY mathRenderConfigChanged
+    )
     Q_PROPERTY(QString mathServerPath READ getMathServerPath WRITE setMathServerPath NOTIFY mathRenderConfigChanged)
+    Q_PROPERTY(
+        QString bubbleRenderMode READ getBubbleRenderMode WRITE setBubbleRenderMode NOTIFY bubbleRenderModeChanged
+    )
 
     /// 保证数学公式渲染服务器在跑：没在跑就拉起来，已在跑就什么都不做。
     ///
@@ -115,11 +136,14 @@ public:
     Q_INVOKABLE void    clearHistory();
     Q_INVOKABLE void    saveMessages();
     Q_INVOKABLE QString markdownToHtml(const QString& markdown, const QString& linkColor = QString());
+    Q_INVOKABLE void    parseMarkdownAsync(const QString& markdown, const QString& requestId);
+    Q_INVOKABLE void    cancelMarkdownParse(const QString& requestId);
     Q_INVOKABLE void    truncateHistory(int index);
     Q_INVOKABLE void    editMessage(int index, const QString& newContent);
     Q_INVOKABLE void    deleteMessage(int index);
     Q_INVOKABLE void    regenerateMessage(int index);
     Q_INVOKABLE void    cancelRequest();
+    Q_INVOKABLE void    resetApiCacheStats();
 
     // Tool Call 接口
     Q_INVOKABLE void submitToolResult(const QString& toolCallId, const QString& toolName, const QString& result);
@@ -166,16 +190,19 @@ public:
     QString      getApiKey() const;
     QString      getApiEndpoint() const;
     QString      getModel() const;
+    QString      getApiProtocol() const;
     qreal        getTemperature() const;
     QString      getDefaultPrompt() const;
     bool         getIsStreaming() const;
     QVariantList getMessages() const;
+    QVariantMap  getApiCacheStats() const;
 
     bool getCapText() const { return m_capText; }
     bool getCapVision() const { return m_capVision; }
     bool getCapAudio() const { return m_capAudio; }
     bool getCapToolCall() const { return m_capToolCall; }
     bool getCapReasoning() const { return m_capReasoning; }
+    bool getCapImageGeneration() const { return m_capImageGeneration; }
 
     QString getProxyVisionModelId() const { return m_proxyVisionModelId; }
     void    setProxyVisionModelId(const QString& v);
@@ -191,8 +218,10 @@ public:
 
     bool    getMathRenderEnabled() const { return m_mathRenderEnabled; }
     QString getMathServerPath() const { return m_mathServerPath; }
+    QString getBubbleRenderMode() const { return m_bubbleRenderMode; }
     void    setMathRenderEnabled(bool v);
     void    setMathServerPath(const QString& path);
+    void    setBubbleRenderMode(const QString& mode);
 
     void setApiKey(const QString& key);
     void setApiEndpoint(const QString& endpoint);
@@ -205,18 +234,24 @@ signals:
     void messageReceived(const QString& content, bool isComplete = true);
     void streamStart();
     void streamChunk(const QString& content);
+    void reasoningChunk(const QString& content);
+    void markdownParsed(const QString& requestId, const QString& blocksJson);
     void streamEnd();
     void errorOccurred(const QString& error);
     void requestCancelled();
     // Tool Call 信号：toolCallsJson 为完整 tool_calls 数组的 JSON 字符串
     void toolCallReceived(const QString& toolCallsJson);
+    void imageAttachmentsReceived(const QVariantList& attachments);
+    void toolCallProgress(const QString& text, bool isComplete);
     void apiKeyChanged();
     void apiEndpointChanged();
     void modelChanged();
+    void apiProtocolChanged();
     void temperatureChanged();
     void defaultPromptChanged();
     void isStreamingChanged();
     void messagesChanged();
+    void apiCacheStatsChanged();
     void modelsChanged();
     void promptsChanged();
     void sessionsChanged();
@@ -236,6 +271,7 @@ signals:
     shellCommandFinished(const QString& toolCallId, bool success, const QString& summary, const QString& resultText);
     void toolBatchFlushed();
     void mathRenderConfigChanged();
+    void bubbleRenderModeChanged();
 
 private:
     friend Singleton<ChatBot>;
@@ -246,13 +282,18 @@ public:
 
 private:
     QNetworkAccessManager* m_networkManager;
+    QThreadPool            m_markdownPool;
+    QMutex                 m_markdownRequestsMutex;
+    QSet<QString>          m_markdownRequests;
     QList<QNetworkReply*>  m_activeReplies;
-    bool                   m_cancelled = false;
-    int                    m_requestSeq = 0;
+    bool                   m_cancelled        = false;
+    bool                   m_streamEndEmitted = false;
+    int                    m_requestSeq       = 0;
 
     QString m_apiKey;
     QString m_apiEndpoint;
     QString m_model;
+    QString m_apiProtocol = "chat_completions";
     qreal   m_temperature;
     QString m_defaultPrompt;
     bool    m_isStreaming;
@@ -261,12 +302,16 @@ private:
     json m_extraParams;
 
     // 当前活动模型的能力标志
-    bool m_capText        = true;
-    bool m_capVision      = false;
-    bool m_capAudio       = false;
-    bool m_capToolCall    = false;
-    bool m_capReasoning   = false;
-    int  m_maxContextSize = 0;
+    bool    m_capText                 = true;
+    bool    m_capVision               = false;
+    bool    m_capAudio                = false;
+    bool    m_capToolCall             = false;
+    bool    m_capReasoning            = false;
+    bool    m_capImageGeneration      = false;
+    bool    m_nativeWebSearchEnabled  = false;
+    QString m_nativeWebSearchProvider = "auto";
+    QString m_reasoningEffort;
+    int     m_maxContextSize = 0;
 
     QString m_proxyVisionModelId;
     QString m_proxyVisionPrompt = "请详细描述这张图片的内容。如果图片中有文字，请完整转录。";
@@ -297,19 +342,39 @@ private:
     // 将 MessageData 序列化为 OpenAI API 格式的 QJsonObject
     QJsonObject messageToJson(const MessageData& msg) const;
     // 将当前历史（加 system prompt）组装为 API messages 数组
-    QJsonArray buildApiMessages(const QVector<MessageData>& history,
-                                const QString&              userText,
-                                const QVector<MessagePart>& userParts = {});
+    QJsonArray buildApiMessages(
+        const QVector<MessageData>& history,
+        const QString&              userText,
+        const QVector<MessagePart>& userParts = {}
+    );
 
-    void makeApiRequest(const QJsonArray& messages, bool isRetry = false);
-    void handleNetworkReply(QNetworkReply* reply, bool isStream);
-    void abortActiveReplies();
+    // AI-01：isRetry 防重试风暴（重试排期捕获 m_requestSeq，到期不符自弃）
+    void       makeApiRequest(const QJsonArray& messages, bool isRetry = false);
+    void       handleNetworkReply(QNetworkReply* reply, bool isStream);
+    void       finishStream();
+    void       emitContentChunk(const QString& content);
+    void       flushEmbeddedContent();
+    void       recordApiUsage(const QJsonObject& usage);
+    bool       usesResponsesApi() const;
+    QJsonArray messagesToResponsesInput(const QJsonArray& messages) const;
+    void       abortActiveReplies();
 
     QString m_currentStreamBuffer;
+    QString m_currentReasoningBuffer;
+    QString m_embeddedContentBuffer;
+    bool    m_embeddedReasoningActive = false;
     QString m_responseBuffer;
     QByteArray m_sseBuffer; // 流式响应字节缓冲（按行解码，避免 UTF-8/分包问题）
     // 流式 tool_calls 累积缓冲（按 index 存储各工具调用的片段）
-    QMap<int, json> m_toolCallsBuffer;
+    QMap<int, json>    m_toolCallsBuffer;
+    QMap<QString, int> m_responseToolItemIndexes;
+    bool               m_serverToolCallActive = false;
+    QString            m_serverToolCallName;
+    quint64            m_cacheSampleCount  = 0;
+    quint64            m_totalInputTokens  = 0;
+    quint64            m_totalCachedTokens = 0;
+    quint64            m_lastInputTokens   = 0;
+    quint64            m_lastCachedTokens  = 0;
 
     // 请求重试（429/5xx 等瞬时错误）
     QJsonArray m_lastRequestMessages;
@@ -335,10 +400,12 @@ private:
     int     m_tavilyMaxResults = 5;
     bool    m_tavilyEnabled    = false;
 
-    void initTavily();
-    void injectToolDefinitions(QJsonObject& requestBody);
-    void dispatchToolCalls(const QString& toolCallsJson);
-    void executeTavilySearch(const QString& toolCallId, const QString& query);
+    void                 initTavily();
+    void                 injectToolDefinitions(QJsonObject& requestBody);
+    QVector<MessagePart> persistGeneratedImages(const QJsonArray& output);
+    QVariantList         attachmentVariants(const QVector<MessagePart>& parts) const;
+    void                 dispatchToolCalls(const QString& toolCallsJson);
+    void                 executeTavilySearch(const QString& toolCallId, const QString& query);
 
     // Shell tool
     bool        m_shellToolEnabled   = false;
@@ -356,8 +423,8 @@ private:
     struct ActiveShellExec {
         QString   toolCallId;
         QString   command;
-        QProcess* process    = nullptr;
-        QTimer*   timer      = nullptr;
+        QProcess* process = nullptr;
+        QTimer*   timer   = nullptr;
         QString   stdoutBuf;
         QString   stderrBuf;
     };
@@ -372,6 +439,7 @@ private:
     // 数学公式渲染
     bool    m_mathRenderEnabled = false;
     QString m_mathServerPath;
+    QString m_bubbleRenderMode = "full";
 
     void initMathRender();
 
@@ -387,14 +455,18 @@ private:
     void submitToolResultBatched(const QString& toolCallId, const QString& toolName, const QString& result);
     void tryFlushToolBatch();
 
-    void callVisionProxy(const QString&              message,
-                         const QVector<MessagePart>& parts,
-                         const QString&              sessionId,
-                         int                         requestSeq);
-    void finishMediaMessage(const QString&              message,
-                            const QVector<MessagePart>& parts,
-                            const QString&              effectiveMessage,
-                            const QString&              sessionId);
+    void callVisionProxy(
+        const QString&              message,
+        const QVector<MessagePart>& parts,
+        const QString&              sessionId,
+        int                         requestSeq
+    );
+    void finishMediaMessage(
+        const QString&              message,
+        const QVector<MessagePart>& parts,
+        const QString&              effectiveMessage,
+        const QString&              sessionId
+    );
 };
 
 } // namespace mod::chatbot

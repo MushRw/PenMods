@@ -8,6 +8,7 @@
 
 #include "common/Event.h"
 #include "mod/Config.h"
+#include "system/input/ScreenManager.h"
 
 #include "base/YPointer.h"
 
@@ -60,7 +61,34 @@ void KeyBoard::setAutoSendScanConfig(bool value) {
     }
 }
 
+bool KeyBoard::startVoiceInput(QObject* speechManager) {
+    auto* startAsrRecord = PEN_SYM("_ZN14YSpeechManager14startAsrRecordEv");
+    auto* setAsrResult   = PEN_SYM("_ZN14YSpeechManager12setAsrResultERK7QString");
+    if (speechManager == nullptr || startAsrRecord == nullptr || setAsrResult == nullptr) return false;
+
+    const QString emptyResult;
+    reinterpret_cast<void (*)(void*, const QString&)>(setAsrResult)(speechManager, emptyResult);
+
+    m_startingVoiceInput = true;
+    reinterpret_cast<void (*)(void*)>(startAsrRecord)(speechManager);
+    m_startingVoiceInput = false;
+    return true;
+}
+
+bool KeyBoard::stopVoiceInput(QObject* speechManager) {
+    auto* stopAsrRecord = PEN_SYM("_ZN14YSpeechManager13stopAsrRecordEv");
+    if (speechManager == nullptr || stopAsrRecord == nullptr) return false;
+
+    reinterpret_cast<void (*)(void*)>(stopAsrRecord)(speechManager);
+    return true;
+}
+
 } // namespace mod
+
+PEN_HOOK(uint64, _ZN7YGlobal14showSpeechPageEv, uint64 self) {
+    if (mod::KeyBoard::getInstance().isStartingVoiceInput()) return 0;
+    return origin(self);
+}
 
 static bool shouldBlockScan() {
     // KB-14：这是扫码热路径（4 个 hook 每次扫码各走一遍）。原实现每次都 PEN_CALL →
@@ -85,6 +113,12 @@ PEN_HOOK(bool, _ZN11YSystemBase12onScanFinishERK7QStringi, uint64 self, QString 
 }
 
 PEN_HOOK(uint64, _ZN11YSystemBase8ocrStartEv, uint64 self, uint64 a2, uint64 a3, uint64 a4, uint64 a5) {
+    mod::ScreenManager::getInstance().setSystemBase(reinterpret_cast<YSystemBase*>(self));
+    const bool isButtonRelease =
+        PEN_CALL(bool, "_ZNK11YSystemBase15isButtonReleaseEv", void*)(reinterpret_cast<void*>(self));
+    if (!isButtonRelease) {
+        emit mod::Event::getInstance().ocrStarted();
+    }
     if (shouldBlockScan()) {
         return false;
     }

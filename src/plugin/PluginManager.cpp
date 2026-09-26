@@ -176,11 +176,8 @@ void PluginManager::scanAndLoadAll() {
         }
     }
 
-    // 清理 QML 引擎缓存以加载更新后的插件
-    if (m_engine) {
-        m_engine->clearComponentCache();
-        m_engine->trimComponentCache();
-    }
+    // 合并上游（86acce8）：上游直接删除了扫描后的 clearComponentCache/trimComponentCache
+    // （每次扫描全量清缓存会让 QML 重新编译，得不偿失；组件缓存随页面生命周期自然更替）。
 
     emit pluginsChanged();
 }

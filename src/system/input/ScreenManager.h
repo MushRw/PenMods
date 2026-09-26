@@ -7,18 +7,21 @@
 #pragma once
 
 #include "base/YEnum.h"
+#include "base/YPointer.h"
 
 #include "common/Utils.h"
 
 #include "mod/Config.h"
+
+#include <QTimer>
 
 namespace mod {
 
 class ScreenManager : public QObject, public Singleton<ScreenManager> {
     Q_OBJECT
 
-    Q_PROPERTY(QString autoSleepDuration READ getAutoSleepDurationStr WRITE setAutoSleepDurationStr NOTIFY
-                   autoSleepDurationChanged);
+    Q_PROPERTY(QString autoShutdownDuration READ getAutoShutdownDurationStr WRITE setAutoShutdownDurationStr NOTIFY
+                   autoShutdownDurationChanged);
     Q_PROPERTY(int intelSleep READ getIntelSleep WRITE setIntelSleep NOTIFY intelSleepChanged);
     Q_PROPERTY(bool intelSleepAudioLock READ getIntelSleepAudioLock WRITE setIntelSleepAudioLock NOTIFY
                    intelSleepAudioLockChanged);
@@ -26,6 +29,7 @@ class ScreenManager : public QObject, public Singleton<ScreenManager> {
 
 public:
     QString getAutoSleepDurationStr() const;
+    QString getAutoShutdownDurationStr() const;
 
     int getAutoSleepDuration() const;
 
@@ -36,6 +40,7 @@ public:
     bool getLockScreen() const;
 
     void setAutoSleepDurationStr(const QString&);
+    void setAutoShutdownDurationStr(const QString&);
 
     void setAutoSleepDuration(int);
 
@@ -57,6 +62,9 @@ public:
     void onInPlayerPageChanged(bool);
 
     void onAudioDaemonStateChanged();
+    void setSystemBase(YSystemBase* systemBase);
+    void resetInactivityTimer();
+    void requestPowerOff();
 
     // 所有"是否禁止息屏"的判定收敛到这一个出口（KB-04/05）。
     void updateScreenOff();
@@ -64,6 +72,7 @@ public:
 signals:
 
     void autoSleepDurationChanged();
+    void autoShutdownDurationChanged();
 
     void intelSleepChanged();
 
@@ -79,10 +88,14 @@ private:
     json        mCfg;
 
     int  mAutoSleepDuration;
+    int  mAutoShutdownDuration{0};
+    QTimer mInactivityTimer;
     bool mIntelSleep;
     bool mIntelSleepAudioLock;
     bool mLockScreen;
     bool mAudioLockActive = false;
+
+    YSystemBase* mSystemBase = nullptr;
 
     // Tmp saving;
     bool      mLrcShowing      = false;

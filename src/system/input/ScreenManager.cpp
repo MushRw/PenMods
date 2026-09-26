@@ -15,6 +15,7 @@
 #include "common/Event.h"
 
 #include <QQmlContext>
+#include <QDebug>
 
 namespace mod {
 
@@ -23,6 +24,7 @@ ScreenManager::ScreenManager() {
     mCfg = Config::getInstance().read(mClassName);
 
     mAutoSleepDuration    = mCfg["sleep_duration"];
+    mAutoShutdownDuration  = mCfg.value("shutdown_duration", 0);
     mIntelSleep           = mCfg["intel_sleep"];
     mIntelSleepAudioLock  = mCfg["intel_sleep_audio_lock"];
     mLockScreen           = mCfg.value("lock_screen", true);
@@ -31,7 +33,17 @@ ScreenManager::ScreenManager() {
         context->setContextProperty("screenManager", this);
     });
 
+    connect(&Event::getInstance(), &Event::currentPageIndexChanged, this, [this](int) {
+        resetInactivityTimer();
+    });
+    connect(&Event::getInstance(), &Event::ocrStarted, this, [this]() {
+        resetInactivityTimer();
+    });
+
     connect(&AudioDaemon::getInstance(), &AudioDaemon::stateChanged, this, &ScreenManager::onAudioDaemonStateChanged);
+    mInactivityTimer.setSingleShot(true);
+    connect(&mInactivityTimer, &QTimer::timeout, this, &ScreenManager::requestPowerOff);
+    if (mAutoShutdownDuration > 0) mInactivityTimer.start(mAutoShutdownDuration * 1000);
 }
 
 void ScreenManager::onPlayStateChanged(PlayState state) {
@@ -54,6 +66,10 @@ void ScreenManager::reportAction(const QString& action) {
     // KB-04/05：所有"是否禁止息屏"的判定收敛到 updateScreenOff() 单一真源，
     // 不再在各个回调里各自 pause/resume（那样会互相抵消，见 KB-05）。
     // 智能休眠开关在 updateScreenOff() 内部统一处理。
+    // 合并上游：动态动作视为用户活动，重置无操作计时（注意：不能像上游那样
+    // 在 getIntelSleep()==false 时提前 return——标志位必须始终更新，否则之后
+    // 开启智能休眠时会拿到过期状态，正是 KB-04/05 修过的那类 bug）。
+    resetInactivityTimer();
     switch (H(action.toLocal8Bit().data())) {
     case H("wordbook_cardview_enter"):
         mInWordbookCard = true;
@@ -70,6 +86,46 @@ void ScreenManager::reportAction(const QString& action) {
         onLrcShowChanged(false);
         break;
     }
+}
+
+QString ScreenManager::getAutoShutdownDurationStr() const {
+    if (mAutoShutdownDuration == 0) return "关闭";
+    return QString::number(mAutoShutdownDuration / 60) + "分钟";
+}
+
+void ScreenManager::setAutoShutdownDurationStr(const QString& str) {
+    int duration = 0;
+    if (str != "关闭") {
+        duration = str.left(str.indexOf("分钟")).toInt() * 60;
+    }
+    if (duration == mAutoShutdownDuration) return;
+    mAutoShutdownDuration = duration;
+    mCfg["shutdown_duration"] = duration;
+    WRITE_CFG;
+    resetInactivityTimer();
+    emit autoShutdownDurationChanged();
+}
+
+void ScreenManager::setSystemBase(YSystemBase* systemBase) {
+    if (mSystemBase == nullptr && systemBase != nullptr) {
+        mSystemBase = systemBase;
+        qInfo() << "captured YSystemBase instance";
+    }
+}
+
+void ScreenManager::resetInactivityTimer() {
+    if (mAutoShutdownDuration > 0) mInactivityTimer.start(mAutoShutdownDuration * 1000);
+    else mInactivityTimer.stop();
+}
+
+void ScreenManager::requestPowerOff() {
+    qInfo() << "inactivity shutdown timer expired";
+    if (mSystemBase == nullptr) {
+        qWarning() << "cannot power off: YSystemBase is not captured";
+        return;
+    }
+    qInfo() << "calling YSystemBase::powerOff()";
+    PEN_CALL(void*, "_ZN11YSystemBase8powerOffEv", void*)(mSystemBase);
 }
 
 QString ScreenManager::getAutoSleepDurationStr() const {
@@ -175,6 +231,11 @@ void ScreenManager::rtSetAutoScreenOff(bool val) {
 } // namespace mod
 
 // MusicPlayer
+PEN_HOOK(void*, _ZN11YSystemBase16onPowerLongPressEv, void* self) {
+    mod::ScreenManager::getInstance().setSystemBase(reinterpret_cast<YSystemBase*>(self));
+    return origin(self);
+}
+
 PEN_HOOK(uint64, _ZN7YGlobal27isInPlayerCenterPageChangedEv, uint64 self, uint64 a2, uint64 a3, uint64 a4, uint64 a5) {
     bool isInPage = PEN_CALL(bool, "_ZNK7YGlobal20isInPlayerCenterPageEv", uint64)(self);
     mod::ScreenManager ::getInstance().onInPlayerPageChanged(isInPage);
@@ -182,6 +243,7 @@ PEN_HOOK(uint64, _ZN7YGlobal27isInPlayerCenterPageChangedEv, uint64 self, uint64
     if (!isInPage) {
         mod::filemanager::MusicPlayer::getInstance().cleanupTempSymlinks();
     }
+    mod::ScreenManager::getInstance().resetInactivityTimer();
     return origin(self, a2, a3, a4, a5);
 }
 
@@ -194,7 +256,7 @@ PEN_HOOK(
     uint64 a4,
     uint64 a5
 ) {
-    mod::ScreenManager ::getInstance().onPlayStateChanged(
+    mod::ScreenManager::getInstance().onPlayStateChanged(
         PEN_CALL(PlayState, "_ZNK19YMediaPlayerManager9playStateEv", uint64)(self)
     );
     return origin(self, a2, a3, a4, a5);

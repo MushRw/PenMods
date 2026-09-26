@@ -87,6 +87,7 @@ Config::Config() : Logger("Config") {
         }},
         {"screen", {
             {"sleep_duration", 30},
+            {"shutdown_duration", 0},
             {"intel_sleep", false},
             {"intel_sleep_audio_lock", false},
             // ScreenManager::setLockScreen() 会写这个键，而 ScreenManager.cpp 用
@@ -106,7 +107,8 @@ Config::Config() : Logger("Config") {
                 {"restart", true},
                 {"reset_page", true},
                 {"dev_setting", false},
-                {"filemanager",false}
+                {"filemanager",false},
+                {"antiembs_deactivate", false}
             }}
         }},
         {"antiembs", {
@@ -127,7 +129,9 @@ Config::Config() : Logger("Config") {
                 {"reversed", false}
             }},
             {"hide_paired_lyrics", false},
-            {"show_hidden_files", false}
+            {"show_hidden_files", false},
+            {"pause_on_scan", false},
+            {"hide_floating_window", false}
         }},
         {"wallpaper", {
             {"mode", 0},
@@ -150,6 +154,7 @@ Config::Config() : Logger("Config") {
             {"auto_send_scan", true},
             {"speech_assistant", false},
             {"streaming", true},
+            {"bubble_render_mode", "full"},
             {"models", json::array({
                 json{
                     {"id",          "deepseek-v4-flash"},
@@ -157,17 +162,21 @@ Config::Config() : Logger("Config") {
                     {"provider",    "DeepSeek"},
                     {"endpoint",    "https://api.deepseek.com/v1/chat/completions"},
                     {"modelId",     "deepseek-v4-flash"},
+                    {"apiProtocol", "chat_completions"},
                     {"apiKey",      ""},
                     {"temperature", 0.7},
                     {"maxContextSize", 0},
+                    {"reasoningEffort", ""},
+                    {"nativeWebSearchEnabled", false},
+                    {"nativeWebSearchProvider", "auto"},
                     {"capabilities", json{
                         {"text",      true},
                         {"vision",    false},
                         {"audio",     false},
-#ifdef PL_AI_TOOLS
                         {"toolCall",  false},
-#endif
-                        {"reasoning", false}
+                        {"toolCall",  false},
+                        {"reasoning",       false},
+                        {"imageGeneration", false}
                     }},
                     {"extraParams", ""},
                     {"proxyVisionModelId", ""},
@@ -183,7 +192,6 @@ Config::Config() : Logger("Config") {
                 }
             })},
             {"activePromptId", "default"},
-#ifdef PL_AI_TOOLS
             {"tavily", {
                 {"api_key",      ""},
                 {"search_depth", "advanced"},
@@ -196,7 +204,6 @@ Config::Config() : Logger("Config") {
                 {"max_output_bytes", 4096},
                 {"blocklist", json::array()}
             }},
-#endif
             {"math_render", {
                 {"enabled",     false},
                 {"server_path", ""}
@@ -304,14 +311,18 @@ bool Config::_update(json& data) {
                 if (!data["ai"].contains("models") || !data["ai"]["models"].is_array()) {
                     auto& cb                    = data["ai"]["chatbot"];
                     data["ai"]["models"]        = json::array({
-                        json{{"id", cb.value("model", "deepseek-chat")},
+                        json{
+                             {"id", cb.value("model", "deepseek-chat")},
                              {"name", "DeepSeek Chat"},
                              {"provider", "DeepSeek"},
                              {"endpoint", cb.value("api_endpoint", "https://api.deepseek.com/v1/chat/completions")},
                              {"modelId", cb.value("model", "deepseek-chat")},
+                             {"apiProtocol", "chat_completions"},
                              {"apiKey", cb.value("api_key", "")},
                              {"temperature", cb.value("temperature", 0.7)},
-                             {"extraParams", ""}}
+                             {"reasoningEffort", ""},
+                             {"extraParams", ""}
+                        }
                     });
                     data["ai"]["activeModelId"] = cb.value("model", "deepseek-chat");
                 }

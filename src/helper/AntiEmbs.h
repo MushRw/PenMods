@@ -18,6 +18,7 @@ class AntiEmbs : public QObject, public Singleton<AntiEmbs> {
     Q_PROPERTY(bool autoMute READ getAutoMute WRITE setAutoMute NOTIFY autoMuteChanged);
     Q_PROPERTY(bool autoPronLocked READ getAutoPronLocked WRITE setAutoPronLocked NOTIFY autoPronLockChanged);
     Q_PROPERTY(bool fastHide READ getFastHide WRITE setFastHide NOTIFY fastHideChanged);
+    Q_PROPERTY(bool active READ isActive NOTIFY activeChanged);
     Q_PROPERTY(bool lowVoiceMode READ getLowVoiceMode WRITE setLowVoiceMode NOTIFY lowVoiceModeChanged);
     Q_PROPERTY(bool fastMute READ getFastMute WRITE setFastMute NOTIFY fastMuteChanged);
 
@@ -26,6 +27,8 @@ public:
 
     void onHomeButtonPress();
 
+    Q_INVOKABLE bool deactivate(const QString& password);
+
     // =================================
 
     [[nodiscard]] bool getAutoMute() const;
@@ -33,6 +36,8 @@ public:
     [[nodiscard]] bool getAutoPronLocked() const;
 
     [[nodiscard]] bool getFastHide() const;
+
+    [[nodiscard]] bool isActive() const;
 
     [[nodiscard]] bool getLowVoiceMode() const;
 
@@ -57,6 +62,10 @@ signals:
     void autoPronLockChanged();
 
     void fastHideChanged();
+
+    void activeChanged();
+
+    void deactivationUnlockRequested();
 
     void lowVoiceModeChanged();
 
