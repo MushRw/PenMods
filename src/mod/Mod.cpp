@@ -4,6 +4,7 @@
  * This file is part of the PenMods open source project.
  */
 
+#include "mod/Engine.h"
 #include "mod/Mod.h"
 #include "mod/PlayerInstaller.h"
 #include "helper/AvatarProvider.h"
@@ -298,6 +299,10 @@ PEN_HOOK(bool, license_verify) { return true; }
 using namespace mod;
 
 __attribute__((constructor)) static void BeforeMain() {
+
+    // 把 QML 编译缓存指到可写分区（HY-05）。必须在这里做：这是本库最早的执行点，
+    // 早于 main()、也早于 QQmlEngine 的创建；晚一步环境变量就不一定还生效。
+    mod::engine::redirectQmlDiskCacheBeforeMain();
 
     // Setup global logger.
 

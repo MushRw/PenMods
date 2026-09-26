@@ -12,7 +12,7 @@ Rectangle {
     radius: 8
     color: YColors.surfaceStrong
     border.width: 1
-    border.color: "#3F3F3F"
+    border.color: YColors.border
 
     ListView {
         anchors { fill: parent; margins: 4 }

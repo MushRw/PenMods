@@ -146,7 +146,7 @@ Rectangle {
         Rectangle {
             width: parent.width
             height: 1
-            color: "#3F3F3F"
+            color: YColors.border
         }
 
         // 会话列表

@@ -179,6 +179,14 @@ YBackground {
         anchors.fill: parent
         fillMode: Image.PreserveAspectCrop
 
+        // AP-01：不设 sourceSize 时 Qt 按**原图分辨率**解码 —— 一张 4000×3000 的
+        // 照片在 320×480 的屏上要 45.8 MB，是本项目最大的单点内存开销（设备总共 460MB），
+        // 随机循环模式下每换一张就重来一次。
+        // **只设一个维度**：实测 Qt 的 sourceSize 在两个维度都给定时会**强制拉伸**到
+        // 该尺寸（不再保持宽高比），配合 PreserveAspectCrop 会把壁纸压变形；
+        // 只给一个维度时另一个按比例推导，既限内存又不变形。
+        sourceSize.width: 640
+
         property string defaultPath: "qrc:/images/background/bg.png"
 
         // 加载失败时回退到默认壁纸（不直接写 source，避免打断上面的绑定）

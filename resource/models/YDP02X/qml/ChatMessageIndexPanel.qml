@@ -180,7 +180,7 @@ Rectangle {
         Rectangle {
             width: parent.width
             height: 1
-            color: "#3F3F3F"
+            color: YColors.border
         }
 
         // 消息索引列表
@@ -219,8 +219,8 @@ Rectangle {
                         width: 22
                         height: 16
                         radius: 3
-                        // 角色标签：用户=状态红，工具调用 #3F3F3F，其余用比条目底更深一档的灰
-                        color: modelData.isUser ? YColors.red : modelData.isToolCall ? "#3F3F3F" : YColors.grayNormal
+                        // 角色标签：用户=状态红，工具调用=grayButton，其余用比条目底更深一档的灰
+                        color: modelData.isUser ? YColors.red : modelData.isToolCall ? YColors.grayButton : YColors.grayNormal
                         anchors.verticalCenter: parent.verticalCenter
 
                         Text {

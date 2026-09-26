@@ -506,7 +506,7 @@ Item {
                     radius: 14
                     color: "transparent"
                     border.width: 2
-                    border.color: "#3F3F3F"
+                    border.color: YColors.border
                 }
                 Rectangle {
                     anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: -1 }
@@ -574,7 +574,7 @@ Item {
             Repeater {
                 model: capturedImages
                 Rectangle {
-                    width: 20; height: 14; radius: 1; color: "#3F3F3F"
+                    width: 20; height: 14; radius: 1; color: YColors.grayButton
                     border.width: 1; border.color: index === capturedImages.length - 1 ? YColors.green : "#555555"
                     Image {
                         anchors.fill: parent; anchors.margins: 1

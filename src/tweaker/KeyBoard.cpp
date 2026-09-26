@@ -18,7 +18,14 @@ namespace mod {
 KeyBoard::KeyBoard() {
     auto& config  = mod::Config::getInstance();
     json  aiCfg   = config.read("ai");
-    m_autoSendScanConfig = aiCfg.contains("auto_send_scan") ? aiCfg["auto_send_scan"].get<bool>() : true;
+    // KB-13：这里在**构造函数（开机路径）**上，配置一旦被手改成字符串/数字，
+    // `get<bool>()` 会抛 `nlohmann::type_error` → 构造抛异常 → 主程序退出 →
+    // guardian 重拉并累计崩溃计数。`contains()` 只保证"键存在"，不保证类型，
+    // 所以要连 `is_boolean()` 一起判（与 Locker.cpp 读 bool 的写法一致）。
+    m_autoSendScanConfig =
+        (aiCfg.contains("auto_send_scan") && aiCfg["auto_send_scan"].is_boolean())
+            ? aiCfg["auto_send_scan"].get<bool>()
+            : true;
 
     connect(&Event::getInstance(), &Event::beforeUiInitialization, [this](QQuickView& view, QQmlContext* context) {
         context->setContextProperty("keyBoard", this);

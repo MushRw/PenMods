@@ -82,7 +82,7 @@ Item {
                 // 命令框是嵌在弹窗里的"凹槽"：比弹窗底（grayNormal）更深一档
                 color: YColors.black
                 border.width: 1
-                border.color: "#3F3F3F"
+                border.color: YColors.border
                 clip: true
 
                 Flickable {

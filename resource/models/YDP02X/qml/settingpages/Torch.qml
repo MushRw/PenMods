@@ -61,7 +61,11 @@ YSettingItemPage {
         interval: 1000
         running: true
         repeat: true
-        onTriggered: id_switch.switchOn = torch.switch
+        // AP-21：这里原来是 `id_switch.switchOn = torch.switch`。
+        // `switchOn: torch.switch` 本身**就是绑定**，而 QML 中对已绑定属性赋值会
+        // **移除绑定** —— 这个"每秒兜底同步"正好把绑定机制废掉了。
+        // 改成让 C++ 发一次 NOTIFY，绑定自己重新求值（见 Torch::refreshStatus）。
+        onTriggered: torch.refreshStatus()
     }
 
 }

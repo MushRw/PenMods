@@ -94,6 +94,11 @@ void WallpaperManager::setWallpaperFolder(const QString& path) {
         // 如果是循环模式，重新扫描并应用
         if (mWallpaperMode == 2) {
             scanWallpaperFolder();
+            // AP-03：这句原来漏了。必现路径是"先切到随机循环（此时文件夹为空 →
+            // startCycleTimer() 因 mCachedImages.size() <= 1 没起来）→ 再选有图的
+            // 文件夹" —— 于是定时器再也没人启动，循环永远停在第一张，只能重启主程序。
+            // 与 setWallpaperMode() 的 mode==2 分支保持同一个顺序（扫描 → 起定时 → 换一张）。
+            startCycleTimer();
             nextWallpaper();
         }
     }

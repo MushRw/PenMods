@@ -52,4 +52,10 @@ void Torch::setStatus(bool stat) {
     }
 }
 
+void Torch::refreshStatus() {
+    // 无脑发：绑定会重新求值 `torch.switch`（= 再读一次 GPIO），
+    // 值真变了 QML 才会更新，没变就是一次 sysfs 读的代价。
+    emit statusChanged();
+}
+
 } // namespace mod
