@@ -7,8 +7,9 @@ PenMods YDP02X 一键安装/升级程序
     python install.py            # 自动使用本目录下的发布文件
     python install.py <dir>      # 指定发布包目录
 
-流程：检测 ADB 设备 -> 解锁 -> 挂载可写 -> 推送文件 -> （全新安装时）安装
-patchelf 并给主程序打补丁 -> 校验 -> 重启。
+流程：检测 ADB 设备 -> 解锁 -> 挂载可写 -> 推送文件 -> pen_recover.sh
+（安装 patchelf、给主程序打补丁、MALLOC/XDG 调参、chattr +i 上锁，全幂等）
+-> 校验 -> 重启。
 """
 
 import os
@@ -134,11 +135,41 @@ def main():
 
     adb("shell", "chmod +x /userdata/PenMods/misc/init.sh /userdata/PenMods/misc/patchelf /userdata/PenMods/patch.sh")
 
+    # SH-02：推送一键恢复脚本。它覆盖 init.sh + patch.sh 之外的关键步骤：
+    # MALLOC 调参、XDG_DATA_HOME 注入（插件配置/历史落可写分区）、CA 恢复、
+    # zram、chattr +i 上锁、清崩溃计数——全新安装缺少上锁一步时，厂商资源
+    # 通道会在首次重启把主程序写回原版，mod 直接消失（docs/rootfs-mods.md 复盘结论）。
+    recover_local = os.path.join(pkg_dir, "pen_recover.sh")
+    if not os.path.exists(recover_local):
+        # 发布包未带时回退到仓库内的 scripts/tweaks/pen_recover.sh
+        here = os.path.dirname(os.path.abspath(__file__))      # scripts/installer
+        recover_local = os.path.join(os.path.dirname(here), "tweaks", "pen_recover.sh")
+    if not os.path.exists(recover_local):
+        fail("找不到 pen_recover.sh（发布包与 scripts/tweaks/ 均无），无法保证补丁存活")
+    log("推送 pen_recover.sh ...")
+    tmp = recover_local + ".lf"
+    with open(recover_local, "rb") as f:
+        data = f.read().replace(b"\r\n", b"\n")
+    with open(tmp, "wb") as f:
+        f.write(data)
+    r = adb("push", tmp, "/userdata/PenMods/recover.sh")
+    os.remove(tmp)
+    if r.returncode != 0:
+        fail("推送 pen_recover.sh 失败: %s" % r.stderr.strip())
+
     if not is_upgrade:
-        log("执行 init.sh（安装 patchelf）...")
-        adb("shell", "cd /userdata/PenMods/misc && sh init.sh")
-        log("执行 patch.sh（注入 libPenMods.so）...")
-        adb("shell", "cd /userdata/PenMods && sh patch.sh")
+        # 先解锁再打补丁：上次安装留下的 chattr +i 会让 patch.sh 的 mv 失败
+        adb("shell", "chattr -i /oem/YoudaoDictPen/output/YoudaoDictPen 2>/dev/null")
+        log("执行 pen_recover.sh（init + patch + 调参 + 上锁，全幂等）...")
+        adb("shell", "sh /userdata/PenMods/recover.sh")
+    else:
+        log("校验主程序依赖（升级）...")
+        r = adb("shell", "/usr/bin/patchelf --print-needed /oem/YoudaoDictPen/output/YoudaoDictPen")
+        if "libPenMods.so" not in r.stdout:
+            # 升级时发现补丁被 OTA/厂商通道还原 → 跑恢复脚本补齐，而不是直接失败
+            log("主程序依赖缺失（疑似被 OTA/厂商通道还原），执行 pen_recover.sh 恢复...")
+            adb("shell", "chattr -i /oem/YoudaoDictPen/output/YoudaoDictPen 2>/dev/null")
+            adb("shell", "sh /userdata/PenMods/recover.sh")
 
     log("校验主程序依赖...")
     r = adb("shell", "/usr/bin/patchelf --print-needed /oem/YoudaoDictPen/output/YoudaoDictPen")

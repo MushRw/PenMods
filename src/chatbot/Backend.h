@@ -301,7 +301,7 @@ private:
                                 const QString&              userText,
                                 const QVector<MessagePart>& userParts = {});
 
-    void makeApiRequest(const QJsonArray& messages);
+    void makeApiRequest(const QJsonArray& messages, bool isRetry = false);
     void handleNetworkReply(QNetworkReply* reply, bool isStream);
     void abortActiveReplies();
 

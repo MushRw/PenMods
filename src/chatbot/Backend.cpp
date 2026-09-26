@@ -1139,13 +1139,21 @@ void ChatBot::abortActiveReplies() {
     }
 }
 
-void ChatBot::makeApiRequest(const QJsonArray& messages) {
+void ChatBot::makeApiRequest(const QJsonArray& messages, bool isRetry) {
     // 递增序列号使旧请求的回调自动失效
     int seq = ++m_requestSeq;
 
     abortActiveReplies();
 
     m_cancelled = false;
+
+    // AI-01：新请求（非重试）开启新的重试预算，并使已排期的旧重试定时器失效——
+    // 旧定时器靠 m_requestSeq 序号守卫发现不符而自弃（见 onReplyFinished 的 singleShot）。
+    // 重试请求不得重置预算，否则 m_retryCount 永远到不了上限 → 无限重试。
+    if (!isRetry) {
+        m_retrying   = false;
+        m_retryCount = 0;
+    }
 
     // 记录本次请求体，供瞬时错误（429/5xx）自动重试使用
     m_lastRequestMessages = messages;
@@ -1484,11 +1492,16 @@ void ChatBot::handleNetworkReply(QNetworkReply* reply, bool isStream) {
             m_retryCount++;
             QJsonArray retryMessages = m_lastRequestMessages;
             int        delayMs       = 1500 * m_retryCount;
+            // AI-01：捕获排期时的请求序号。定时器到期前用户若发了新消息/切了会话/取消
+            //（makeApiRequest / cancel 都会 ++m_requestSeq），本次重试必须自弃——
+            // 原实现只查 m_cancelled，而 makeApiRequest 会把它重置为 false，导致：
+            // 新请求被 abort、旧请求被重发、回复追加进错误的会话。
+            const int scheduledSeq = m_requestSeq;
             debug("API 瞬时错误(HTTP {})，{}ms 后重试（第 {} 次）", httpStatus, delayMs, m_retryCount);
-            QTimer::singleShot(delayMs, this, [this, retryMessages]() {
+            QTimer::singleShot(delayMs, this, [this, retryMessages, scheduledSeq]() {
                 m_retrying = false;
-                if (m_cancelled) return;
-                makeApiRequest(retryMessages);
+                if (m_cancelled || m_requestSeq != scheduledSeq) return;
+                makeApiRequest(retryMessages, /*isRetry=*/true);
             });
             m_activeReplies.removeAll(reply);
             reply->deleteLater();
