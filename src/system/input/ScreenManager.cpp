@@ -36,30 +36,32 @@ ScreenManager::ScreenManager() {
 
 void ScreenManager::onPlayStateChanged(PlayState state) {
     mPlayState = state;
-    rtSetAutoScreenOff(!(mPlayState == PlayState::PLAYING && mLrcShowing && mInPlayerPage));
+    updateScreenOff();
 }
 
 void ScreenManager::onLrcShowChanged(bool show) {
     mLrcShowing = show;
-    rtSetAutoScreenOff(!(mPlayState == PlayState::PLAYING && mLrcShowing && mInPlayerPage));
+    updateScreenOff();
 }
 
 void ScreenManager::onInPlayerPageChanged(bool in) {
     mInPlayerPage = in;
-    rtSetAutoScreenOff(!(mPlayState == PlayState::PLAYING && mLrcShowing && mInPlayerPage));
+    updateScreenOff();
 }
 
 // Dynamic Actions
 void ScreenManager::reportAction(const QString& action) {
-    if (!getIntelSleep()) {
-        return;
-    }
+    // KB-04/05：所有"是否禁止息屏"的判定收敛到 updateScreenOff() 单一真源，
+    // 不再在各个回调里各自 pause/resume（那样会互相抵消，见 KB-05）。
+    // 智能休眠开关在 updateScreenOff() 内部统一处理。
     switch (H(action.toLocal8Bit().data())) {
     case H("wordbook_cardview_enter"):
-        rtSetAutoScreenOff(false);
+        mInWordbookCard = true;
+        updateScreenOff();
         break;
     case H("wordbook_cardview_quit"):
-        rtSetAutoScreenOff(true);
+        mInWordbookCard = false;
+        updateScreenOff();
         break;
     case H("musicplayer_lrc_show"):
         onLrcShowChanged(true);
@@ -145,11 +147,25 @@ void ScreenManager::onAudioDaemonStateChanged() {
     bool audioActive = AudioDaemon::getInstance().state() == AudioDaemonState::PLAYING;
     if (mIntelSleepAudioLock && audioActive && !mAudioLockActive) {
         mAudioLockActive = true;
-        rtSetAutoScreenOff(false);
     } else if (mAudioLockActive && (!audioActive || !mIntelSleepAudioLock)) {
         mAudioLockActive = false;
-        rtSetAutoScreenOff(true);
     }
+    updateScreenOff();
+}
+
+void ScreenManager::updateScreenOff() {
+    // KB-04：智能休眠关 → 永远允许息屏（不再只在 reportAction 拦，其它回调也要拦）。
+    if (!getIntelSleep()) {
+        InputDaemon::getInstance().resume();
+        return;
+    }
+    // KB-05：所有"禁止息屏"来源（音频锁 / 单词本卡片 / 播放中且看歌词且在播放页）
+    // 合并成一个布尔，单一出口决定 pause/resume，避免各自 pause/resume 互相抵消
+    //（例如歌词页 pause → 单词本 pause → 退出单词本 resume → 歌词还在看却已息屏）。
+    bool prevent = mAudioLockActive
+                || mInWordbookCard
+                || (mPlayState == PlayState::PLAYING && mLrcShowing && mInPlayerPage);
+    rtSetAutoScreenOff(!prevent);
 }
 
 void ScreenManager::rtSetAutoScreenOff(bool val) {

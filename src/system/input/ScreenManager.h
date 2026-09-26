@@ -58,6 +58,9 @@ public:
 
     void onAudioDaemonStateChanged();
 
+    // 所有"是否禁止息屏"的判定收敛到这一个出口（KB-04/05）。
+    void updateScreenOff();
+
 signals:
 
     void autoSleepDurationChanged();
@@ -82,9 +85,10 @@ private:
     bool mAudioLockActive = false;
 
     // Tmp saving;
-    bool      mLrcShowing   = false;
-    bool      mInPlayerPage = false;
-    PlayState mPlayState    = PlayState::STOPPED;
+    bool      mLrcShowing      = false;
+    bool      mInPlayerPage    = false;
+    bool      mInWordbookCard  = false;
+    PlayState mPlayState       = PlayState::STOPPED;
 };
 
 } // namespace mod

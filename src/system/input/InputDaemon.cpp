@@ -35,6 +35,10 @@ void InputDaemon::onUiCompleted() {
 }
 
 bool InputDaemon::setScreenOff(uint32 sec) {
+    // KB-01：值没变就跳过 —— 否则 `reset()` 每次都重写配置 + 重启 daemon（见 KB-02）。
+    if (sec == mScreenOff) {
+        return true;
+    }
     mScreenOff = sec;
     if (sec > 10) {
         mBackLightDown = sec - 10;
@@ -46,8 +50,12 @@ bool InputDaemon::setScreenOff(uint32 sec) {
 }
 
 bool InputDaemon::setSystemSuspend(uint32 sec) {
-    if (sec <= mBackLightDown && sec != 0) {
+    if (sec != 0 && sec <= mBackLightDown) {
         return false;
+    }
+    // KB-01：值没变就跳过（reset() 调用时传入的就是当前值，无需再动 daemon）。
+    if (sec == mSystemSuspend) {
+        return true;
     }
     mSystemSuspend = sec;
     _resetConfig();

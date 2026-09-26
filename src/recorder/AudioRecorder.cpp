@@ -184,9 +184,9 @@ bool AudioRecorder::stop() {
     // 录音结束，释放音频输出引用
     AudioDaemon::getInstance().release(AudioSource::SYSTEM);
 
-    // Reset audio device.
-    exec("amixer cset numid=2 0", kExecQuickMs);
-    InputDaemon::getInstance().reset();
+    // KB-03：关键资源释放必须无条件执行完，否则音频设备与 buffer 泄漏
+    // （`exec`/`reset()` 一旦抛异常，后面的 stop/lame_close/close/delete 全会被跳过，
+    // 下次录音直接失败）。这里把"必须做的释放"整体前置，可选副作用挪到后面。
     mInputAudio->stop();
     // stateChanged 连接已在上面断开，这里显式同步停止状态，避免 UI 停留在录制中
     setState(QAudio::StoppedState);
@@ -200,6 +200,11 @@ bool AudioRecorder::stop() {
     mLame       = nullptr;
     mInputAudio = nullptr;
     mInputDevice = nullptr;
+
+    // 可选副作用（失败也不影响上面已经释放的资源）：复位混音器 + 让屏幕设置回到
+    // 配置值。KB-01 已让 `reset()` 在"值没变"时跳过，绝大多数情况这里零成本。
+    exec("amixer cset numid=2 0", kExecQuickMs);
+    InputDaemon::getInstance().reset();
 
     switch (error) {
     case QAudio::OpenError:
