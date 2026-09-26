@@ -12,6 +12,14 @@ Item {
 
     property bool expanded: false
 
+    signal expansionStarted(bool expanding)
+
+    function toggleExpanded() {
+        var expanding = !expanded;
+        expansionStarted(expanding);
+        expanded = expanding;
+    }
+
     width: maxWidth
     height: cardHeader.height + cardExpanded.height
 
@@ -169,13 +177,14 @@ Item {
             }
             Connections {
                 target: root
-                onExpandedChanged: arrowCanvas.requestPaint()
+                function onExpandedChanged() { arrowCanvas.requestPaint() }
             }
         }
 
         MouseArea {
             anchors.fill: parent
-            onClicked: root.expanded = !root.expanded
+            preventStealing: false
+            onClicked: root.toggleExpanded()
         }
     }
 
@@ -213,7 +222,8 @@ Item {
             anchors.margins: 8
             contentHeight: detailText.implicitHeight
             clip: true
-            interactive: detailText.implicitHeight > (parent.height - 16)
+            interactive: root.expanded && detailText.implicitHeight > (parent.height - 16)
+            boundsBehavior: Flickable.StopAtBounds
 
             Text {
                 id: detailText
@@ -222,7 +232,7 @@ Item {
                 color: YColors.grayText
                 font.pixelSize: 10
                 font.family: "Microsoft YaHei"
-                wrapMode: Text.Wrap
+                wrapMode: Text.WrapAnywhere
                 textFormat: Text.PlainText
             }
         }

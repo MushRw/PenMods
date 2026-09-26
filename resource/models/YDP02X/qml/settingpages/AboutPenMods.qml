@@ -71,7 +71,7 @@ YSettingItemPage {
                 title: "捐助项目发展"
                 imageName: "settings/info_more_arrow"
                 onClicked: {
-                    id_pop_container.show("AFDianQrCode");
+                    openSettingPage("AFDianQrCode");
                 }
             }
 
@@ -81,20 +81,6 @@ YSettingItemPage {
 
         }
 
-    }
-
-    YDynamicPageStack {
-        id: id_pop_container
-        anchors.fill: parent
-        logTag: "AboutPenMods"
-
-        function show(page) {
-            createPage(Qt.resolvedUrl(("./%1.qml").arg(page)), page, {
-                "pageIndex": YEnum.PageIndex.Setting,
-                "closeOnHomeRelease": true,
-                "closeOnHomeLongPress": true
-            });
-        }
     }
 
 }

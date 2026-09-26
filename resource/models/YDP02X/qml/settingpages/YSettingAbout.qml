@@ -11,8 +11,12 @@ YSettingItemPage {
     objectName: "YPage===YSettingAbout.qml"
     property int clickCount: 0
 
-    function showPage(page,needPasswd,scene) {
-        id_page_pop_helper.popItem.show(page,needPasswd,scene)
+    function showPage(page, needPasswd, scene) {
+        if (needPasswd && locker.enabled && !(scene && !locker.getScene(scene))) {
+            requestKeyboard(page)
+            return null
+        }
+        return openSettingPage(page)
     }
 
     Flickable {
@@ -81,6 +85,7 @@ YSettingItemPage {
             }
 
             YSettingAboutClickableItem {
+                visible: !antiEmbs.active
                 title: "PenMods"
                 value: mod.version
                 imageName: "settings/info_more_arrow"
@@ -114,6 +119,7 @@ YSettingItemPage {
             // }
 
             YSettingAboutClickableItem {
+                visible: !antiEmbs.active
                 title: "开发者选项"
                 value: ""
                 imageName: "settings/info_more_arrow"
@@ -174,8 +180,6 @@ YSettingItemPage {
         id: id_page_pop_helper
         isShowing: qmlGlobal.inputPageShowing
         objectName: "from_PagePopHelper.qml"
-        readonly property alias popItem: id_pop_container
-
         // ==== KeyBoard ====
 
         function inputPageCreated(keyboardPage,page) {
@@ -195,32 +199,6 @@ YSettingItemPage {
             keyboardPage.placeHolderText = "请输入密码..."
             keyboardPage.show()
             qmlGlobal.inputPageShowing = true
-        }
-
-        // ==== PopHelper ====
-
-        YDynamicPageStack {
-            id: id_pop_container
-            anchors.fill: parent
-            logTag: "YSettingAbout"
-
-            function show(page,needPasswd,scene) {
-                if (needPasswd
-                        && locker.enabled
-                        && !(scene && !locker.getScene(scene))) {
-                    requestKeyboard(page)
-                    return
-                }
-                _show(page)
-            }
-
-            function _show(aboutPage) {
-                createPage(Qt.resolvedUrl(("./%1.qml").arg(aboutPage)), aboutPage, {
-                    "pageIndex": YEnum.PageIndex.Setting,
-                    "closeOnHomeRelease": true,
-                    "closeOnHomeLongPress": true
-                })
-            }
         }
 
     }

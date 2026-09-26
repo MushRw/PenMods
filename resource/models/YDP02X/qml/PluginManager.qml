@@ -286,7 +286,7 @@ YBackButtonPage {
 
     Component.onCompleted: {
         if (typeof pluginManager !== 'undefined') {
-            // 首次加载前也清理一次
+            // 首次加载前清空列表模型
             pluginListModel.clear();
             pluginManager.requestPluginList();
         }

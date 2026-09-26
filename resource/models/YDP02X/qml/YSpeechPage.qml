@@ -1,4 +1,5 @@
 import QtQuick 2.12
+import com.github.penuniverse 1.0
 import com.youdao.pen 1.0
 
 import "./components"
@@ -167,6 +168,34 @@ YPage {
     }
 
     property var currentShowPage: null
+    property string lastChatAsrResult: ""
+
+    function forwardAsrResultToChat() {
+        if (antiEmbs.active)
+            return false;
+        if (!mod.voiceChatEnabled)
+            return false;
+
+        var text = speechManager.asrResult.trim();
+        if (text.length === 0 || text === lastChatAsrResult)
+            return true;
+
+        lastChatAsrResult = text;
+        mod.pendingVoiceChatText = text;
+
+        if (navigator && navigator.currentItem === id_touch_talk_page
+                && typeof navigator.replaceLegacy === "function") {
+            if (navigator.replaceLegacy("ChatAssistant", {}, {
+                    "cache": true,
+                    "animation": true
+                })) {
+                return true;
+            }
+        }
+
+        qmlGlobal.requestShowPage(PageIndex.ChatAssistant);
+        return true;
+    }
 
     Connections {
         target: speechManager
@@ -174,6 +203,7 @@ YPage {
         enabled: id_touch_talk_page.visible
         onRecognizingChanged: {
             if (speechManager.recognizing >= YEnum.AS_ASRBegin ){
+                lastChatAsrResult = "";
                 if (currentShowPage != null)
                     currentShowPage.backButtonClicked();
                 id_listening_animation.running = true;
@@ -181,12 +211,17 @@ YPage {
             } else {
                 id_listening_animation.running = false;
                 wave_form.stop()
-                if (bot.speechAssistant) {
+                if (mod.voiceChatEnabled) {
                     backButtonClicked()
                 }
             }
         }
+        onAsrResultChanged: {
+            forwardAsrResultToChat();
+        }
         onContentChanged: {
+            if (mod.voiceChatEnabled)
+                return;
             console.warn("YSpeechPage.qml===", speechManager.content);
             let resJson = JSON.parse(speechManager.content);
             let resType = 0;
@@ -380,7 +415,7 @@ YPage {
 
     Connections {
         target: qmlGlobal
-        enabled: bot.speechAssistant
+        enabled: mod.voiceChatEnabled
         function onCurrentPageIndexChanged() {
             console.warn("onCurrentPageIndexChanged")
             if (qmlGlobal.currentPageIndex != YEnum.PageIndex.Speech) {

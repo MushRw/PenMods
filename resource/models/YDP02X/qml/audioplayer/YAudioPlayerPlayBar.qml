@@ -13,6 +13,8 @@ Item {
     readonly property bool isPlaying: YEnum.PLAYING === mediaPlayerManager.playState
     readonly property int audioSequence: settingManager.audioSequence
     property int truncateAudioState: YEnum.TAS_STOP
+    property bool shutdownMode: false
+    property var shutdownDurations: [15, 20, 30, 45, 60, 120]
 
     // 倍速设置
     property var rateSettingIndex: 0
@@ -59,7 +61,10 @@ Item {
     YMouseArea {
         id: id_close_mousearea
         objectName: "YAudioPlayerPlayBar.qml_id_close_mousearea"
-        anchors.fill: parent
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.right: id_play_bar.left
 
         onClicked: {
             close()
@@ -186,7 +191,38 @@ Item {
                 }
             }
             YAudioPlayerPlayBarSettingItem {
+                id: id_shutdown_timer
+                visible: shutdownMode
+                imageName: "audioplayer/s_stop_single"
+                text: {
+                    if (!musicPlayer.shutdownTimerEnabled) return "定时关机"
+                    if (musicPlayer.shutdownAfterPlaylist) return "播放结束关机"
+                    return musicPlayer.shutdownTimerMinutes + "分钟后关机"
+                }
+                onClicked: {
+                    if (!musicPlayer.shutdownTimerEnabled) {
+                        musicPlayer.setShutdownTimerMinutes(shutdownDurations[0])
+                        musicPlayer.shutdownAfterPlaylist = false
+                    } else if (!musicPlayer.shutdownAfterPlaylist) {
+                        var index = shutdownDurations.indexOf(musicPlayer.shutdownTimerMinutes)
+                        if (index < shutdownDurations.length - 1) {
+                            musicPlayer.setShutdownTimerMinutes(shutdownDurations[index + 1])
+                        } else {
+                            musicPlayer.shutdownAfterPlaylist = true
+                        }
+                    } else {
+                        musicPlayer.cancelShutdownTimer()
+                        musicPlayer.shutdownAfterPlaylist = false
+                    }
+                }
+                onPressAndHold: {
+                    shutdownMode = false
+                }
+            }
+
+            YAudioPlayerPlayBarSettingItem {
                 id: id_audio_sequence
+                visible: !shutdownMode
                 imageName: {
                     switch (audioSequence) {
                     case YEnum.AS_RANDOM:
@@ -218,11 +254,12 @@ Item {
                 onClicked: {
                     settingManager.audioSequence = ((audioSequence + 1) % YEnum.AS_COUNT)
                 }
+                onPressAndHold: {
+                    shutdownMode = true
+                }
             }
         }
-
     }
-
 
     states: [
         State {

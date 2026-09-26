@@ -29,10 +29,10 @@ YLoader {
     Connections {
         target: wordBookManager
         ignoreUnknownSignals: true
-        onWordCountInDatabaseChanged: {
+        function onWordCountInDatabaseChanged(queryId, success, count) {
             console.warn("YWordBookPageSwitchLoader.qml===onWordCountInDatabaseChanged===queryId: ",
                          queryId, ", success:", success, ", count:", count)
-            if (success) {
+            if (success && item && item.delayCheckEmptyTimer) {
                 item.delayCheckEmptyTimer.stop()
                 item.delayCheckEmptyTimer.reshow()
             }
@@ -194,10 +194,12 @@ YLoader {
                     anchors.left: parent.left
                     anchors.leftMargin: 20
                     anchors.verticalCenter: parent.verticalCenter
-                    font.family: (/[\u3220-\uFA29]+/.test(text)) ? qmlGlobal.fontFamilyZhCn
-                                                                 : qmlGlobal.getFontFamilyNameByLangType(model.modelData.srcLangType)
-                    font.bold: font.family === qmlGlobal.fontFamilyEnUs
-                    font.pixelSize: font.family === qmlGlobal.fontFamilyEnUs ? 18 : 16
+                    readonly property string resolvedFontFamily: (/[\u3220-\uFA29]+/.test(text))
+                            ? qmlGlobal.fontFamilyZhCn
+                            : qmlGlobal.getFontFamilyNameByLangType(model.modelData.srcLangType)
+                    font.family: resolvedFontFamily
+                    font.bold: resolvedFontFamily === qmlGlobal.fontFamilyEnUs
+                    font.pixelSize: resolvedFontFamily === qmlGlobal.fontFamilyEnUs ? 18 : 16
                     text: model.modelData.content
                     width: Math.min(id_word_for_width.width,
                                     parent.width - 2*id_word_for_width.anchors.leftMargin)
@@ -233,9 +235,11 @@ YLoader {
                     anchors.right: parent.right
                     anchors.rightMargin: 12
                     anchors.verticalCenter: parent.verticalCenter
-                    font.family: (/[\u3220-\uFA29]+/.test(text)) ? qmlGlobal.fontFamilyZhCn
-                                                                 : qmlGlobal.getFontFamilyNameByLangType(model.modelData.dstLangType)
-                    font.pixelSize: font.family === qmlGlobal.fontFamilyEnUs ? 18 : 16
+                    readonly property string resolvedFontFamily: (/[\u3220-\uFA29]+/.test(text))
+                            ? qmlGlobal.fontFamilyZhCn
+                            : qmlGlobal.getFontFamilyNameByLangType(model.modelData.dstLangType)
+                    font.family: resolvedFontFamily
+                    font.pixelSize: resolvedFontFamily === qmlGlobal.fontFamilyEnUs ? 18 : 16
                     color: YColors.grayText
                     visible: (id_word.width + 2*id_word_for_width.anchors.leftMargin
                               + id_translate.anchors.leftMargin

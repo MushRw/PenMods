@@ -17,8 +17,11 @@ Rectangle {
 
     // 面板宽度（动画目标值）
     property real panelWidth: 175
+    property var fontFamily
     // 是否正在显示
     property bool isOpen: false
+    // 实际聊天 ListModel；索引必须与消息 ListView 的 delegate 索引一致。
+    property var messageModel: null
     // 消息摘要列表模型: [{index, role, preview}]
     property var messagePreviews: []
     // 关闭信号
@@ -53,64 +56,36 @@ Rectangle {
     }
 
     function refreshPreviews() {
-        // 注意：必须先将所有元素构建到临时数组中，再一次性赋值给属性。
-        // 直接 push() 到 messagePreviews 不会触发 QML 的变更通知，
-        // 导致 ListView 的 model 无法感知新增数据。
+        // Build from the exact ListModel used by the chat ListView. Backend history
+        // indices diverge when reasoning and grouped tool cards create extra delegates.
         var newPreviews = [];
-        // 通过 chatbot 上下文属性获取当前会话消息
-        if (typeof chatbot === 'undefined' || chatbot === null || !chatbot.messages)
+        if (!messageModel || messageModel.count === undefined) {
+            messagePreviews = newPreviews;
             return;
-        var msgs = chatbot.messages;
-        var displayIndex = 0;
-        for (var i = 0; i < msgs.length; i++) {
-            var msg = msgs[i];
-            var roleLabel, preview, isUser = false, isToolCall = false;
+        }
 
-            if (msg.role === 'user') {
-                roleLabel = "你";
-                isUser = true;
-            } else if (msg.role === 'tool') {
-                isToolCall = true;
-                // 向上查找 tool name
-                var tn = "";
-                for (var j = i - 1; j >= 0; j--) {
-                    var prev = msgs[j];
-                    if (prev.role === 'assistant' && prev.toolCallsJson) {
-                        try {
-                            var tcs = JSON.parse(prev.toolCallsJson);
-                            for (var k = 0; k < tcs.length; k++) {
-                                if (tcs[k].id === (msg.toolCallId || "")) {
-                                    tn = tcs[k]["function"].name || "";
-                                    break;
-                                }
-                            }
-                        } catch(e) {}
-                        break;
-                    }
-                }
-                roleLabel = tn === "shell_exec" ? "终端" : "搜索";
-            } else if (msg.role === 'assistant' && msg.toolCallsJson && msg.toolCallsJson !== "" && (!msg.content || msg.content.trim() === "")) {
-                continue;
-            } else {
-                roleLabel = "AI";
-            }
-
-            var rawText = msg.content || "";
-            preview = rawText.replace(/<[^>]*>/g, "");
+        for (var i = 0; i < messageModel.count; i++) {
+            var msg = messageModel.get(i);
+            var isUser = msg.isUser === true;
+            var isToolCall = msg.isToolCall === true;
+            var isReasoning = msg.isReasoning === true;
+            var roleLabel = isUser ? "你" : isToolCall ? "工具" : isReasoning ? "推理" : "AI";
+            var rawText = msg.raw_text || msg.text || "";
+            var preview = rawText.replace(/<[^>]*>/g, "");
             preview = preview.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, "\"");
-            if (isToolCall) {
-                preview = roleLabel === "终端" ? "⚙ 命令执行结果" : "🔍 搜索结果";
-            } else if (preview.length > 18) {
+            preview = preview.replace(/\s+/g, " ").trim();
+            if (msg.isThinking && preview.length === 0)
+                preview = "正在思考";
+            else if (preview.length > 18)
                 preview = preview.substring(0, 18) + "...";
-            }
+
             newPreviews.push({
-                "index": displayIndex,
+                "index": i,
                 "role": roleLabel,
                 "preview": preview,
                 "isUser": isUser,
                 "isToolCall": isToolCall
             });
-            displayIndex++;
         }
         messagePreviews = newPreviews;
     }
@@ -137,7 +112,7 @@ Rectangle {
                 text: "消息索引"
                 color: YColors.white
                 font.pixelSize: 12
-                font.family: qmlGlobal.fontFamilyZhCn
+                font.family: id_root.fontFamily || ""
                 font.bold: true
                 anchors {
                     left: parent.left
@@ -160,7 +135,7 @@ Rectangle {
                     text: "✕"
                     color: YColors.grayText
                     font.pixelSize: 14
-                    font.family: qmlGlobal.fontFamilyZhCn
+                    font.family: id_root.fontFamily || ""
                     anchors.centerIn: parent
                 }
 
@@ -227,7 +202,7 @@ Rectangle {
                             text: modelData.role
                             color: YColors.white
                             font.pixelSize: 9
-                            font.family: qmlGlobal.fontFamilyZhCn
+                            font.family: id_root.fontFamily || ""
                             font.bold: true
                             anchors.centerIn: parent
                         }
@@ -238,8 +213,10 @@ Rectangle {
                         text: modelData.preview
                         color: YColors.grayText
                         font.pixelSize: 10
-                        font.family: qmlGlobal.fontFamilyZhCn
+                        font.family: id_root.fontFamily || ""
                         elide: Text.ElideRight
+                        maximumLineCount: 1
+                        wrapMode: Text.NoWrap
                         anchors.verticalCenter: parent.verticalCenter
                         width: parent.width - 32
                     }

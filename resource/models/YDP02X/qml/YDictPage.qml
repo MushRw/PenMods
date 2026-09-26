@@ -36,6 +36,7 @@ YBackButtonPage {
     property bool isButtonIsRePress: !systemBase.isButtonRelease
     property var reportedSet: new Set()
     property alias isScannig: id_dict_listview.isScanning
+    property bool closingScanResult: false
 
     onOcrContentStringChanged:  {
         console.log("headviewModel:"+ocrContentString)
@@ -1120,7 +1121,9 @@ YBackButtonPage {
 //        qmlGlobal.stopAllAnimationMusic()
 //        initStrokeInfo()
         backProcess()
-        soundCenter.forceStop()
+        if (!musicPlayer.shouldPreserveMusicOnScanResultClose()) {
+            soundCenter.forceStop()
+        }
 //        if (resultManager.autoSelectIndex >= 0) {
 //            id_dict_listview.backToPrevious()
 //            return
@@ -1253,6 +1256,7 @@ YBackButtonPage {
     }
 
     onBackButtonClicked: {
+        closingScanResult = musicPlayer.isScanPauseActive()
         resultManager.clearChPinyinList()
         if (YEnum.PLAYING !== mediaPlayerManager.playState) {
             // do not do this, audioplaer is playing
@@ -1271,7 +1275,15 @@ YBackButtonPage {
             }
         } else {
             qmlGlobal.canAutoAddToWb = false
-            soundCenter.stop()
+            if (closingScanResult) {
+                if (!musicPlayer.shouldPreserveMusicOnScanResultClose()) {
+                    soundCenter.stop()
+                }
+                musicPlayer.finishScanPause()
+                closingScanResult = false
+            } else {
+                soundCenter.stop()
+            }
         }
     }
 }

@@ -53,7 +53,7 @@ YSettingItemPage {
                 visible: switch_locker.switchOn
                 imageName: "settings/info_more_arrow"
                 onClicked: {
-                    id_pop_container.show("LockSceneSettingPage")
+                    openSettingPage("LockSceneSettingPage")
                 }
             }
 
@@ -61,7 +61,7 @@ YSettingItemPage {
                 title: "社会安全选项"
                 imageName: "settings/info_more_arrow"
                 onClicked: {
-                    id_pop_container.show("AntiEmbsSettingPage")
+                    openSettingPage("AntiEmbsSettingPage")
                 }
             }
 
@@ -122,20 +122,6 @@ YSettingItemPage {
             } else {
                 id_page_pop_helper.inputPageCreated(incubator.object,pwd)
             }
-        }
-    }
-
-    YDynamicPageStack {
-        id: id_pop_container
-        anchors.fill: parent
-        logTag: "LockSettingPage"
-
-        function show(page) {
-            createPage(Qt.resolvedUrl(("./%1.qml").arg(page)), page, {
-                "pageIndex": YEnum.PageIndex.Setting,
-                "closeOnHomeRelease": true,
-                "closeOnHomeLongPress": true
-            })
         }
     }
 

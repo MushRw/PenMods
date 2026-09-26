@@ -14,6 +14,9 @@ Item {
 
     property int currentFrame: 0
 
+    // Preview fallback for vendor image implementations that do not expose isLoaded.
+    property bool isLoaded: true
+
     property int stopShowFrameIndex: YAnimatedImagesView.StopShowFrameAt.SSFA_Last
 
     property size frameSize: Qt.size(800, 254)

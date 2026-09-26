@@ -7,6 +7,7 @@ YBasePopLayer {
     id: root
 
     property var _pendingRequest: null
+    property var _preloadRequests: ({})
     property var _connectedItem: null
     property var _backCallback: null
     property var _destructionCallback: null
@@ -98,6 +99,8 @@ YBasePopLayer {
         }
 
         _applyProperties(item, properties);
+        if (item.hasOwnProperty("z"))
+            item.z = YUtils.nextVisualZ();
         if (item.hasOwnProperty("animationEnabled")) {
             item.animationEnabled = animationEnabled !== false;
         }
@@ -157,6 +160,76 @@ YBasePopLayer {
     function _finishPending(pending) {
         if (_pendingRequest === pending) {
             _pendingRequest = null;
+        }
+    }
+
+    function _finishPreload(request, item) {
+        delete _preloadRequests[request.popId];
+        _destroyComponent(request.component);
+        request.component = null;
+
+        if (!item)
+            return;
+        if (cachePagesMap.containsKey(request.popId) || stackPagesMap.containsKey(request.popId)) {
+            item.destroy(1);
+            return;
+        }
+
+        Object.defineProperty(item, "popId", {
+            enumerable: false,
+            configurable: false,
+            writable: false,
+            value: request.popId
+        });
+        if (item.hasOwnProperty("destroyOnBack"))
+            item.destroyOnBack = false;
+        item.visible = false;
+        cachePagesMap.put(request.popId, item);
+    }
+
+    function _incubatePreload(request) {
+        if (!request.component || request.component.status !== Component.Ready)
+            return;
+        var incubator = request.component.incubateObject(YUtils.stackView, request.properties, Qt.Asynchronous);
+        request.incubator = incubator;
+        if (incubator.status === Component.Ready) {
+            _finishPreload(request, incubator.object);
+            return;
+        }
+        incubator.onStatusChanged = function (status) {
+            if (status === Component.Ready)
+                _finishPreload(request, incubator.object);
+            else if (status === Component.Error)
+                _finishPreload(request, null);
+        };
+    }
+
+    function preload(qrcqml, properties) {
+        if ((typeof qrcqml !== "string") || qrcqml.length < 1 || !YUtils.stackView || !cachePagesMap)
+            return;
+        var popIdValue = popIdPrefix + qrcqml;
+        if (cachePagesMap.containsKey(popIdValue) || stackPagesMap.containsKey(popIdValue) || _preloadRequests[popIdValue])
+            return;
+
+        var component = Qt.createComponent(("qrc:/qml/%1.qml").arg(qrcqml), Component.Asynchronous);
+        var request = {
+            "component": component,
+            "incubator": null,
+            "popId": popIdValue,
+            "properties": _propertiesFromArguments(properties, undefined)
+        };
+        _preloadRequests[popIdValue] = request;
+        if (component.status === Component.Ready) {
+            _incubatePreload(request);
+        } else if (component.status === Component.Loading) {
+            component.statusChanged.connect(function () {
+                if (component.status === Component.Ready)
+                    _incubatePreload(request);
+                else if (component.status === Component.Error)
+                    _finishPreload(request, null);
+            });
+        } else {
+            _finishPreload(request, null);
         }
     }
 

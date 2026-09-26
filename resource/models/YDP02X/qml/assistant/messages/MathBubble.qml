@@ -16,11 +16,14 @@ Item {
     property string _svgData: ""
     property string _pendingUri: ""
 
+    signal layoutAboutToChange
+
     Timer {
         id: commitTimer
         interval: 150
         repeat: false
         onTriggered: {
+            root.layoutAboutToChange();
             root._svgData = root._pendingUri;
             root._pendingUri = "";
             root._state = MathCache.DONE;
@@ -74,6 +77,7 @@ Item {
                 root._pendingUri = result.dataUri;
                 commitTimer.restart();
             } else {
+                root.layoutAboutToChange();
                 root._svgData = "";
                 root._state = MathCache.ERROR;
             }

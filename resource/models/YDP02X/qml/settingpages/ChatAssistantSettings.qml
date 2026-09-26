@@ -46,6 +46,21 @@ YBackButtonPage {
             anchors.right: parent.right
             spacing: 9
 
+            YSettingAboutClickableItem {
+                title: "气泡渲染"
+                value: chatbot.bubbleRenderMode === "basic" ? "基础"
+                       : chatbot.bubbleRenderMode === "plain" ? "纯文本" : "完全"
+                imageName: "settings/info_more_arrow"
+                onClicked: {
+                    if (chatbot.bubbleRenderMode === "full")
+                        chatbot.bubbleRenderMode = "basic";
+                    else if (chatbot.bubbleRenderMode === "basic")
+                        chatbot.bubbleRenderMode = "plain";
+                    else
+                        chatbot.bubbleRenderMode = "full";
+                }
+            }
+
             DescribedSwitchItem {
                 title: "流式输出"
                 description: "随 LLM 模型处理进度动态更新消息内容"
@@ -63,6 +78,16 @@ YBackButtonPage {
                 interval: 0
                 onTimerTriggered: {
                     keyBoard.autoSendScanConfig = !keyBoard.autoSendScanConfig;
+                }
+            }
+
+            DescribedSwitchItem {
+                title: "语音输入"
+                description: "语音助手识别完成后发送给 AI 助手"
+                switchOn: mod.voiceChatEnabled
+                interval: 0
+                onTimerTriggered: {
+                    mod.voiceChatEnabled = !mod.voiceChatEnabled;
                 }
             }
 
@@ -132,6 +157,21 @@ YBackButtonPage {
                 }
             }
 
+            YSettingAboutClickableItem {
+                title: "API 缓存统计"
+                imageName: "settings/info_more_arrow"
+                onClicked: {
+                    var component = Qt.createComponent("ApiCacheStatsPage.qml");
+                    if (component.status !== Component.Ready) {
+                        console.error("ApiCacheStatsPage load error:", component.errorString());
+                        return;
+                    }
+                    var page = component.createObject(id_setting_item);
+                    page.backButtonClicked.connect(function () { page.todoDestroy(); });
+                    page.show();
+                }
+            }
+
             YSettingItemTitle {
                 title: "网络搜索 (Tavily)"
                 visible: chatbot.toolsEnabled
@@ -155,9 +195,14 @@ YBackButtonPage {
                 visible: chatbot.toolsEnabled
                 imageName: "settings/info_more_arrow"
                 onClicked: {
-                    openKeyboard("输入 Tavily API Key...", "", function(apiKey) {
+                    var cfg = {};
+                    try {
+                        cfg = JSON.parse(chatbot.getTavilyConfig());
+                    } catch (error) {
+                        console.warn("读取 Tavily 配置失败:", error);
+                    }
+                    openKeyboard("输入 Tavily API Key...", cfg.apiKey || "", function(apiKey) {
                         if (apiKey && apiKey.trim().length > 0) {
-                            var cfg = JSON.parse(chatbot.getTavilyConfig());
                             cfg.apiKey = apiKey.trim();
                             chatbot.setTavilyConfig(JSON.stringify(cfg));
                         }
@@ -217,7 +262,7 @@ YBackButtonPage {
 
             Connections {
                 target: chatbot
-                onShellToolConfigChanged: {
+                function onShellToolConfigChanged() {
                     var cfg = JSON.parse(chatbot.getShellToolConfig());
                     shellTimeoutItem.value = (cfg.timeout_ms / 1000) + "s";
                     shellOutputItem.value = (cfg.max_output_bytes / 1024) + " KB";
@@ -260,7 +305,7 @@ YBackButtonPage {
 
             Connections {
                 target: chatbot
-                onMathRenderConfigChanged: {
+                function onMathRenderConfigChanged() {
                     mathServerPathItem.value = chatbot.mathServerPath !== "" ? chatbot.mathServerPath : "未配置";
                 }
             }

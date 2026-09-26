@@ -30,6 +30,7 @@ YBackButtonPage {
             "provider":       modelData.provider    || "",
             "endpoint":       modelData.endpoint    || "",
             "modelId":        modelData.modelId     || "",
+            "apiProtocol":    modelData.apiProtocol === "responses" ? "responses" : "chat_completions",
             "apiKey":         modelData.apiKey      || "",
             "temperature":    modelData.temperature !== undefined ? String(modelData.temperature) : "0.7",
             "maxContextSize": modelData.maxContextSize || 0,
@@ -38,6 +39,10 @@ YBackButtonPage {
             "capAudio":       cap.audio     || false,
             "capToolCall":    cap.toolCall  || false,
             "capReasoning":   cap.reasoning || false,
+            "capImageGeneration": cap.imageGeneration || false,
+            "reasoningEffort": modelData.reasoningEffort || "",
+            "nativeWebSearchEnabled": modelData.nativeWebSearchEnabled || false,
+            "nativeWebSearchProvider": modelData.nativeWebSearchProvider || "auto",
             "extraParams":    modelData.extraParams ? JSON.stringify(modelData.extraParams) : "",
             "proxyVisionModelId":  modelData.proxyVisionModelId  || "",
             "proxyVisionPrompt":   modelData.proxyVisionPrompt   || ""
@@ -75,15 +80,20 @@ YBackButtonPage {
             "provider":       fd.provider || "",
             "endpoint":       fd.endpoint,
             "modelId":        fd.modelId,
+            "apiProtocol":    fd.apiProtocol,
             "apiKey":         fd.apiKey || "",
             "temperature":    parseFloat(fd.temperature) || 0.7,
             "maxContextSize": fd.maxContextSize || 0,
+            "reasoningEffort": fd.capReasoning ? fd.reasoningEffort : "",
+            "nativeWebSearchEnabled": fd.apiProtocol === "responses" && fd.nativeWebSearchEnabled,
+            "nativeWebSearchProvider": fd.nativeWebSearchProvider || "auto",
             "capabilities": {
                 "text":      fd.capText,
                 "vision":    fd.capVision,
                 "audio":     fd.capAudio,
                 "toolCall":  fd.capToolCall,
-                "reasoning": fd.capReasoning
+                "reasoning":       fd.capReasoning,
+                "imageGeneration": fd.capImageGeneration
             },
             "extraParams":    fd.extraParams || "",
             "proxyVisionModelId":  fd.proxyVisionModelId || "",
@@ -102,6 +112,30 @@ YBackButtonPage {
 
     function generateId(name) {
         return name.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "model";
+    }
+
+    function reasoningEffortLabel(value) {
+        var labels = { "": "默认", "none": "关闭", "minimal": "极低", "low": "低", "medium": "中", "high": "高", "xhigh": "极高" };
+        return labels[value] || "默认";
+    }
+
+    function nativeWebSearchProviderLabel(value) {
+        var labels = { "auto": "自动识别", "openai": "OpenAI", "xai": "xAI", "compatible": "兼容服务" };
+        return labels[value] || "自动识别";
+    }
+
+    function cycleNativeWebSearchProvider() {
+        var providers = ["auto", "openai", "xai", "compatible"];
+        var index = providers.indexOf(fd.nativeWebSearchProvider);
+        fd.nativeWebSearchProvider = providers[(index + 1) % providers.length];
+        fd = fd;
+    }
+
+    function cycleReasoningEffort() {
+        var values = ["", "none", "minimal", "low", "medium", "high", "xhigh"];
+        var index = values.indexOf(fd.reasoningEffort);
+        fd.reasoningEffort = values[(index + 1) % values.length];
+        fd = fd;
     }
 
     property var visionModelList: []
@@ -255,6 +289,23 @@ YBackButtonPage {
                 onClicked: openKeyboard("modelId", "请输入模型 ID")
             }
 
+            DescribedSwitchItem {
+                title: "Responses API"
+                description: "使用 /responses 协议"
+                switchOn: fd.apiProtocol === "responses"
+                interval: 0
+                onTimerTriggered: {
+                    var chatEndpoint = "https://api.deepseek.com/v1/chat/completions";
+                    var responsesEndpoint = "https://api.deepseek.com/v1/responses";
+                    if (switchOn && fd.endpoint === chatEndpoint)
+                        fd.endpoint = responsesEndpoint;
+                    else if (!switchOn && fd.endpoint === responsesEndpoint)
+                        fd.endpoint = chatEndpoint;
+                    fd.apiProtocol = switchOn ? "responses" : "chat_completions";
+                    fd = fd;
+                }
+            }
+
             DescribedClickableTextBox {
                 title: "API 密钥"
                 describe: fd.apiKey ? "●".repeat(Math.min(fd.apiKey.length, 12)) : "点击输入身份验证密钥"
@@ -340,10 +391,46 @@ YBackButtonPage {
 
             DescribedSwitchItem {
                 title: "推理（Reasoning）"
-                description: "支持思维链推理模式"
+                description: "支持推理摘要与深度控制"
                 switchOn: fd.capReasoning
                 interval: 0
                 onTimerTriggered: { fd.capReasoning = switchOn; fd = fd; }
+            }
+
+            DescribedSwitchItem {
+                title: "图片生成"
+                description: "使用 Responses API 图片生成工具"
+                switchOn: fd.capImageGeneration
+                enabled: fd.apiProtocol === "responses"
+                interval: 0
+                onTimerTriggered: { fd.capImageGeneration = switchOn; fd = fd; }
+            }
+
+            DescribedSwitchItem {
+                title: "厂商联网搜索"
+                description: "使用 Responses API 原生搜索工具"
+                switchOn: fd.nativeWebSearchEnabled
+                enabled: fd.apiProtocol === "responses"
+                interval: 0
+                onTimerTriggered: { fd.nativeWebSearchEnabled = switchOn; fd = fd; }
+            }
+
+            DescribedClickableTextBox {
+                title: "联网搜索来源"
+                describe: nativeWebSearchProviderLabel(fd.nativeWebSearchProvider)
+                describeItem.color: YColors.grayText
+                visible: fd.apiProtocol === "responses" && fd.nativeWebSearchEnabled
+                opacityChangableWhenPressed: false
+                onClicked: cycleNativeWebSearchProvider()
+            }
+
+            DescribedClickableTextBox {
+                title: "推理深度"
+                describe: reasoningEffortLabel(fd.reasoningEffort)
+                describeItem.color: fd.reasoningEffort ? YColors.textColor : YColors.grayText
+                visible: fd.capReasoning
+                opacityChangableWhenPressed: false
+                onClicked: cycleReasoningEffort()
             }
 
             // ─── 视觉代理设置（仅 Vision 关闭时显示）────

@@ -19,7 +19,15 @@ QtObject {
     // request may publish a page into the shared stack.
     property int popRequestSequence: 0
 
+    // Shared by the navigator and legacy pop layers so later pages always render on top.
+    property int visualZSequence: 5000
+
     property QtObject soundCenterPlayingCheckTimer: null
+
+    function nextVisualZ() {
+        visualZSequence += 1;
+        return visualZSequence;
+    }
 
     function beginPopRequest() {
         popRequestSequence += 1;

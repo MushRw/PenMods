@@ -12,56 +12,117 @@ YMainWindow {
     id: id_main_menu_root
 
     function showPage(qrcqml, cachePage, properties) {
-        const useCache = !!cachePage;
-        if (useCache)
-            return id_page_pop_helper.cacheShow(qrcqml, false, properties);
-        return id_page_pop_helper.show(qrcqml, false, properties);
+        return id_page_pop_helper.pushLegacy(qrcqml, properties, {
+            "cache": !!cachePage,
+            "animation": true
+        });
     }
 
     function closeAudioPlayer() {
-        if (id_audio_player_loader.item && id_audio_player_loader.item.isShowing) {
+        if (id_audio_player_loader.item) {
             id_audio_player_loader.item.close();
         }
     }
 
-    function requestKeyboard() {
+    property var mainKeyboardPage: null
+    property bool mainKeyboardPreloadPending: false
+    property bool mainKeyboardRequestPending: false
+
+    function setupMainKeyboard(page) {
+        if (!page || mainKeyboardPage)
+            return;
+
+        mainKeyboardPage = page;
+        page.visible = false;
+        page.backButtonClicked.connect(function() {
+            qmlGlobal.inputPageShowing = false;
+            page.visible = false;
+            if (typeof page.resetInput === "function")
+                page.resetInput("");
+        });
+        page.inputFinished.connect(function(contents) {
+            qmlGlobal.canAutoAddToWb = true;
+            if (resultManager.entryResult(contents, "", "", YEnum.PageIndex.Dict, 1)) {
+                const pageIndex = (qmlGlobal.currentPageIndex === YEnum.PageIndex.Fav)
+                ? YEnum.PageIndex.Fav
+                : YEnum.PageIndex.NonePage;
+                qmlGlobal.showDictPage(pageIndex);
+                resultManager.isReportButtonVisible = true;
+                id_scan_words_result_loader.active = false;
+            } else {
+                qmlGlobal.canAutoAddToWb = false;
+                showEmptyAndToast();
+            }
+        });
+
+        if (mainKeyboardRequestPending) {
+            mainKeyboardRequestPending = false;
+            activateMainKeyboard();
+        }
+    }
+
+    function preloadMainKeyboard() {
+        if (mainKeyboardPage || mainKeyboardPreloadPending)
+            return;
+        mainKeyboardPreloadPending = true;
+
         let component = qmlCreateComponent("YInputPage");
+        if (component.status === Component.Error) {
+            mainKeyboardPreloadPending = false;
+            console.error("!!! YInputPage 组件创建失败 !!!", component.errorString());
+            return;
+        }
 
-        if (component.status === Component.Ready) {
-            let incubator = component.incubateObject(id_page_keyboard.containerItem);
-
-            let onFinished = function(obj) {
-                console.log("main.qml===YInputPage", obj, "is ready!");
-                id_page_keyboard.inputPageCreated(obj);
-            };
-
-            if (incubator.status !== Component.Ready) {
+        function incubateKeyboard() {
+            let incubator = component.incubateObject(id_page_keyboard.containerItem, {}, Qt.Asynchronous);
+            if (incubator.status === Component.Ready) {
+                mainKeyboardPreloadPending = false;
+                setupMainKeyboard(incubator.object);
+            } else {
                 incubator.onStatusChanged = function(status) {
                     if (status === Component.Ready) {
-                        onFinished(incubator.object);
+                        mainKeyboardPreloadPending = false;
+                        setupMainKeyboard(incubator.object);
                     } else if (status === Component.Error) {
+                        mainKeyboardPreloadPending = false;
                         console.error("YInputPage 孵化失败 (Incubation Error)!");
                     }
                 };
-            } else {
-                onFinished(incubator.object);
             }
         }
-        else if (component.status === Component.Error) {
-            console.error("!!! YInputPage 组件创建失败 (Component Error) !!!");
-            console.error(component.errorString());
-        }
-        else if (component.status === Component.Loading) {
-            console.log("YInputPage 正在加载中...");
+
+        if (component.status === Component.Ready) {
+            incubateKeyboard();
+        } else if (component.status === Component.Loading) {
             component.statusChanged.connect(function() {
-                if (component.status === Component.Ready) {
-                    console.log("YInputPage 异步加载完成，请重试或修改代码支持异步");
-                } else if (component.status === Component.Error) {
-                    console.error("!!! YInputPage 异步加载失败 !!!");
-                    console.error(component.errorString());
+                if (component.status === Component.Ready)
+                    incubateKeyboard();
+                else if (component.status === Component.Error) {
+                    mainKeyboardPreloadPending = false;
+                    console.error("!!! YInputPage 异步加载失败 !!!", component.errorString());
                 }
             });
         }
+    }
+
+    function activateMainKeyboard() {
+        if (!mainKeyboardPage) {
+            mainKeyboardRequestPending = true;
+            preloadMainKeyboard();
+            return;
+        }
+
+        if (typeof mainKeyboardPage.resetInput === "function")
+            mainKeyboardPage.resetInput(resultManager.mainQuery);
+        else
+            mainKeyboardPage.enterText(resultManager.mainQuery);
+        mainKeyboardPage.placeHolderText = "请输入要查询的内容";
+        mainKeyboardPage.show();
+        qmlGlobal.inputPageShowing = true;
+    }
+
+    function requestKeyboard() {
+        activateMainKeyboard();
     }
 
     Component.onCompleted: {
@@ -70,20 +131,23 @@ YMainWindow {
         systemBase.headSetInitStatus();
     }
 
-    YIndexPage {
-        id: id_index_page
-    }
+    Item {
+        id: id_index_page_host
+        anchors.fill: parent
+        property alias transitionX: id_index_page_translate.x
+        transform: Translate {
+            id: id_index_page_translate
+            x: 0
+        }
 
-    YStackView {
-        id: id_stack_view
-        onCurrentPopIdValidChanged: {
-            if (!currentPopIdValid)
-                qmlGlobal.currentPageIndex = YEnum.PageIndex.NonePage;
+        YIndexPage {
+            id: id_index_page
         }
     }
 
-    YPopLayer {
+    YNavigator {
         id: id_page_pop_helper
+        backgroundItem: id_index_page_host
     }
 
     YScanWordsResultLoader {
@@ -111,35 +175,8 @@ YMainWindow {
         id: id_page_keyboard
 
         function inputPageCreated(incubatorObject) {
-            incubatorObject.backButtonClicked.connect(function() {
-                qmlGlobal.inputPageShowing = false;
-                if (typeof incubatorObject.todoDestroy === "function") {
-                    incubatorObject.todoDestroy();
-                } else {
-                    incubatorObject.destroy();
-                }
-                incubatorObject = null;
-            });
-
-            incubatorObject.inputFinished.connect(function(contents) {
-                qmlGlobal.canAutoAddToWb = true;
-                if (resultManager.entryResult(contents, "", "", YEnum.PageIndex.Dict, 1)) {
-                    const pageIndex = (qmlGlobal.currentPageIndex === YEnum.PageIndex.Fav)
-                    ? YEnum.PageIndex.Fav
-                    : YEnum.PageIndex.NonePage;
-                    qmlGlobal.showDictPage(pageIndex);
-                    resultManager.isReportButtonVisible = true;
-                    id_scan_words_result_loader.active = false;
-                } else {
-                    qmlGlobal.canAutoAddToWb = false;
-                    showEmptyAndToast();
-                }
-            });
-
-            incubatorObject.placeHolderText = "请输入要查询的内容";
-            incubatorObject.enterText(resultManager.mainQuery);
-            incubatorObject.show();
-            qmlGlobal.inputPageShowing = true;
+            setupMainKeyboard(incubatorObject);
+            activateMainKeyboard();
         }
 
         isShowing: qmlGlobal.inputPageShowing
@@ -156,9 +193,16 @@ YMainWindow {
                 qmlGlobal.inputPageShowing = false;
             }
 
-            showPage("YSettingPage");
-            if ((index < YEnum.SettingIndex.SI_COUNT) && id_page_pop_helper.popItemObject)
-                id_page_pop_helper.popItemObject.settingItemClicked(index, true);
+            id_page_pop_helper.afterTransition(function() {
+                showPage("YSettingPage");
+                if (index < YEnum.SettingIndex.SI_COUNT) {
+                    id_page_pop_helper.afterTransition(function() {
+                        const settingPage = id_page_pop_helper.popItemObject;
+                        if (settingPage && typeof settingPage.settingItemClicked === "function")
+                            settingPage.settingItemClicked(index, true);
+                    });
+                }
+            });
 
             id_scan_words_result_loader.hidden();
             closeQuickSetting();
@@ -319,7 +363,7 @@ YMainWindow {
                     showPage("AudioRecorder");
                     break;
                 case PageIndex.ChatAssistant:
-                    showPage("ChatAssistant");
+                    showPage("ChatAssistant", true);
                     break;
                 case PageIndex.PluginManager:
                     showPage("PluginManager");
@@ -409,6 +453,15 @@ YMainWindow {
                 id_audio_player_loader.source = "qml/audioplayer/YAudioPlayer.qml";
             }
             id_audio_player_loader.active = true;
+            preloadMainKeyboard();
+            id_chat_assistant_preload_timer.start();
         }
+    }
+
+    Timer {
+        id: id_chat_assistant_preload_timer
+        interval: 50
+        repeat: false
+        onTriggered: id_page_pop_helper.preload("ChatAssistant")
     }
 }

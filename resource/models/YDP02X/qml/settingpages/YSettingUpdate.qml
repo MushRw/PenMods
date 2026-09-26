@@ -29,6 +29,11 @@ YSettingItemPage {
         updater.check()
     }
 
+    function navigationActivated(resumed) {
+        if (resumed)
+            checkUpdate()
+    }
+
     // 开始下载新版本
     function downloadStart() {
         updater.download()
@@ -98,7 +103,7 @@ YSettingItemPage {
     YSettingUpdateCheckNetworkLoader {
         id: id_setting_update_check_network_loader
         onCheckNetwork: {
-            id_pop_layer.show("settingpages/YSettingWifi")
+            openSettingPage("YSettingWifi")
         }
     }
 
@@ -108,17 +113,6 @@ YSettingItemPage {
 
     YSettingUpdateLowPowerLoader {
         id: id_setting_update_low_power_loader
-    }
-
-    YPopLayer {
-        id: id_pop_layer
-        onPopItemObjectChanged: {
-            if (null !== popItemObject) {
-                popItemObject.backButtonClicked.connect(function(){
-                    checkUpdate()
-                })
-            }
-        }
     }
 
     onBackButtonClicked: {

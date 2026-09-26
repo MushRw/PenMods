@@ -1,4 +1,6 @@
 import QtQuick 2.12
+import com.youdao.pen 1.0
+import "qrc:/qml/commons"
 
 // 符号页：3 行 × 10 列（26 个符号 + 退格/空格/回车/回到字母）。
 YInputTextCharsModelBase {

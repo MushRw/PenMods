@@ -32,6 +32,7 @@ YBackButtonAudioPage {
 
             YAudioPageDomainButton {
                 id: id_my_imports_button
+                visible: !antiEmbs.active
                 name: "文件管理"
                 count: "Beta"
                 imageName: "audiopage/my_imports"
@@ -42,11 +43,13 @@ YBackButtonAudioPage {
             }
 
             // 插件管理：从首页搬到这里，沿用首页那张图标
+            // 合并上游（antiembs）：防嵌入模式激活时隐藏敏感入口
             YAudioPageDomainButton {
                 id: id_plugin_manager_button
                 name: "插件管理"
                 count: ""
                 imageName: "qrc:/images/home/home-plugin.png"
+                visible: typeof antiEmbs !== "undefined" ? !antiEmbs.active : true
 
                 onValidClicked: {
                     id_pop_layer.show("PluginManager")

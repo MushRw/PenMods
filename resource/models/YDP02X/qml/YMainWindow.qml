@@ -48,9 +48,9 @@ YWindow {
     YQuickSettingLayer {
         id: id_quick_setting_layer
         y: - id_quick_setting_layer.height
-        // 毛玻璃取景交给 YGlassSurface 实时做（live + mapToItem），
-        // 这里不再自己缓存一张 ShaderEffectSource，省一层 FBO
-        backdropItem: id_inner_item
+        // 合并上游：快速设置面板毛玻璃改用 fastBlurTarget（内部 FastBlur），
+        // 取景对象 = 主窗口内容容器（等效旧 backdropItem 实时取景语义）
+        fastBlurTarget: id_inner_item
     }
 
     YMouseArea {

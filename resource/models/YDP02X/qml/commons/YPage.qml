@@ -13,7 +13,10 @@ YPopItem {
     property int pageIndex: -1
     property bool animationEnabled: true
     property bool destroyOnBack: true
+    property bool navigationManaged: false
+    property var navigator: null
     property bool indexPageShowAnimationRunning: false
+    property bool deferHomeCloseUntilLongPress: false
 
     readonly property bool animationRunning: false
 
@@ -26,8 +29,19 @@ YPopItem {
         todoDestroy();
     }
 
+    function navigationDeactivated() {
+        id_deferred_home_close_timer.stop();
+    }
+
+    function navigate(qmlName, properties, options) {
+        if (navigator && typeof navigator.pushLegacy === "function")
+            return navigator.pushLegacy(qmlName, properties || {}, options || {});
+        console.warn("YPage navigation is unavailable:", qmlName);
+        return null;
+    }
+
     function syncCurrentPageIndex() {
-        if (visible && pageIndex >= 0 && qmlGlobal.currentPageIndex !== pageIndex) {
+        if (!navigationManaged && visible && pageIndex >= 0 && qmlGlobal.currentPageIndex !== pageIndex) {
             qmlGlobal.currentPageIndex = pageIndex;
         }
     }
@@ -40,11 +54,20 @@ YPopItem {
 
     onBackButtonClicked: {
         console.warn("YPage.qml===backButtonClicked===objectName: ", objectName);
-        YUtils.beginPopRequest();
-        close();
-        if (typeof id_ypage_root.popId != "undefined") {
-            YUtils.removeKey(id_ypage_root.popId);
+        if (!navigationManaged) {
+            YUtils.beginPopRequest();
+            close();
+            if (typeof id_ypage_root.popId != "undefined") {
+                YUtils.removeKey(id_ypage_root.popId);
+            }
         }
+    }
+
+    Timer {
+        id: id_deferred_home_close_timer
+        interval: 120
+        repeat: false
+        onTriggered: backButtonClicked()
     }
 
     YBackground {
@@ -79,7 +102,19 @@ YPopItem {
         enabled: id_ypage_root.visible
         function onClosePageWhileHomeKeyReleased() {
             console.log("YPage.qml===onClosePageWhileHomeKeyReleased===");
-            backButtonClicked();
+            if (deferHomeCloseUntilLongPress)
+                id_deferred_home_close_timer.restart();
+            else
+                backButtonClicked();
+        }
+    }
+
+    Connections {
+        target: systemBase
+        ignoreUnknownSignals: true
+        enabled: id_ypage_root.visible && deferHomeCloseUntilLongPress
+        function onHomeKeyLongPress() {
+            id_deferred_home_close_timer.stop();
         }
     }
 

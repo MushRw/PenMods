@@ -13,7 +13,7 @@ Rectangle {
 
     signal pressAndHold(real mouseX, real mouseY)
 
-    readonly property real targetWidth: Math.min(Math.max(contentText.implicitWidth + (contentText.text.length <= 1 ? 12 : 24), 40), maxBubbleWidth)
+    readonly property real targetWidth: Math.min(Math.max(Math.ceil(contentText.implicitWidth) + 26, 40), maxBubbleWidth)
     readonly property real targetHeight: Math.max(contentText.implicitHeight + 18, 36)
 
     width: targetWidth
@@ -21,7 +21,8 @@ Rectangle {
     x: isUser ? (containerWidth - width - 8) : 8
 
     radius: 16
-    color: isUser ? YColors.red : YColors.grayNormal
+    color: isUser ? "#2B5278" : "#182533"
+    clip: true
 
     Behavior on width {
         enabled: !root.isComplete
@@ -32,23 +33,27 @@ Rectangle {
         NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
     }
 
-    MouseArea {
-        anchors.fill: parent
-        onPressAndHold: root.pressAndHold(mouseX, mouseY)
-    }
-
     Text {
         id: contentText
         text: root.text
-        width: Math.min(implicitWidth, root.maxBubbleWidth - 24)
-        anchors.centerIn: parent
-        wrapMode: Text.Wrap
-        color: YColors.white
+        anchors.fill: parent
+        anchors.leftMargin: 13
+        anchors.rightMargin: 13
+        anchors.topMargin: 9
+        anchors.bottomMargin: 9
+        wrapMode: Text.WrapAnywhere
+        color: "#FFFFFF"
         font.pixelSize: 14
         font.family: root.fontFamily || ""
         lineHeight: 1.3
         horizontalAlignment: Text.AlignLeft
         textFormat: (root.isUser || !root.isComplete) ? Text.PlainText : Text.RichText
         linkColor: YColors.red
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        z: 1
+        onPressAndHold: root.pressAndHold(mouseX, mouseY)
     }
 }

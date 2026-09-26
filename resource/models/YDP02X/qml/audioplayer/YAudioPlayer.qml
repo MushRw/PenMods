@@ -81,9 +81,13 @@ Item {
 
         state = "close"
         if (YEnum.PM_AudioPlayer === playerMode && YEnum.STOPPED !== mediaPlayerManager.playState) {
-            // 音乐模式且仍在播放 → 缩小到悬浮球，保留音频引用
-            id_audio_player_indicator.show()
-            id_audio_player_indicator.closeExtendState()
+            // 音乐模式继续播放；悬浮窗隐藏时由快捷设置层提供控制入口。
+            if (musicPlayer.hideFloatingWindow) {
+                id_audio_player_indicator.hide()
+            } else {
+                id_audio_player_indicator.show()
+                id_audio_player_indicator.closeExtendState()
+            }
         } else if (YEnum.STOPPED === mediaPlayerManager.playState) {
             // 播放已停止 → 释放音频引用
             musicPlayer.releaseAudio()
@@ -101,8 +105,8 @@ Item {
         cleanupInternal()
         visible = false
         playStatePauseConfirm()
-        // 隐藏时释放音频引用（完全退出播放界面）
-        musicPlayer.releaseAudio()
+        // 扫描导致页面切换时保留暂停会话，其他隐藏场景正常释放音频引用
+        musicPlayer.releaseAudioAfterHide()
     }
 
     function raise() {
@@ -214,6 +218,7 @@ Item {
 
         YAudioPlayerPlayBar {
             id: id_play_bar
+            z: 2
         }
 
         YProgressBar {
@@ -264,6 +269,61 @@ Item {
                     anchors.fill: parent
                     color: YColors.red
                 }
+            }
+        }
+
+        // Keep the visual bar thin while providing a touch target that is easy to drag.
+        YMouseArea {
+            id: id_progress_seek_area
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.rightMargin: id_play_bar.state === "show" ? 170 : 0
+            anchors.bottom: parent.bottom
+            height: 26
+            z: 1
+            preventStealing: true
+            enabled: mediaPlayerManager.duration > 0
+            property bool wasPlayingBeforeSeek: false
+
+            function seekTo(mouseX) {
+                if (width <= 0 || mediaPlayerManager.duration <= 0) {
+                    return
+                }
+                var ratio = Math.max(0, Math.min(1, mouseX / width))
+                id_play_bar.callStopRepeat()
+                musicPlayer.seekToPosition(Math.round(mediaPlayerManager.duration * ratio))
+                id_player_progress_timeinfo_item.visible = true
+                id_progress_seek_hide_timer.restart()
+            }
+
+            onPressed: {
+                wasPlayingBeforeSeek = mediaPlayerManager.playState === YEnum.PLAYING
+                seekTo(mouse.x)
+            }
+            onPositionChanged: {
+                if (pressed) {
+                    seekTo(mouse.x)
+                }
+            }
+            onReleased: {
+                seekTo(mouse.x)
+                if (wasPlayingBeforeSeek) {
+                    mediaPlayerManager.onClickedPlay()
+                }
+                wasPlayingBeforeSeek = false
+            }
+            onCanceled: {
+                if (wasPlayingBeforeSeek) {
+                    mediaPlayerManager.onClickedPlay()
+                }
+                wasPlayingBeforeSeek = false
+                id_progress_seek_hide_timer.restart()
+            }
+
+            Timer {
+                id: id_progress_seek_hide_timer
+                interval: 700
+                onTriggered: id_player_progress_timeinfo_item.visible = false
             }
         }
     }
@@ -466,6 +526,29 @@ Item {
         enabled: id_audio_player.state === "show"
         function onHomeKeyLongPress() {
             id_audio_player.close()
+        }
+    }
+
+    Connections {
+        target: musicPlayer
+        ignoreUnknownSignals: true
+        function onStopRequested() {
+            if (id_audio_player.state === "show") {
+                id_audio_player.close()
+            }
+        }
+        function onHideFloatingWindowChanged() {
+            if (id_audio_player.state !== "close"
+                    || id_audio_player.playerMode !== YEnum.PM_AudioPlayer
+                    || mediaPlayerManager.playState === YEnum.STOPPED) {
+                return
+            }
+            if (musicPlayer.hideFloatingWindow) {
+                id_audio_player_indicator.hide()
+            } else {
+                id_audio_player_indicator.show()
+                id_audio_player_indicator.closeExtendState()
+            }
         }
     }
 }

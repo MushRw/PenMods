@@ -1,7 +1,7 @@
 import QtQuick 2.12
-import "../../commons"
+import "MessageLayoutCache.js" as MessageLayoutCache
 
-Column {
+Item {
     id: root
 
     property string rawText: ""
@@ -9,86 +9,429 @@ Column {
     property bool serverAvailable: false
     property real maxWidth: 300
     property var fontFamily
+    property bool layoutBusy: false
+    property int parseDelay: 16
+    readonly property bool renderReady: _renderReady && !crossFadeAnimation.running
 
-    spacing: 6
     width: maxWidth
+    implicitHeight: !isComplete ? streamingText.implicitHeight
+                                : (_renderReady ? richContentColumn.implicitHeight : placeholderHeight)
 
     property var _blocks: []
+    property int _renderGeneration: 0
+    property int _loadedBlocks: 0
+    property int _visibleBlockCount: 0
+    property bool _renderReady: false
+    property bool _showSkeleton: true
+    property bool _useFastPath: false
+    property string _fastHtml: ""
+    property real _cachedHeight: 0
+    property string _parseRequestId: ""
+    property bool _parsePending: false
+    property bool _commitPending: false
+    property string _renderSource: ""
+    property bool _hasRenderSource: false
+    readonly property real placeholderHeight: streamingText.implicitHeight
+
+    signal renderCommitStarted
+
+    function _commitRender() {
+        if (_renderReady)
+            return;
+        if (layoutBusy) {
+            _commitPending = true;
+            return;
+        }
+        _commitPending = false;
+        renderWatchdog.stop();
+        commitSettleTimer.begin();
+    }
+
+    function _finishRenderCommit() {
+        if (_renderReady)
+            return;
+        if (layoutBusy) {
+            _commitPending = true;
+            return;
+        }
+        _commitPending = false;
+        renderCommitStarted();
+        _renderReady = true;
+        richContentColumn.opacity = 0;
+        _cachedHeight = richContentColumn.implicitHeight;
+        MessageLayoutCache.setHeight(rawText, maxWidth, _cachedHeight);
+        crossFadeAnimation.restart();
+    }
+
+    onLayoutBusyChanged: {
+        if (layoutBusy) {
+            blockBatchTimer.stop();
+            if (_blocks.length === 0) {
+                parseTimer.stop();
+                if (isComplete && !_renderReady)
+                    _parsePending = true;
+            }
+            return;
+        }
+        // A completed block tree must be committed before considering a deferred parse.
+        if (_commitPending || (_blocks.length > 0 && _loadedBlocks >= _blocks.length)) {
+            _parsePending = false;
+            _commitRender();
+        } else if (_parsePending) {
+            _parsePending = false;
+            parseTimer.restart();
+        } else if (_visibleBlockCount < _blocks.length) {
+            blockBatchTimer.restart();
+        }
+    }
+
+    function _cancelParseRequest() {
+        if (_parseRequestId !== "" && typeof chatbot !== "undefined" && chatbot !== null
+                && chatbot.cancelMarkdownParse)
+            chatbot.cancelMarkdownParse(_parseRequestId);
+        _parseRequestId = "";
+    }
+
+    function _scheduleParse() {
+        if (!isComplete)
+            return;
+
+        // QML applies model roles independently when a delegate is created. Avoid
+        // restarting the same parse for rawText, isComplete, and completion events.
+        if (_hasRenderSource && _renderSource === rawText
+                && (_renderReady || parseTimer.running || _parsePending || _parseRequestId !== ""
+                    || _blocks.length > 0 || _useFastPath || commitSettleTimer.running
+                    || _commitPending || renderWatchdog.running))
+            return;
+
+        _renderSource = rawText;
+        _hasRenderSource = true;
+        _cancelParseRequest();
+        _renderGeneration++;
+        _loadedBlocks = 0;
+        _visibleBlockCount = 0;
+        _renderReady = false;
+        commitSettleTimer.stop();
+        _parsePending = false;
+        _commitPending = false;
+        _showSkeleton = true;
+        _useFastPath = false;
+        _fastHtml = "";
+        _cachedHeight = MessageLayoutCache.getHeight(rawText, maxWidth);
+        crossFadeAnimation.stop();
+        skeletonPlaceholder.opacity = 1;
+        richContentColumn.opacity = 0;
+        _blocks = [];
+        renderWatchdog.restart();
+        if (layoutBusy)
+            _parsePending = true;
+        else
+            parseTimer.restart();
+    }
+
+    function _blockLoaded(generation) {
+        if (generation !== _renderGeneration)
+            return;
+        _loadedBlocks++;
+        if (_loadedBlocks >= _blocks.length)
+            _commitRender();
+    }
 
     onIsCompleteChanged: {
         if (isComplete)
-            _parse();
+            _scheduleParse();
+        else {
+            _cancelParseRequest();
+            parseTimer.stop();
+            blockBatchTimer.stop();
+            renderWatchdog.stop();
+            _renderGeneration++;
+            _blocks = [];
+            _renderReady = false;
+            commitSettleTimer.stop();
+            _parsePending = false;
+            _commitPending = false;
+            _showSkeleton = false;
+            crossFadeAnimation.stop();
+        }
     }
     onRawTextChanged: {
         if (isComplete)
-            _parse();
+            _scheduleParse();
     }
     Component.onCompleted: {
         if (isComplete)
-            _parse();
+            _scheduleParse();
+    }
+    Component.onDestruction: _cancelParseRequest()
+
+    Timer {
+        id: parseTimer
+        interval: root.parseDelay
+        repeat: false
+        onTriggered: root._parse(root._renderGeneration)
+    }
+
+    Timer {
+        id: commitSettleTimer
+        property real lastHeight: -1
+        property int stableFrames: 0
+        property int ticks: 0
+        interval: 16
+        repeat: true
+
+        function begin() {
+            if (running)
+                return;
+            lastHeight = -1;
+            stableFrames = 0;
+            ticks = 0;
+            restart();
+        }
+
+        onTriggered: {
+            if (root._renderReady) {
+                stop();
+                return;
+            }
+            if (root.layoutBusy) {
+                stop();
+                root._commitPending = true;
+                return;
+            }
+
+            var currentHeight = richContentColumn.implicitHeight;
+            if (lastHeight >= 0 && Math.abs(currentHeight - lastHeight) <= 0.5)
+                stableFrames++;
+            else
+                stableFrames = 0;
+            lastHeight = currentHeight;
+            ticks++;
+
+            if ((currentHeight > 0 || root.rawText.length === 0) && stableFrames >= 1) {
+                stop();
+                root._finishRenderCommit();
+            } else if (ticks >= 8) {
+                stop();
+                root._commitPending = true;
+                renderWatchdog.restart();
+            }
+        }
+    }
+
+    Timer {
+        id: renderWatchdog
+        interval: 800
+        repeat: false
+        onTriggered: {
+            if (!root.isComplete || root._renderReady)
+                return;
+            if (root.layoutBusy) {
+                restart();
+            } else if (root._useFastPath
+                       || (root._blocks.length > 0 && root._loadedBlocks >= root._blocks.length)) {
+                root._commitRender();
+            } else if (root._blocks.length > 0) {
+                if (!blockBatchTimer.running)
+                    blockBatchTimer.restart();
+                restart();
+            } else if (root._parseRequestId !== "") {
+                restart();
+            } else {
+                root._parsePending = false;
+                parseTimer.restart();
+                restart();
+            }
+        }
+    }
+
+    Connections {
+        target: typeof chatbot !== "undefined" ? chatbot : null
+        ignoreUnknownSignals: true
+
+        function onMarkdownParsed(requestId, blocksJson) {
+            if (requestId !== root._parseRequestId)
+                return;
+            root._parseRequestId = "";
+            var blocks;
+            try {
+                blocks = JSON.parse(blocksJson);
+            } catch (error) {
+                parseTimer.restart();
+                return;
+            }
+            MessageLayoutCache.set(root.rawText, blocks);
+            root._blocks = blocks;
+            root._visibleBlockCount = Math.min(3, blocks.length);
+            if (blocks.length === 0)
+                root._commitRender();
+            else
+                blockBatchTimer.restart();
+        }
+    }
+
+    Timer {
+        id: blockBatchTimer
+        interval: 16
+        repeat: true
+        onTriggered: {
+            if (root.layoutBusy)
+                return;
+            var remaining = root._blocks.length - root._visibleBlockCount;
+            var batchSize = remaining > 24 ? 4 : 3;
+            root._visibleBlockCount = Math.min(root._visibleBlockCount + batchSize, root._blocks.length);
+            if (root._visibleBlockCount >= root._blocks.length)
+                stop();
+        }
+    }
+
+    SequentialAnimation {
+        id: crossFadeAnimation
+        ParallelAnimation {
+            NumberAnimation {
+                target: skeletonPlaceholder
+                property: "opacity"
+                to: 0
+                duration: 140
+                easing.type: Easing.OutCubic
+            }
+            NumberAnimation {
+                target: richContentColumn
+                property: "opacity"
+                to: 1
+                duration: 140
+                easing.type: Easing.OutCubic
+            }
+        }
+        ScriptAction { script: root._showSkeleton = false }
     }
 
     // ── 阶段 1：流式加载中，纯文本 ──
     Text {
-        visible: !root.isComplete
+        id: streamingText
+        opacity: root.isComplete ? 0 : 1
         width: root.maxWidth
         text: root.rawText
         textFormat: Text.PlainText
-        wrapMode: Text.Wrap
-        color: YColors.white
+        wrapMode: Text.WrapAnywhere
+        color: "#FFFFFF"
         font.pixelSize: 14
         font.family: root.fontFamily || ""
         lineHeight: 1.3
     }
 
-    // ── 阶段 2：加载完成后 ──
-    Repeater {
-        model: root.isComplete ? root._blocks : []
+    // 完成态先显示廉价纯文本，富文本准备好后原子替换。
+    Item {
+        id: skeletonPlaceholder
+        visible: root.isComplete && root._showSkeleton
+        width: root.maxWidth
+        height: root.placeholderHeight
+        clip: true
 
-        delegate: Loader {
+        Text {
+            anchors.fill: parent
+            text: root.rawText
+            textFormat: Text.PlainText
+            wrapMode: Text.WrapAnywhere
+            color: "#D7E3EE"
+            font.pixelSize: 14
+            font.family: root.fontFamily || ""
+            lineHeight: 1.3
+        }
+    }
+
+    Column {
+        id: richContentColumn
+        visible: root.isComplete
+        width: root.maxWidth
+        spacing: 6
+        opacity: 0
+        onImplicitHeightChanged: {
+            if (!root._renderReady)
+                return;
+            root._cachedHeight = implicitHeight;
+            MessageLayoutCache.setHeight(root.rawText, root.maxWidth, implicitHeight);
+        }
+
+        Text {
+            id: fastRichText
+            visible: root._useFastPath
             width: root.maxWidth
-            sourceComponent: {
-                switch (modelData.type) {
-                    case "math_block":  return blockMathComponent;
-                    case "code_block":  return codeBlockComponent;
-                    case "heading":     return headingComponent;
-                    case "list_block":  return listBlockComponent;
-                    case "blockquote":  return blockquoteComponent;
-                    case "hr":          return hrComponent;
-                    case "table":       return tableComponent;
-                    default:            return paragraphComponent;
-                }
-            }
+            text: root._fastHtml
+            textFormat: Text.RichText
+            wrapMode: Text.WrapAnywhere
+            color: "#FFFFFF"
+            font.pixelSize: 14
+            font.family: root.fontFamily || ""
+            lineHeight: 1.3
+            linkColor: "#62A8EA"
+        }
 
-            onLoaded: {
-                switch (modelData.type) {
+        Repeater {
+            model: root.isComplete && !root._useFastPath ? root._blocks.length : 0
+
+            delegate: Loader {
+                property int renderGeneration: root._renderGeneration
+                property var blockData: root._blocks[index]
+                property int reportedGeneration: -1
+                width: root.maxWidth
+                active: index < root._visibleBlockCount
+
+                function reportLoaded() {
+                    if (reportedGeneration === renderGeneration)
+                        return;
+                    reportedGeneration = renderGeneration;
+                    root._blockLoaded(renderGeneration);
+                }
+                asynchronous: false
+                sourceComponent: {
+                    switch (blockData.type) {
+                    case "math_block": return blockMathComponent;
+                    case "code_block": return codeBlockComponent;
+                    case "heading": return headingComponent;
+                    case "list_block": return listBlockComponent;
+                    case "blockquote": return blockquoteComponent;
+                    case "hr": return hrComponent;
+                    case "table": return tableComponent;
+                    default: return paragraphComponent;
+                    }
+                }
+
+                onLoaded: {
+                    switch (blockData.type) {
                     case "math_block":
-                        item.mContent = modelData.content;
+                        item.mContent = blockData.content;
                         break;
                     case "code_block":
-                        item.mCode = modelData.content;
-                        item.mLanguage = modelData.language || "";
+                        item.mCode = blockData.content;
+                        item.mLanguage = blockData.language || "";
                         break;
                     case "heading":
-                        item.mLevel = modelData.level;
-                        item.mSegments = modelData.segments;
+                        item.mLevel = blockData.level;
+                        item.mSegments = blockData.segments;
                         break;
                     case "list_block":
-                        item.mItems = modelData.items;
-                        item.mOrdered = modelData.ordered || false;
+                        item.mItems = blockData.items;
+                        item.mOrdered = blockData.ordered || false;
                         break;
                     case "blockquote":
-                        item.mSegments = modelData.segments;
+                        item.mSegments = blockData.segments;
                         break;
                     case "hr":
                         break;
                     case "table":
-                        item.mHeaders = modelData.headers;
-                        item.mRows = modelData.rows;
+                        item.mHeaders = blockData.headers;
+                        item.mRows = blockData.rows;
                         break;
                     default:
-                        item.mSegments = modelData.segments;
+                        item.mSegments = blockData.segments;
                         break;
+                    }
+                    reportLoaded();
+                }
+                onStatusChanged: {
+                    if (status === Loader.Error)
+                        reportLoaded();
                 }
             }
         }
@@ -104,6 +447,7 @@ Column {
             serverAvailable: root.serverAvailable
             maxWidth: root.maxWidth
             fontFamily: root.fontFamily
+            onLayoutAboutToChange: root.renderCommitStarted()
         }
     }
 
@@ -127,8 +471,8 @@ Column {
                 anchors.margins: 8
                 text: parent.mCode
                 textFormat: Text.PlainText
-                wrapMode: Text.Wrap
-                color: YColors.white
+                wrapMode: Text.WrapAnywhere
+                color: "#D4D4D4"
                 font.pixelSize: 12
                 font.family: "Courier New, Consolas, monospace"
                 lineHeight: 1.4
@@ -170,8 +514,8 @@ Column {
             text: _renderMarkdownInline(mContent)
             textFormat: Text.RichText
             width: Math.min(implicitWidth, root.maxWidth)
-            wrapMode: Text.Wrap
-            color: YColors.white
+            wrapMode: Text.WrapAnywhere
+            color: "#FFFFFF"
             font.pixelSize: _headingSize(mLevel)
             font.bold: true
             font.family: root.fontFamily || ""
@@ -219,8 +563,14 @@ Column {
                         Repeater {
                             model: modelData
                             delegate: Loader {
+                                property real contentWidth: parent.width
+                                width: contentWidth
                                 sourceComponent: modelData.type === "math" ? inlineMathComponent : textComponent
-                                onLoaded: item.mContent = modelData.content
+                                onLoaded: {
+                                    if (modelData.type !== "math")
+                                        item.availableWidth = contentWidth;
+                                    item.mContent = modelData.content;
+                                }
                             }
                         }
                     }
@@ -269,8 +619,8 @@ Column {
             text: _renderMarkdownInline(mContent)
             textFormat: Text.RichText
             width: parent ? parent.width : root.maxWidth
-            wrapMode: Text.Wrap
-            color: YColors.textSecondary
+            wrapMode: Text.WrapAnywhere
+            color: "#AAAAAA"
             font.pixelSize: 14
             font.family: root.fontFamily || ""
             font.italic: true
@@ -296,7 +646,7 @@ Column {
             property var mRows: []
 
             width: root.maxWidth
-            height: tableText.implicitHeight + 2
+            height: tableText.implicitHeight + 10
             radius: 4
             color: YColors.grayNormal
             border.color: YColors.border
@@ -308,8 +658,8 @@ Column {
                 anchors.margins: 4
                 text: _tableHtml()
                 textFormat: Text.RichText
-                wrapMode: Text.Wrap
-                color: YColors.white
+                wrapMode: Text.WrapAnywhere
+                color: "#DDDDDD"
                 font.pixelSize: 11
                 font.family: root.fontFamily || ""
                 lineHeight: 1.2
@@ -352,8 +702,13 @@ Column {
             Repeater {
                 model: mSegments
                 delegate: Loader {
+                    property real contentWidth: root.maxWidth
                     sourceComponent: modelData.type === "math" ? inlineMathComponent : textComponent
-                    onLoaded: item.mContent = modelData.content
+                    onLoaded: {
+                        if (modelData.type !== "math")
+                            item.availableWidth = contentWidth;
+                        item.mContent = modelData.content;
+                    }
                 }
             }
         }
@@ -369,6 +724,7 @@ Column {
             serverAvailable: root.serverAvailable
             maxWidth: root.maxWidth
             fontFamily: root.fontFamily
+            onLayoutAboutToChange: root.renderCommitStarted()
         }
     }
 
@@ -377,11 +733,12 @@ Column {
         id: textComponent
         Text {
             property string mContent: ""
+            property real availableWidth: root.maxWidth
             text: _renderMarkdownInline(mContent)
             textFormat: Text.RichText
-            width: Math.min(implicitWidth, root.maxWidth)
-            wrapMode: Text.Wrap
-            color: YColors.white
+            width: Math.min(implicitWidth, availableWidth)
+            wrapMode: Text.WrapAnywhere
+            color: "#FFFFFF"
             font.pixelSize: 14
             font.family: root.fontFamily || ""
             lineHeight: 1.3
@@ -394,16 +751,6 @@ Column {
     function _renderMarkdownInline(raw) {
         if (!raw || raw.length === 0)
             return "";
-
-        if (typeof chatbot !== "undefined" && chatbot !== null && chatbot.markdownToHtml) {
-            var html = chatbot.markdownToHtml(raw, YColors.red);
-            if (html && html.length > 0) {
-                html = html.replace(/^\s*<p[^>]*>/i, "");
-                html = html.replace(/<\/p>\s*$/i, "");
-                html = html.replace(/\n/g, "");
-                return html;
-            }
-        }
 
         var t = raw;
 
@@ -436,11 +783,77 @@ Column {
         return t;
     }
 
+    function _requiresBlockLayout(text) {
+        return text.indexOf("```") !== -1
+                || text.indexOf("$") !== -1
+                || text.indexOf("\\(") !== -1
+                || text.indexOf("\\[") !== -1
+                || /(^|\n)\s*\|.+\|\s*(\n|$)/.test(text);
+    }
+
+    function _renderMarkdownDocument(raw) {
+        var cachedHtml = MessageLayoutCache.getHtml(raw);
+        if (cachedHtml !== null)
+            return cachedHtml;
+        var html = "";
+        if (typeof chatbot !== "undefined" && chatbot !== null && chatbot.markdownToHtml)
+            html = chatbot.markdownToHtml(raw);
+        if (!html || html.length === 0)
+            html = _renderMarkdownInline(raw).replace(/\n/g, "<br>");
+        MessageLayoutCache.setHtml(raw, html);
+        return html;
+    }
+
     // ── 解析器 ──
-    function _parse() {
+    function _parse(generation) {
+        if (generation !== _renderGeneration)
+            return;
+        _parsePending = false;
         var text = rawText;
         if (!text || text.length === 0) {
             _blocks = [];
+            _commitRender();
+            return;
+        }
+
+        var asyncParserAvailable = typeof chatbot !== "undefined" && chatbot !== null
+                                   && chatbot.parseMarkdownAsync;
+        if (asyncParserAvailable) {
+            _useFastPath = false;
+            _fastHtml = "";
+            var asyncCached = MessageLayoutCache.get(text);
+            if (asyncCached !== null) {
+                _blocks = asyncCached;
+                _visibleBlockCount = Math.min(3, asyncCached.length);
+                if (asyncCached.length === 0)
+                    _commitRender();
+                else
+                    blockBatchTimer.restart();
+                return;
+            }
+            _parseRequestId = String(_renderGeneration) + ":" + String(Date.now()) + ":" + String(Math.random());
+            chatbot.parseMarkdownAsync(text, _parseRequestId);
+            return;
+        }
+
+        if (!_requiresBlockLayout(text)) {
+            _useFastPath = true;
+            _fastHtml = _renderMarkdownDocument(text);
+            _blocks = [];
+            _commitRender();
+            return;
+        }
+
+        _useFastPath = false;
+        _fastHtml = "";
+        var cached = MessageLayoutCache.get(text);
+        if (cached !== null) {
+            _blocks = cached;
+            _visibleBlockCount = Math.min(3, cached.length);
+            if (cached.length === 0)
+                _commitRender();
+            else
+                blockBatchTimer.restart();
             return;
         }
 
@@ -700,7 +1113,14 @@ Column {
             _appendText(text.slice(textStart), currentSegments, flushParagraph);
         flushParagraph();
 
+        if (generation !== _renderGeneration)
+            return;
+        MessageLayoutCache.set(text, blocks);
         _blocks = blocks;
+        _visibleBlockCount = Math.min(3, blocks.length);
+        if (blocks.length === 0)
+            _commitRender();
+        else blockBatchTimer.restart();
     }
 
     function _parseTableRow(line) {

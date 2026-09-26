@@ -309,7 +309,7 @@ YBackButtonPage {
     Connections {
         target: systemBase
         ignoreUnknownSignals: true
-        onOcrStart: {
+        function onOcrStart() {
             backButtonClicked();
         }
     }

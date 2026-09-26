@@ -289,7 +289,7 @@ YSettingItemPage {
         radius: 6
         source: "commons/more"
         onValidClicked: {
-            id_pop_container.show('settingpages/ConfigureNetworkPage')
+            openSettingPage("ConfigureNetworkPage")
         }
     }
 

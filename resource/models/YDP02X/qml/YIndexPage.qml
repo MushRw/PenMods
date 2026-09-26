@@ -151,12 +151,32 @@ YBackground {
     }
 
     function mainMenuClicked(index, logAction) {
+        if (antiEmbs.active
+                && (index === PageIndex.ChatAssistant || index === PageIndex.PluginManager))
+            return;
         if (logAction && logAction.length > 0)
             logManager.sendHttpLog(logAction);
         if (index === YEnum.PageIndex.PowerOff && typeof id_page_pop_helper !== "undefined") {
             id_page_pop_helper.show("YPowerOffPage");
         }
         qmlGlobal.requestShowPage(index);
+    }
+
+    function requestAntiEmbsUnlock() {
+        if (qmlGlobal.inputPageShowing)
+            return;
+        let component = qmlCreateComponent("YInputPage");
+        if (Component.Ready !== component.status)
+            return;
+        var incubator = component.incubateObject(id_antiembs_unlock_helper.containerItem);
+        if (incubator.status === Component.Ready) {
+            id_antiembs_unlock_helper.inputPageCreated(incubator.object);
+        } else {
+            incubator.onStatusChanged = function(status) {
+                if (status === Component.Ready)
+                    id_antiembs_unlock_helper.inputPageCreated(incubator.object);
+            };
+        }
     }
 
     anchors.fill: parent
@@ -442,11 +462,13 @@ YBackground {
                 "pageIndex": YEnum.PageIndex.Dict,
                 "logAction": "action=home_search_click"
             });
-            append({
-                "iconFg": "home-textbook",
-                "pageIndex": PageIndex.ChatAssistant,
-                "logAction": ""
-            });
+            if (!antiEmbs.active) {
+                append({
+                    "iconFg": "home-textbook",
+                    "pageIndex": PageIndex.ChatAssistant,
+                    "logAction": ""
+                });
+            }
             append({
                 "iconFg": "home-speech",
                 "pageIndex": PageIndex.AudioRecorder,
@@ -528,17 +550,66 @@ YBackground {
         }
     }
 
+    Connections {
+        target: antiEmbs
+        function onActiveChanged() {
+            mainMenuModel.clear();
+            mainMenuModel.append({"iconFg": "home-dict", "pageIndex": YEnum.PageIndex.Dict, "logAction": "action=home_search_click"});
+            if (!antiEmbs.active)
+                mainMenuModel.append({"iconFg": "home-textbook", "pageIndex": PageIndex.ChatAssistant, "logAction": ""});
+            mainMenuModel.append({"iconFg": "home-speech", "pageIndex": PageIndex.AudioRecorder, "logAction": ""});
+            mainMenuModel.append({"iconFg": "home-fav", "pageIndex": YEnum.PageIndex.Fav, "logAction": "action=home_wordbook_click"});
+            if (qmlGlobal.checkFeature(YEnum.FEATURE_AUDIO))
+                mainMenuModel.append({"iconFg": "home-audioplayer", "pageIndex": YEnum.PageIndex.Audioplayer, "logAction": "action=home_listening_clik"});
+            mainMenuModel.append({"iconFg": "home-history", "pageIndex": YEnum.PageIndex.History, "logAction": "action=home_history_click"});
+            if (!antiEmbs.active)
+                mainMenuModel.append({"iconFg": "qrc:/images/home/home-plugin.png", "pageIndex": PageIndex.PluginManager, "logAction": ""});
+            mainMenuModel.append({"iconFg": "home-setting", "pageIndex": YEnum.PageIndex.Setting, "logAction": "action=home_settings_click"});
+            if (antiEmbs.active) {
+                id_plugin_drawer.closeDrawer();
+                id_plugin_pop_container.closeAll();
+            }
+            applyWallpaper();
+        }
+        function onDeactivationUnlockRequested() {
+            requestAntiEmbsUnlock();
+        }
+    }
+
     Component.onCompleted: {
         refreshPluginDrawer();
         // 壁纸由 id_bg_image.source 的绑定负责，这里不再需要手动 applyWallpaper()
         // （手动赋值会打断绑定，而且会先渲染默认壁纸再淡出）
     }
 
+    YPagePopHelper {
+        id: id_antiembs_unlock_helper
+        z: 600
+        isShowing: qmlGlobal.inputPageShowing
+
+        function inputPageCreated(keyboardPage) {
+            keyboardPage.backButtonClicked.connect(function() {
+                qmlGlobal.inputPageShowing = false;
+                keyboardPage.todoDestroy();
+                keyboardPage = null;
+            });
+            keyboardPage.inputFinished.connect(function(content) {
+                if (!antiEmbs.deactivate(content)) {
+                    qmlGlobal.showToast("未查询到相关内容", YColors.grayNormal);
+                    Qt.callLater(requestAntiEmbsUnlock);
+                }
+            });
+            keyboardPage.placeHolderText = "请输入要查询的内容";
+            keyboardPage.show();
+            qmlGlobal.inputPageShowing = true;
+        }
+    }
+
     YDynamicPageStack {
         id: id_plugin_pop_container
         anchors.fill: parent
         z: 500
-        visible: count > 0
+        visible: !antiEmbs.active && count > 0
         logTag: "YIndexPage plugin"
 
         // 事件屏障：位于动态插件内容之后（z:-1），
@@ -589,7 +660,7 @@ YBackground {
         id: id_plugin_drawer
         anchors.fill: parent
         z: 400
-        visible: id_plugin_drawer_model.count > 0
+        visible: !antiEmbs.active && id_plugin_drawer_model.count > 0
 
         property bool isOpen: false
         property real panelHeight: 140

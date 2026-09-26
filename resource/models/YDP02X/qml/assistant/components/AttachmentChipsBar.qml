@@ -8,6 +8,19 @@ Rectangle {
     property var mediaModel: null
     property var fontFamily
 
+    function formatIcon(item, isMedia) {
+        if (isMedia)
+            return item && item.type === "input_audio"
+                    ? "qrc:/images/format/suffix-mp3.png"
+                    : "qrc:/images/format/suffix-image.png";
+        var name = item && item.name ? item.name.toLowerCase() : "";
+        if (/\.(md|markdown)$/.test(name)) return "qrc:/images/format/suffix-md.png";
+        if (/\.json$/.test(name)) return "qrc:/images/format/suffix-json.png";
+        if (/\.(xml|qml|html|htm)$/.test(name)) return "qrc:/images/format/suffix-xml.png";
+        if (/\.(sh|bash)$/.test(name)) return "qrc:/images/format/suffix-sh.png";
+        return "qrc:/images/format/suffix-txt.png";
+    }
+
     height: 34
     radius: 8
     color: YColors.surfaceStrong
@@ -43,11 +56,12 @@ Rectangle {
                 }
                 spacing: 4
 
-                Text {
-                    text: isMediaChip
-                        ? (chipData && chipData.type === "input_audio" ? "🎵" : "🖼️")
-                        : "📎"
-                    font.pixelSize: 11
+                Image {
+                    width: 15
+                    height: 15
+                    source: root.formatIcon(chipData, isMediaChip)
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {

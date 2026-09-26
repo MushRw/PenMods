@@ -11,7 +11,35 @@ YPage {
     property int currentShowIndex: -1
 
     function showSettingPage(settingPage, needPwd, scene, popThisPage) {
-        id_pop_container.show(settingPage, needPwd, scene, popThisPage);
+        if (needPwd && locker.enabled && !(scene && !locker.getScene(scene))) {
+            requestKeyboard(settingPage, popThisPage);
+            return null;
+        }
+
+        var page = navigate(settingPage, {}, {
+            "animation": true,
+            "cache": false
+        });
+        if (!page)
+            return null;
+
+        if (popThisPage && page.hasOwnProperty("backButtonClicked")) {
+            page.backButtonClicked.connect(function() {
+                const navigator = id_setting_page.navigator;
+                if (!navigator)
+                    return;
+                navigator.afterTransition(function() {
+                    if (navigator.currentItem === id_setting_page)
+                        navigator.pop();
+                });
+            });
+        }
+        if (settingPage === "settingpages/YSettingUpdate"
+                && wifiManager.internetConnect
+                && typeof page.checkUpdate === "function") {
+            page.checkUpdate();
+        }
+        return page;
     }
 
     function requestKeyboard(page, popThisPage) {
@@ -30,6 +58,8 @@ YPage {
     }
 
     function settingItemClicked(index, popThisPage = false) {
+        if (antiEmbs.active && (index === 201 || index === 203 || index === 206 || index === 208))
+            return;
         console.log("YSettingPage.qml===settingItemClicked===index: ", index);
         currentShowIndex = index;
         let component = null;
@@ -100,15 +130,13 @@ YPage {
             showSettingPage("settingpages/Torch", false, undefined, popThisPage);
             break;
         case 208:
-            showSettingPage("settingpages/WallpaperSettingPage", false, undefined, popThisPage);
+            if (!antiEmbs.active)
+                showSettingPage("settingpages/WallpaperSettingPage", false, undefined, popThisPage);
             break;
         }
     }
 
     objectName: "YPage===YSettingPage.qml"
-    onBackButtonClicked: {
-        id_pop_container.closeAllPages();
-    }
     Component.onDestruction: {
         console.log("YSettingPage.qml===Component.onDestruction===called");
     }
@@ -247,7 +275,7 @@ YPage {
             anchors.left: parent.left
             anchors.leftMargin: 10
             anchors.bottom: parent.bottom
-            opacity: id_back_button.pressed || !enabled ? 0.6 : 1
+            opacity: id_title_bar.backButtonItem.pressed || !enabled ? 0.6 : 1
             color: YColors.grayNormal
             radius: height / 2
             onClicked: {
@@ -299,111 +327,46 @@ YPage {
         objectName: "from_YSettingPage.qml"
     }
 
-    YDynamicPageStack {
-        id: id_pop_container
-        logTag: "YSettingPage"
-
-        function show(page, needPasswd, scene, popThisPage) {
-            if (needPasswd && locker.enabled && !(scene && !locker.getScene(scene))) {
-                requestKeyboard(page, popThisPage);
-                return ;
-            }
-            _show(page, popThisPage);
+    function refreshSettingModel() {
+        id_setting_model.clear();
+        id_setting_model.append({"settingIndex": YEnum.SettingIndex.Network, "settingIcon": res.getDisk("settings/ic_network")});
+        id_setting_model.append({"settingIndex": YEnum.SettingIndex.Bluetooth, "settingIcon": res.getDisk("settings/ic_bluetooth")});
+        id_setting_model.append({"settingIndex": YEnum.SettingIndex.Volume, "settingIcon": res.getDisk("settings/ic_sounds")});
+        id_setting_model.append({"settingIndex": YEnum.SettingIndex.Brightness, "settingIcon": res.get("setting/screen")});
+        if (qmlGlobal.checkFeature(YEnum.FEATURE_LANG_JPN)
+                || qmlGlobal.checkFeature(YEnum.FEATURE_LANG_KOR)
+                || qmlGlobal.checkFeature(YEnum.FEATURE_LANG_ES)) {
+            id_setting_model.append({"settingIndex": YEnum.SettingIndex.Translate, "settingIcon": res.getDisk("settings/ic_translate")});
         }
-
-        function _show(settingPage, popThisPage) {
-            createPage(Qt.resolvedUrl(("./%1.qml").arg(settingPage)), settingPage, {
-                "pageIndex": YEnum.PageIndex.Setting,
-                "closeOnHomeRelease": true,
-                "closeOnHomeLongPress": true
-            }, undefined, function(incubatorObject) {
-                if (popThisPage)
-                    incubatorObject.backButtonClicked.connect(id_setting_page.backButtonClicked);
-                if ("settingpages/YSettingUpdate" === settingPage && wifiManager.internetConnect && null !== id_pop_container.popItemObject)
-                    incubatorObject.checkUpdate();
-            });
+        id_setting_model.append({"settingIndex": YEnum.SettingIndex.Dict, "settingIcon": res.getDisk("settings/ic_dict")});
+        id_setting_model.append({"settingIndex": YEnum.SettingIndex.Pronunc, "settingIcon": res.getDisk("settings/ic_pronunc")});
+        id_setting_model.append({"settingIndex": YEnum.SettingIndex.Handedness, "settingIcon": res.getDisk("settings/ic_handedness")});
+        if (!qmlGlobal.checkFeature(YEnum.FEATURE_SERIAL_D2))
+            id_setting_model.append({"settingIndex": YEnum.SettingIndex.Language, "settingIcon": res.getDisk("settings/ic_language")});
+        if (!antiEmbs.active)
+            id_setting_model.append({"settingIndex": 206, "settingIcon": res.get("setting/lock")});
+        id_setting_model.append({"settingIndex": 205, "settingIcon": res.get("setting/scan")});
+        if (!antiEmbs.active)
+            id_setting_model.append({"settingIndex": 201, "settingIcon": res.get("setting/battery")});
+        id_setting_model.append({"settingIndex": 207, "settingIcon": res.get("setting/torch")});
+        if (!antiEmbs.active) {
+            id_setting_model.append({"settingIndex": 208, "settingIcon": res.get("setting/background")});
+            id_setting_model.append({"settingIndex": 203, "settingIcon": res.get("setting/sys_tweak")});
         }
+        id_setting_model.append({"settingIndex": YEnum.SettingIndex.Update, "settingIcon": res.getDisk("settings/ic_update")});
+        id_setting_model.append({"settingIndex": YEnum.SettingIndex.About, "settingIcon": res.getDisk("settings/ic_about")});
+    }
 
-        anchors.fill: parent
+    Connections {
+        target: antiEmbs
+        function onActiveChanged() {
+            refreshSettingModel();
+        }
     }
 
     ListModel {
         id: id_setting_model
-
-        Component.onCompleted: {
-            append({
-                "settingIndex": YEnum.SettingIndex.Network,
-                "settingIcon": res.getDisk("settings/ic_network")
-            });
-            append({
-                "settingIndex": YEnum.SettingIndex.Bluetooth,
-                "settingIcon": res.getDisk("settings/ic_bluetooth")
-            });
-            append({
-                "settingIndex": YEnum.SettingIndex.Volume,
-                "settingIcon": res.getDisk("settings/ic_sounds")
-            });
-            append({
-                "settingIndex": YEnum.SettingIndex.Brightness,
-                "settingIcon": res.get("setting/screen")
-            });
-            if (qmlGlobal.checkFeature(YEnum.FEATURE_LANG_JPN) || qmlGlobal.checkFeature(YEnum.FEATURE_LANG_KOR) || qmlGlobal.checkFeature(YEnum.FEATURE_LANG_ES))
-                append({
-                "settingIndex": YEnum.SettingIndex.Translate,
-                "settingIcon": res.getDisk("settings/ic_translate")
-            });
-
-            append({
-                "settingIndex": YEnum.SettingIndex.Dict,
-                "settingIcon": res.getDisk("settings/ic_dict")
-            });
-            append({
-                "settingIndex": YEnum.SettingIndex.Pronunc,
-                "settingIcon": res.getDisk("settings/ic_pronunc")
-            });
-            append({
-                "settingIndex": YEnum.SettingIndex.Handedness,
-                "settingIcon": res.getDisk("settings/ic_handedness")
-            });
-            if (!qmlGlobal.checkFeature(YEnum.FEATURE_SERIAL_D2))
-                append({
-                "settingIndex": YEnum.SettingIndex.Language,
-                "settingIcon": res.getDisk("settings/ic_language")
-            });
-
-            append({
-                "settingIndex": 206,
-                "settingIcon": res.get("setting/lock")
-            });
-            append({
-                "settingIndex": 205,
-                "settingIcon": res.get("setting/scan")
-            });
-            append({
-                "settingIndex": 201,
-                "settingIcon": res.get("setting/battery")
-            });
-            append({
-                "settingIndex": 207,
-                "settingIcon": res.get("setting/torch")
-            });
-            append({
-                "settingIndex": 208,
-                "settingIcon": res.get("setting/background")
-            });
-            append({
-                "settingIndex": 203,
-                "settingIcon": res.get("setting/sys_tweak")
-            });
-            append({
-                "settingIndex": YEnum.SettingIndex.Update,
-                "settingIcon": res.getDisk("settings/ic_update")
-            });
-            append({
-                "settingIndex": YEnum.SettingIndex.About,
-                "settingIcon": res.getDisk("settings/ic_about")
-            });
-        }
+        Component.onCompleted: refreshSettingModel()
     }
 
 }

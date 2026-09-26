@@ -237,7 +237,7 @@ YPage {
     // Toolbar Items
     Item {
         z: parent.z
-        visible: !qmlGlobal.inputPageShowing
+        visible: !qmlGlobal.inputPageShowing && id_pop_container.count === 0
         anchors.fill: parent
         anchors.topMargin: 80
         anchors.leftMargin: 0
@@ -333,6 +333,7 @@ YPage {
 
     YDynamicPageStack {
         id: id_pop_container
+        z: parent.z + 1
         logTag: "FileManagerPageComponent"
 
         // 增加 Component 缓存，避免每次打开文件都重新编译 QML

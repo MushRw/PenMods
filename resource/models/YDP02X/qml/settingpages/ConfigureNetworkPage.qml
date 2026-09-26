@@ -57,7 +57,7 @@ YSettingItemPage {
                 value: ""
                 imageName: "settings/info_more_arrow"
                 onClicked: {
-                    id_pop_container.show('settingpages/ConfigureProxyPage')
+                    openSettingPage("ConfigureProxyPage")
                 }
             }
 

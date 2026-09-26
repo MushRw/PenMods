@@ -54,6 +54,16 @@ YSettingItemPage {
 
             YSettingSwitchItem {
                 implicitHeight: 52
+                title: "取消按键小助手"
+                switchOn: locker.getScene('antiembs_deactivate')
+                interval: 0
+                onTimerTriggered: {
+                    locker.setScene('antiembs_deactivate', switchOn)
+                }
+            }
+
+            YSettingSwitchItem {
+                implicitHeight: 52
                 title: "隐藏文件设置"
                 switchOn: locker.getScene('filemanager')
                 interval: 0
