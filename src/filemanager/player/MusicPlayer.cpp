@@ -261,21 +261,21 @@ PEN_HOOK(void*, _ZN13YMediaManager10clickMediaEi, void* a1, void* a2) {
     return origin(a1, a2);
 }
 
-PEN_HOOK(uint64, _ZN19YMediaPlayerManager13onClickedPrevEb, void* self, bool a2) {
+PEN_HOOK_CHAIN(uint64, _ZN19YMediaPlayerManager13onClickedPrevEb, void* self, bool a2) {
     if (!MusicPlayer::mIsTakeOver) return origin(self, a2);
     if (MusicPlayer::getCurrentAudioSequence() == AudioSequence::RANDOM) MusicPlayer::getInstance().clickRand();
     else MusicPlayer::getInstance().clickPrev();
     return 0;
 }
 
-PEN_HOOK(uint64, _ZN19YMediaPlayerManager13onClickedNextEb, void* self, bool a2) {
+PEN_HOOK_CHAIN(uint64, _ZN19YMediaPlayerManager13onClickedNextEb, void* self, bool a2) {
     if (!MusicPlayer::mIsTakeOver) return origin(self, a2);
     if (MusicPlayer::getCurrentAudioSequence() == AudioSequence::RANDOM) MusicPlayer::getInstance().clickRand();
     else MusicPlayer::getInstance().clickNext();
     return 0;
 }
 
-PEN_HOOK(void*, _ZN19YMediaPlayerManager10onSoundEndEj, void* self, uint32 a2) {
+PEN_HOOK_CHAIN(void*, _ZN19YMediaPlayerManager10onSoundEndEj, void* self, uint32 a2) {
     if (!MusicPlayer::mIsTakeOver) return origin(self, a2);
     if (*(uint32*)(*((uint64*)self + 4) + 100) == a2 // Is current sequence equal?
         && PEN_CALL(PlayState,

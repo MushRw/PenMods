@@ -8,6 +8,7 @@
 
 #include "base/StdInt.h"
 #include "base/SymDB.h"
+#include "base/MediaHookChain.h"
 
 #include <dobby.h>
 
@@ -41,4 +42,30 @@
     };                                                                                                                 \
     ret_t (*HookRegistrar_##name::origin)(args_t) = nullptr;                                                           \
     static HookRegistrar_##name hookRegistrar_##name;                                                                  \
+    ret_t                       HookRegistrar_##name::detour(args_t)
+
+// 与 PEN_HOOK_ADDR 同构，但把 hook 收口到 MediaHookChain（LX-01 修复）：
+// 同一目标被宿主与插件重复 hook 时，两者都成为订阅者、都执行，不再互相覆盖。
+// 仅对 3 个已知媒体目标生效；subscribe 返回 -1（非链管目标）时退回原生 DobbyHook。
+#define PEN_HOOK_CHAIN(ret_t, sym, args_t...) PEN_HOOK_CHAIN_ADDR(ret_t, sym, PEN_SYM(#sym), args_t)
+
+#define PEN_HOOK_CHAIN_ADDR(ret_t, name, addr, args_t...)                                                                            \
+    class HookRegistrar_##name {                                                                                                     \
+    public:                                                                                                                          \
+        explicit HookRegistrar_##name() {                                                                                            \
+            if ((addr) == nullptr) {                                                                                                 \
+                spdlog::error("Hook target not found, hook skipped: {} (feature disabled, NOT a crash).", #name);                     \
+                return;                                                                                                              \
+            }                                                                                                                        \
+            int rc = ::mod::MediaHookChain::subscribe((void*)(addr), (void*)detour, (void**)&origin);                                 \
+            if (rc != 0) {                                                                                                           \
+                if (DobbyHook(addr, (dobby_dummy_func_t)detour, (dobby_dummy_func_t*)&origin) != 0)                                 \
+                    spdlog::error("Fail to hook: {} ({:#x}).", #name, reinterpret_cast<uint64>(addr));                                \
+            }                                                                                                                        \
+        }                                                                                                                            \
+        static ret_t (*origin)(args_t);                                                                                              \
+        static ret_t detour(args_t);                                                                                                 \
+    };                                                                                                                               \
+    ret_t (*HookRegistrar_##name::origin)(args_t) = nullptr;                                                                         \
+    static HookRegistrar_##name hookRegistrar_##name;                                                                                \
     ret_t                       HookRegistrar_##name::detour(args_t)

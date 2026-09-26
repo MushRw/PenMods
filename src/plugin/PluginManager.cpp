@@ -1,5 +1,6 @@
 #include "PluginManager.h"
 #include "PluginSDK.h"
+#include "base/MediaHookChain.h"
 #include "QmlPluginWrapper.h"
 #include "common/Event.h"
 #include <QDir>
@@ -428,6 +429,22 @@ static int hookFunctionImpl(void* targetAddr, void* detourFunc, void** originalF
         return -1;
     }
     
+    // LX-01: 3 个媒体控制目标归 MediaHookChain 管（宿主与插件都要 hook 同一目标，需链化让两者都跑）。
+    if (MediaHookChain::isChainedTarget(targetAddr)) {
+        int rc = MediaHookChain::subscribe(targetAddr, detourFunc, originalFunc);
+        if (rc != 0) {
+            spdlog::error("[PluginHookAPI] Failed to chain-hook at {:#x} (rc={})",
+                          reinterpret_cast<uint64_t>(targetAddr), rc);
+        } else {
+            spdlog::info("[PluginHookAPI] Successfully chained-hook at {:#x}",
+                         reinterpret_cast<uint64_t>(targetAddr));
+            // PL-01: 登记，供卸载时回滚（DobbyDestroy 仍按目标地址清理整条链）
+            if (!s_currentHookOwner.isEmpty())
+                s_pluginHooks[s_currentHookOwner].insert(reinterpret_cast<uintptr_t>(targetAddr));
+        }
+        return rc;
+    }
+
     int result = DobbyHook(targetAddr, (dobby_dummy_func_t)detourFunc, (dobby_dummy_func_t*)originalFunc);
     if (result != 0) {
         spdlog::error("[PluginHookAPI] Failed to hook at {:#x}", reinterpret_cast<uint64_t>(targetAddr));
