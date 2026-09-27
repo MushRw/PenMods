@@ -315,3 +315,90 @@ jobs:
             kmod-report.txt
           if-no-files-found: error
           retention-days: 7
+
+      # ─────────────────────────────────────────────────────────────────────
+      # 配置矩阵：量化每个 config 项对 sizeof(struct module) 的贡献
+      # ─────────────────────────────────────────────────────────────────────
+      # 为什么需要它：实测把整个 tracing 子系统全关掉后，this_module 仍然是 768
+      # （设备是 704）—— 说明差的那 64 字节不在 tracing 那几块里。与其继续猜，
+      # 不如把「每个可疑开关单独切换一次，看大小变化多少字节」全量打出来，
+      # 再找一个恰好等于 -64 的组合。
+      #
+      # ⚠️ 本步骤故意放在「上传产物」**之后**：它会反复改 .config，绝不能污染
+      #    待上传的 .ko（md5 要和设备侧比对）。
+      # ⚠️ 每次探针都先把 .config 恢复成基线再切换单项，避免累计效应。
+      - name: 配置矩阵（量化各开关对 struct module 大小的贡献，仅诊断）
+        if: always()
+        continue-on-error: true
+        run: |
+          set +e
+          cd "$GITHUB_WORKSPACE/linux-${KVER}"
+          mkdir -p /tmp/lp
+          printf 'obj-m += p.o\n' > /tmp/lp/Makefile
+          cat > /tmp/lp/p.c <<'EOF'
+          #include <linux/module.h>
+          #include <linux/kernel.h>
+          #include <linux/init.h>
+          static int __init p_init(void) { return 0; }
+          static void __exit p_exit(void) { }
+          module_init(p_init);
+          module_exit(p_exit);
+          MODULE_LICENSE("GPL");
+          EOF
+          cp .config /tmp/base.config
+
+          probe() {
+            local label="$1"; shift
+            cp /tmp/base.config .config
+            if [ "$#" -gt 0 ]; then ./scripts/config "$@" >/dev/null 2>&1; fi
+            make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig >/dev/null 2>&1
+            find /tmp/lp -name '*.o' -delete 2>/dev/null
+            find /tmp/lp -name '*.ko' -delete 2>/dev/null
+            find /tmp/lp -name '.*.cmd' -delete 2>/dev/null
+            rm -f /tmp/lp/modules.order /tmp/lp/Module.symvers 2>/dev/null
+            make M=/tmp/lp ARCH=arm64 CROSS_COMPILE="${CROSS}" modules >/dev/null 2>&1
+            local hx dec
+            hx=$(aarch64-linux-gnu-objdump -h /tmp/lp/p.ko 2>/dev/null \
+                 | awk '/this_module/{print $3; exit}')
+            if [ -n "$hx" ]; then dec=$((16#$hx)); else dec="?"; fi
+            printf '  %-46s -> %s\n' "$label" "$dec"
+          }
+
+          echo "================ 配置矩阵：struct module 大小（设备 = 704）================"
+          probe "BASE（当前 config）"
+          probe "关掉全部 tracing 之后 BASE 的校验项"
+          echo "-- 逐项 +8/-8 级别 --"
+          probe "+UNUSED_SYMBOLS"           --enable  UNUSED_SYMBOLS
+          probe "+MODULE_SIG"               --enable  MODULE_SIG
+          probe "+LIVEPATCH"                --enable  LIVEPATCH
+          probe "+GENERIC_BUG"              --enable  GENERIC_BUG
+          probe "-GENERIC_BUG"              --disable GENERIC_BUG
+          probe "-MODULE_UNLOAD"            --disable MODULE_UNLOAD
+          probe "-KALLSYMS"                 --disable KALLSYMS
+          probe "+KALLSYMS_ALL"             --enable  KALLSYMS_ALL
+          probe "-SYSFS"                    --disable SYSFS
+          probe "+DEBUG_KOBJECT_RELEASE"    --enable  DEBUG_KOBJECT_RELEASE
+          probe "+LOCKDEP"                  --enable  LOCKDEP --enable DEBUG_LOCK_ALLOC
+          probe "-MUTEX_SPIN_ON_OWNER"      --disable MUTEX_SPIN_ON_OWNER
+          probe "+MUTEX_SPIN_ON_OWNER"      --enable  MUTEX_SPIN_ON_OWNER
+          probe "+DEBUG_MUTEXES"            --enable  DEBUG_MUTEXES
+          probe "+MODULE_FORCE_LOAD"        --enable  MODULE_FORCE_LOAD
+          probe "+STRICT_MODULE_RWX"        --enable  STRICT_MODULE_RWX
+          probe "+MODULES_TREE_LOOKUP"      --enable  MODULES_TREE_LOOKUP
+          echo "-- tracing 家族（单项，用于确认它们到底有没有进 struct module）--"
+          probe "+TRACEPOINTS"              --enable  TRACEPOINTS
+          probe "+TRACING"                  --enable  TRACING
+          probe "+EVENT_TRACING"            --enable  EVENT_TRACING
+          probe "+FTRACE_MCOUNT_RECORD"     --enable  FTRACE_MCOUNT_RECORD
+          probe "+FUNCTION_TRACER"          --enable  FUNCTION_TRACER
+          probe "+JUMP_LABEL"               --enable  JUMP_LABEL
+          probe "+PERF_EVENTS"              --enable  PERF_EVENTS
+          probe "+BPF_SYSCALL"              --enable  BPF_SYSCALL
+
+          echo
+          echo "================ 关键 config 现状（BASE）================"
+          cp /tmp/base.config .config
+          make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig >/dev/null 2>&1
+          grep -E '^CONFIG_(UNUSED_SYMBOLS|MODULE_SIG|LIVEPATCH|GENERIC_BUG|MODULE_UNLOAD|KALLSYMS|KALLSYMS_ALL|SYSFS|DEBUG_KOBJECT_RELEASE|LOCKDEP|DEBUG_LOCK_ALLOC|MUTEX_SPIN_ON_OWNER|DEBUG_MUTEXES|MODULE_FORCE_LOAD|STRICT_MODULE_RWX|MODULES_TREE_LOOKUP|TRACEPOINTS|TRACING|EVENT_TRACING|FTRACE_MCOUNT_RECORD|FUNCTION_TRACER|JUMP_LABEL|PERF_EVENTS|BPF_SYSCALL|SMP|MODVERSIONS|MODULE_SRCVERSION_ALL)=' .config | sort
+          echo "================ BASE 的全部 # 未设置项里含 module/mutex/perf 的 ================"
+          grep -E '^# CONFIG_.*(MODULE|MUTEX|PERF|BUG|SYSFS|KALLSYMS).* is not set' .config | sort || true
