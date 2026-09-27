@@ -189,6 +189,63 @@ jobs:
             echo "❌ L1_CACHE_SHIFT 补丁没打上（锚点不匹配？）；直接失败，避免静默产出错布局"
             exit 1
           fi
+          # ★★ 第二处 ABI 复刻：configfs 的 struct config_group（+16 字节）★★
+          #
+          # 这是用 tools/uac2-kmod/abiprobe.ko 在**真机**上量出来的（零风险：
+          # 只调用内核的 config_group_init_type_name() 去写我们自己 kzalloc 的
+          # 一块内存，然后扫描内核写下的特征值；不注册任何 configfs 项）：
+          #
+          #   内核自指的 list_head @ 32  → 我们的 ci_entry     @ 32   ✓
+          #   内核自指的 list_head @ 80  → 我们的 cg_children  @ 80   ✓
+          #   内核把名字串写在       8   → 我们的 ci_namebuf  @ 8    ✓
+          #   内核把 ci_name 指向它  0   → 我们的 ci_name      @ 0    ✓
+          #   ⇒ struct config_item 完全一致。
+          #   但内核在 **152** 处读 usb_function_instance.set_inst_name，
+          #     而我们的 set_inst_name 在 136 ⇒ 内核的 struct config_group
+          #     是 128 字节，我们是 112 —— 差 16！
+          #
+          # 差的 16 字节在尾部：设备内核用的是 configfs `default_groups` 改造
+          # 之后的版本 ——
+          #     struct list_head    default_groups;        (16)
+          #     struct config_group **default_groups_array; (8)   → 尾部 24
+          # 而上游 4.4.159 里还只是
+          #     struct config_group **default_groups;       (8)   → 尾部  8
+          # ⇒ 厂商把这个改造回移植了。同一个回移植也是 usb_function_instance
+          #   比 4.4 大 16 字节的原因（group 内嵌在里面）。
+          #
+          # 🔴 后果实测（不是理论推演）：`mkdir functions/uac2.0` 时
+          #    function_make() 从**它的**偏移 152 去读"函数指针"，读到的却是我们
+          #    f_uac2_opts 里的 p_chmask(0x3) / p_srate(48000)，于是跳到
+          #    0x0000bb8000000003 ⇒ oops ⇒ panic_on_oops=1 ⇒ **设备直接重启**。
+          #    pstore/ramoops 里 console-ramoops-0 / dmesg-ramoops-0 有完整栈。
+          python3 - <<'PYPATCH_CFG'
+          import io, sys, re
+          p = 'include/linux/configfs.h'
+          s = io.open(p, encoding='utf-8').read()
+          pat = re.compile(r'^[ \t]*struct config_group[ \t]+\*\*default_groups;[ \t]*$', re.M)
+          hits = pat.findall(s)
+          print('config_group **default_groups 锚点命中数 =', len(hits))
+          if len(hits) != 1:
+              sys.exit('❌ 锚点不是恰好 1 处，终止（不允许静默产出错布局）')
+          new = (
+              "\t/*\n"
+              "\t * [PenMods ABI 复刻] 设备内核用的是 configfs default_groups\n"
+              "\t * 改造之后的版本：default_groups 为 list_head，另有\n"
+              "\t * default_groups_array 数组指针。比上游 4.4.159 的\n"
+              "\t * `struct config_group **default_groups` 多 16 字节。\n"
+              "\t * 不对齐会让 usb_function_instance 的 fd / set_inst_name /\n"
+              "\t * free_func_inst 偏移全部提前 16 字节 —— 实测后果是 configfs\n"
+              "\t * mkdir 时 function_make() 读到 p_chmask/p_srate 当函数指针，\n"
+              "\t * 跳到 0x0000bb8000000003 ⇒ oops ⇒ panic_on_oops=1 ⇒ 重启。\n"
+              "\t */\n"
+              "\tstruct list_head\t\tdefault_groups;\n"
+              "\tstruct config_group\t\t**default_groups_array;"
+          )
+          s = pat.sub(lambda _m: new, s, count=1)
+          io.open(p, 'w', encoding='utf-8', newline='').write(s)
+          print('configfs.h ABI 补丁已应用')
+          PYPATCH_CFG
+          grep -n 'default_groups' include/linux/configfs.h
 
           # ★★★ 关于 struct module 的 init/exit 偏移 ★★★
           #

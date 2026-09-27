@@ -108,6 +108,21 @@ static int __init abiprobe_init(void)
 	void *buf;
 	int off;
 
+	/* ── 编译期硬门禁：configfs ABI 复刻的目标值 ──────────────────────
+	 * 由真机实测反推（见本文件顶部说明）：
+	 *   sizeof(struct config_group) = 128     （上游 4.4.159 是 112，差 16）
+	 *   usb_function_instance: fd=144  set_inst_name=152  free_func_inst=160
+	 *                          sizeof=168
+	 * CI 的 configfs.h 补丁一旦没生效、锚点变了、或被谁删了，这里会**直接
+	 * 编译失败**，而不是产出一个会把内核 oops 掉的模块 —— 设备
+	 * panic_on_oops=1，偏移一错就是当场重启。 */
+	BUILD_BUG_ON(sizeof(struct config_group) != 128);
+	BUILD_BUG_ON(offsetof(struct config_group, default_groups_array) != 120);
+	BUILD_BUG_ON(sizeof(struct usb_function_instance) != 168);
+	BUILD_BUG_ON(offsetof(struct usb_function_instance, fd) != 144);
+	BUILD_BUG_ON(offsetof(struct usb_function_instance, set_inst_name) != 152);
+	BUILD_BUG_ON(offsetof(struct usb_function_instance, free_func_inst) != 160);
+
 	abiprobe_ours();
 
 	buf = kzalloc(ABIPROBE_BUFSZ, GFP_KERNEL);
