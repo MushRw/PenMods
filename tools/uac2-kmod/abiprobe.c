@@ -109,19 +109,21 @@ static int __init abiprobe_init(void)
 	int off;
 
 	/* ── 编译期硬门禁：configfs ABI 复刻的目标值 ──────────────────────
-	 * 由真机实测反推（见本文件顶部说明）：
-	 *   sizeof(struct config_group) = 128     （上游 4.4.159 是 112，差 16）
-	 *   usb_function_instance: fd=144  set_inst_name=152  free_func_inst=160
-	 *                          sizeof=168
-	 * CI 的 configfs.h 补丁一旦没生效、锚点变了、或被谁删了，这里会**直接
-	 * 编译失败**，而不是产出一个会把内核 oops 掉的模块 —— 设备
-	 * panic_on_oops=1，偏移一错就是当场重启。 */
-	BUILD_BUG_ON(sizeof(struct config_group) != 128);
-	BUILD_BUG_ON(offsetof(struct config_group, default_groups_array) != 120);
-	BUILD_BUG_ON(sizeof(struct usb_function_instance) != 168);
-	BUILD_BUG_ON(offsetof(struct usb_function_instance, fd) != 144);
-	BUILD_BUG_ON(offsetof(struct usb_function_instance, set_inst_name) != 152);
-	BUILD_BUG_ON(offsetof(struct usb_function_instance, free_func_inst) != 160);
+	 * 全部由真机实测反推（见 CI 里 configfs.h 补丁的注释、本文件顶部说明）：
+	 *   sizeof(struct config_group) = 120     （上游 4.4.159 是 112，差 +8：
+	 *                                          设备把 default_groups 从
+	 *                                          `**` 指针回移植成 list_head）
+	 *   usb_function_instance: fd=136  set_inst_name=144  free_func_inst=152
+	 *                          sizeof=160
+	 * 一旦补丁失效、锚点变了或被谁删了，这里**直接编译失败**，而不是产出一个
+	 * 会把内核 oops 掉的模块 —— 设备 panic_on_oops=1，偏移一错就当场重启。
+	 * ⚠️ 判据必须 mkdir + rmdir 都过：加多了 8 字节时 mkdir 照样成功，
+	 *    只在 rmdir 调 free_func_inst 时才崩。 */
+	BUILD_BUG_ON(sizeof(struct config_group) != 120);
+	BUILD_BUG_ON(sizeof(struct usb_function_instance) != 160);
+	BUILD_BUG_ON(offsetof(struct usb_function_instance, fd) != 136);
+	BUILD_BUG_ON(offsetof(struct usb_function_instance, set_inst_name) != 144);
+	BUILD_BUG_ON(offsetof(struct usb_function_instance, free_func_inst) != 152);
 
 	abiprobe_ours();
 
