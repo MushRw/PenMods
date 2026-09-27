@@ -110,6 +110,39 @@ jobs:
           ./scripts/config \
             --disable PREEMPT --disable PREEMPT_VOLUNTARY \
             --enable PREEMPT_NONE --disable PREEMPT_COUNT || true
+          # ★★ 对齐设备内核的 struct module 布局（最关键的一步）
+          #
+          # 实测证据：原厂 hci_uart.ko / 8723ds.ko 的 .gnu.linkonce.this_module
+          # 节大小都是 704，而用上游 arm64 defconfig 编出来的是 768 —— 差 64 字节。
+          # 后果：内核按**它自己的**偏移往这块内存里读写字段，我们读的是**我们的**
+          # 偏移 ⇒ /proc/modules 里 refcount 打出 9400318 这种垃圾值（其实是
+          # module_core 基址 0x8F7000 附近），rmmod 报 EAGAIN
+          # ("Resource temporarily unavailable")。
+          #
+          # 差 64 字节的来源已用设备 /proc/kallsyms 反推确认（函数符号表是完整的）：
+          #   | 判据（kallsyms 里的符号）        | 设备 | 结论                        |
+          #   | static_key*/jump_label* 计数     |  0   | CONFIG_JUMP_LABEL=n         |
+          #   | *ftrace* 计数 / /sys/kernel/tracing | 0 / 无 | FTRACE/TRACING/TRACEPOINTS |
+          #   |                                  |      | /EVENT_TRACING 全 = n       |
+          #   | klp_enable_patch                 |  无  | CONFIG_LIVEPATCH=n          |
+          #   | mod_verify_sig                   |  无  | CONFIG_MODULE_SIG=n         |
+          #   | module_refcount/try_module_get   | 有   | CONFIG_MODULE_UNLOAD=y      |
+          #   | kallsyms_lookup_name             | 有   | CONFIG_KALLSYMS=y（ALL=n）  |
+          # ⇒ 设备把整个 tracing 子系统砍了，而那正好是 struct module 里
+          #   TRACEPOINTS / HAVE_JUMP_LABEL / TRACING / EVENT_TRACING /
+          #   FTRACE_MCOUNT_RECORD 这 5 个 #ifdef 块。
+          # 另外用户栈顶 0x7ff4039000 紧贴 0x8000000000 ⇒ VA_BITS=39（上游是 48），
+          # 一并还原以求配置忠实（这一项不改变 struct module 大小）。
+          ./scripts/config \
+            --disable FTRACE --disable FUNCTION_TRACER --disable DYNAMIC_FTRACE \
+            --disable FTRACE_MCOUNT_RECORD --disable STACK_TRACER \
+            --disable FUNCTION_GRAPH_TRACER --disable TRACING \
+            --disable TRACEPOINTS --disable EVENT_TRACING \
+            --disable TRACEPOINT_BENCHMARK --disable TRACER_SNAPSHOT \
+            --disable LIVEPATCH --disable JUMP_LABEL \
+            --disable KALLSYMS_ALL --disable DEBUG_INFO --disable DEBUG_INFO_DWARF4 \
+            --disable ARM64_VA_BITS_48 --enable ARM64_VA_BITS_39 \
+            || true
           make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig
           # 记录关键配置项，便于和设备的 vermagic 对照
           echo "=== 影响 vermagic 的关键项 ==="
@@ -194,6 +227,20 @@ jobs:
               strings "$k" | grep -E '^vermagic=' | sort -u
               echo "--- 模块元信息 ---"
               strings "$k" | grep -E '^(name|license|description|author)=' | sort -u
+              echo "--- sizeof(struct module)：设备实测 = 704（0x2c0），必须一致 ---"
+              # ⚠️ 不能用 awk 的 strtonum —— ubuntu runner 上的 awk 是 mawk，没有这个函数。
+              #    改成 shell 的 16# 基数算术。
+              hx=$(aarch64-linux-gnu-objdump -h "$k" | awk '/this_module/ {print $3; exit}')
+              if [ -n "$hx" ]; then
+                dec=$((16#$hx))
+                if [ "$dec" -eq 704 ]; then
+                  echo "  ✅ .gnu.linkonce.this_module = 0x$hx = $dec  —— 与设备内核一致"
+                else
+                  echo "  ❌ .gnu.linkonce.this_module = 0x$hx = $dec  —— 设备是 704，差 $((dec - 704)) 字节"
+                fi
+              else
+                echo "  ⚠️ 未找到 .gnu.linkonce.this_module 节"
+              fi
               echo "--- 未决符号（需由内核提供，应与设备 kallsyms 对得上）---"
               aarch64-linux-gnu-nm -u "$k" | awk '{print $NF}' | sort -u
               echo "--- 本模块导出的符号 ---"
@@ -203,6 +250,61 @@ jobs:
             echo "=== $k ==="; strings "$k" | grep -E '^vermagic=' | sort -u
           done
           cat "$OUT"
+
+      - name: 诊断 struct module 布局（pahole 全字段偏移，仅诊断）
+        continue-on-error: true
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          # 在 /tmp 里现搭一个独立的小模块目录，**完全不碰仓库里的产物**，
+          # 避免诊断构建改写待上传的 .ko（md5 要和设备侧比对）。
+          rm -rf /tmp/lprobe && mkdir -p /tmp/lprobe
+          cat > /tmp/lprobe/Makefile <<'EOF'
+          obj-m += layoutprobe.o
+          CFLAGS_layoutprobe.o := -g
+          EOF
+          cat > /tmp/lprobe/layoutprobe.c <<'EOF'
+          #include <linux/module.h>
+          #include <linux/kernel.h>
+          #include <linux/init.h>
+          static unsigned long __attribute__((used)) penmods_probe[] = {
+          sizeof(struct module),
+          offsetof(struct module, state),
+          offsetof(struct module, init),
+          };
+          static int __init layoutprobe_init(void) { return 0; }
+          static void __exit layoutprobe_exit(void) { }
+          module_init(layoutprobe_init);
+          module_exit(layoutprobe_exit);
+          MODULE_LICENSE("GPL");
+          EOF
+          make -C "linux-${KVER}" M=/tmp/lprobe ARCH=arm64 \
+            CROSS_COMPILE="${CROSS}" modules || true
+
+          command -v pahole >/dev/null 2>&1 || \
+            sudo apt-get install -y -qq dwarves >/dev/null 2>&1 || true
+
+          echo "############ struct module 布局（ours，带字段偏移）############"
+          if [ -f /tmp/lprobe/layoutprobe.ko ] && command -v pahole >/dev/null 2>&1; then
+            pahole -C module /tmp/lprobe/layoutprobe.ko 2>&1 | head -140 || true
+          else
+            echo "(pahole 或 layoutprobe.ko 不可用，降级：只报总大小)"
+            aarch64-linux-gnu-objdump -h /tmp/lprobe/layoutprobe.ko 2>/dev/null | grep this_module || true
+          fi
+          echo "############ 受 #ifdef 控制的字段（决定与设备的差异）############"
+          pahole -C module /tmp/lprobe/layoutprobe.ko 2>/dev/null \
+            | grep -nE 'tracepoint|jump_entr|trace_bprintk|trace_event|trace_enum|ftrace_callsite|num_symtab|symtab|strtab|refptr|source_list|target_list|waiter|exit|klp|sig_ok|num_bugs|bug_list|bug_table|unused_' || true
+          echo "############ 对照表：设备侧（已实测/已反推）############"
+          cat <<'EOF'
+            .gnu.linkonce.this_module = 704 (0x2c0)
+            CONFIG_MODULE_UNLOAD = y   (module_refcount/try_module_get 存在)
+            CONFIG_KALLSYMS      = y   (kallsyms_lookup_name 存在), ALL = n
+            CONFIG_MODULE_SIG    = n   (无 mod_verify_sig)
+            CONFIG_LIVEPATCH     = n   (无 klp_*)
+            CONFIG_JUMP_LABEL    = n   (static_key*/jump_label* 计数 = 0)
+            FTRACE/TRACING/TRACEPOINTS/EVENT_TRACING = n (ftrace 计数 0，无 tracefs)
+            VA_BITS              = 39  (用户栈顶 0x7ff4039000)
+            vermagic             = 4.4.159 SMP mod_unload aarch64
+          EOF
 
       - name: 上传内核模块产物
         uses: actions/upload-artifact@v4
