@@ -38,25 +38,30 @@ layout-patch.py —— 把 .ko 的 .gnu.linkonce.this_module 重定位搬到设�
 用法
 ----
     # 应用（就地改写，节大小不变，纯 r_offset 搬移 ⇒ 不会挪动任何其它节）
-    python layout-patch.py utest.ko --ref hci_uart.ko
+    python layout-patch.py utest.ko usb_uac2.ko
 
     # 只校验不改（CI 门禁用）
-    python layout-patch.py utest.ko --check
+    python layout-patch.py --check utest.ko
 
-不传 --ref 时使用内置的实测默认值（704 / 24 / 368 / 680）。
+    # 手上还有原厂 .ko 时，顺手复核契约文件没被改坏
+    python layout-patch.py utest.ko --ref /path/to/hci_uart.ko
+
+不传 --ref 时使用仓库内的契约文件 device-abi.json（推荐；CI 就是这么跑的）。
+--ref <原厂.ko> 会拿真模块现场反推，并**交叉校验**契约文件没被改坏。
 """
 import importlib.util
 import os
+import re
 import struct
 import sys
 
-# 实测 ground truth（设备内核 = 原厂 .ko 反推）
+R_AARCH64_ABS64 = 257
+
+# 基准值（与 tools/uac2-kmod/ref-abi.txt 必须一致 —— 两边任一漂移都由 CI 硬失败拦下）
 DEF_SIZE = 704
 DEF_NAME_OFF = 24
 DEF_INIT = 368
 DEF_EXIT = 680
-
-R_AARCH64_ABS64 = 257
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -74,6 +79,40 @@ KL = _load_layout()
 
 SELF = '.gnu.linkonce.this_module'
 RELA = '.rela.gnu.linkonce.this_module'
+
+# 判据来源：仓库内的契约文件 device-abi.json（由原厂 hci_uart.ko / 8723ds.ko 的
+# 重定位表反推，md5 与复现命令都写在里面）。**不在代码里硬编码**，避免两处漂移。
+# ⚠️ 原厂 .ko 不在本仓库（hci_uart.ko + 8723ds.ko 共 ~1.6MB），所以 CI 的
+#    checkout 里根本看不到它们 —— 这就是为什么判据必须落成仓库内的契约文件。
+ABI_TXT = os.path.join(HERE, 'ref-abi.txt')
+
+
+def load_contract(path=None):
+    """读设备 ABI 基准 → (size, name_off, init, exit, 描述)
+
+    基准文件是 tools/uac2-kmod/ref-abi.txt（仓库内契约；里面写了它是怎么从原厂
+    hci_uart.ko / 8723ds.ko 的重定位表读出来的，以及 md5 与复核命令）。
+    读到的值必须与内置 DEF_* 一致，否则**直接报错** —— 不允许两个真相源静默漂移。
+    """
+    p = path or ABI_TXT
+    if not os.path.exists(p):
+        print('⚠️  找不到基准文件 %s，回退到内置值 size=%d name=%d init=%d exit=%d'
+              % (p, DEF_SIZE, DEF_NAME_OFF, DEF_INIT, DEF_EXIT))
+        return (DEF_SIZE, DEF_NAME_OFF, DEF_INIT, DEF_EXIT,
+                '内置基准(基准文件缺失)')
+
+    txt = open(p, encoding='utf-8').read()
+    got = {k: int(v) for k, v in re.findall(r'^(size|align|name|init|exit)\s*=\s*(\d+)',
+                                            txt, re.M)}
+    builtin = dict(size=DEF_SIZE, name=DEF_NAME_OFF, init=DEF_INIT, exit=DEF_EXIT)
+    bad = [k for k, v in builtin.items() if got.get(k) != v]
+    if bad:
+        raise SystemExit('✗ %s 与 layout-patch.py 内置基准不一致：%s —— 先查清哪边对，'
+                         '不要静默用错偏移' % (p, ', '.join(bad)))
+    if got.get('align') not in (None, 64):
+        raise SystemExit('✗ %s 里 align=%s，应为 64（L1_CACHE_BYTES=64）' % (p, got.get('align')))
+    return (DEF_SIZE, DEF_NAME_OFF, DEF_INIT, DEF_EXIT,
+            'ref-abi.txt（与内置基准对账一致）')
 
 
 def _find(shs, name):
@@ -126,10 +165,20 @@ def probe(path):
     return out
 
 
-def target_from_ref(ref):
+def target_from_ref(ref, contract):
+    """从真模块现场反推布局，并要求它与契约文件逐项一致（不一致就报错）。
+
+    这是"契约没被改坏"的证明：只要手上还有原厂 .ko，就能一条命令复核。
+    """
     r = probe(ref)
     if r['size'] is None or r['init'] is None or r['exit'] is None:
         raise SystemExit('✗ --ref %s 读不到完整的 this_module 指纹' % ref)
+    got = (r['size'], r['name_off'], r['init'], r['exit'])
+    if got != contract:
+        raise SystemExit(
+            '✗ --ref %s 实测 %s，与契约文件 %s 不一致 —— '
+            '契约被改坏了（或设备换了内核），先查清再改' % (ref, got, contract))
+    print('  ✅ --ref %s 现场实测与契约文件逐项一致 %s' % (ref, got))
     return r
 
 
@@ -147,18 +196,20 @@ def main():
         ref = args[i + 1]
         del args[i:i + 2]
 
+    abi = None
+    if '--abi' in args:
+        i = args.index('--abi')
+        abi = args[i + 1]
+        del args[i:i + 2]
+
     if not args:
         raise SystemExit(__doc__)
 
-    if ref:
-        t = target_from_ref(ref)
-        t_size, t_name_off, t_init, t_exit = t['size'], t['name_off'], t['init'], t['exit']
-        src = os.path.basename(ref)
-    else:
-        t_size, t_name_off, t_init, t_exit = DEF_SIZE, DEF_NAME_OFF, DEF_INIT, DEF_EXIT
-        src = '内置实测默认值'
+    t_size, t_name_off, t_init, t_exit, src = load_contract(abi)
     print('目标布局（来自 %s）: size=%d name@%d init@%d exit@%d'
           % (src, t_size, t_name_off, t_init, t_exit))
+    if ref:
+        target_from_ref(ref, (t_size, t_name_off, t_init, t_exit))
 
     rc = 0
     for path in args:
