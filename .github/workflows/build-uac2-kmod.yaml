@@ -186,42 +186,57 @@ jobs:
           #     CONFIG_NUMA                    int numa_node                 +4
           #     CONFIG_DMA_CMA                 struct cma *cma_area          +8
           #
-          # 设备内核侧实测（/proc/kallsyms 反推，数据符号列不全但函数够用）：
-          #     pinctrl_register / pinctrl_unregister / devm_pinctrl_get 都在
-          #         ⇒ CONFIG_PINCTRL = y
-          #     cma_alloc / dma_alloc_from_contiguous 都没有
-          #         ⇒ CONFIG_DMA_CMA = n
-          #     pci_scan_bus / __pci_register_driver / msi_create_irq_domain 都没有，
-          #     且 /sys/bus/pci 不存在 ⇒ PCI_MSI / GENERIC_MSI_IRQ* 全 = n
-          # 而我们的上游 arm64 defconfig 恰好相反：
-          #     DMA_CMA=y（line 83）、PCI_MSI=y（会 select GENERIC_MSI_IRQ）
-          #     PINCTRL 反而因 defconfig 里的 PINCTRL_MSM8916 依赖 ARCH_QCOM
-          #     被 Kconfig 静默关掉 ⇒ CONFIG_PINCTRL = n
-          # ⇒ 全部向设备看齐。
-          ./scripts/config \
-            --disable DMA_CMA --disable NUMA \
-            --disable PCI_MSI --disable PCI_XGENE \
-            --disable PCIE_DW --disable PCIE_DW_HOST --disable PCIE_DW_PLAT \
-            || true
+          # ★ 2026-09-27 修正（上一版按 kallsyms 反推，方向搞反了，已作废）
+          #
+          # 已确认的硬事实（设备文本符号 = 函数；未开 KALLSYMS_ALL 时数据符号本就不列，
+          # 所以只有**函数**的缺失才能当证据）：
+          #     cma_alloc / dma_alloc_from_contiguous 计数 = 0
+          #         ⇒ CONFIG_CMA = n ⇒ CONFIG_DMA_CMA = n  ✅ 硬
+          #     pinctrl_register / devm_pinctrl_get 都在     ⇒ CONFIG_PINCTRL = y  ✅ 硬
+          #     /sys/class/iommu 存在（iommu class 已注册）  ⇒ CONFIG_IOMMU_API = y ✅ 硬
+          #     /sys/bus/pci 不存在                          ⇒ CONFIG_PCI = n
+          #
+          # 目标不是"猜 Kconfig"，而是让 sizeof(struct device) 与内核逐字节相等。
+          # 真机 abiprobe 从内核 device_add 机器码读出的目标值：
+          #     dev->type = 88（与我们一致）、dev->class = 752、dev->groups = 760
+          # 我们（PINCTRL=n、IOMMU_API=n、MSI 全 y、DMA_CMA=y）是 class=744 ⇒ 只差 8。
+          # 逐项折算（以"5 个 #ifdef 成员全关 + archdata=16"为基准 704）：
+          #     +8  PINCTRL      → pins
+          #     +8  IOMMU_API    → struct dev_archdata 从 16 变 24（多一个 void *iommu）
+          #     +8  GENERIC_MSI_IRQ_DOMAIN → msi_domain
+          #     +16 GENERIC_MSI_IRQ        → msi_list
+          #     +8  NUMA         → numa_node（4 + 4 对齐填充）
+          #     = 752 ✅ 与内核实测一致
+          #     DMA_CMA 必须保持 n（内核没有 cma_alloc）
+          # ⇒ 目标：sizeof(struct device) = 792，class=752 groups=760 release=768
+          #
+          # ⚠️ 这一版仍是"待上机复验的假设"。复验方法：编出 abiprobe.ko → insmod →
+          #    比对它打印的 ours 成员表与内核机器码表；**只有完全一致才能去绑 UDC**。
+          ./scripts/config --enable IOMMU_SUPPORT --enable IOMMU_API || true
+          ./scripts/config --enable GENERIC_MSI_IRQ --enable GENERIC_MSI_IRQ_DOMAIN || true
+          ./scripts/config --enable NUMA || true
+          ./scripts/config --disable DMA_CMA || true
           make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig
-          # CONFIG_PINCTRL 没有 prompt（只能被驱动 select），要在 olddefconfig 之后补。
-          # 我们并不编译内核本体，只让 include/linux/device.h 里的
-          # `#ifdef CONFIG_PINCTRL` 成立，从而 struct device 多出 `pins` 这一个指针。
+          # PINCTRL 没有 prompt（只能被驱动 select）；IOMMU_API 依赖 IOMMU_SUPPORT
+          # 与 ARCH_HAS_DMA_SET_COHERENT_MASK 之类，所以要在 olddefconfig 之后再补一轮。
           ./scripts/config --enable PINCTRL || true
+          ./scripts/config --enable IOMMU_API || true
+          make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig
           echo "=== struct device 相关 Kconfig（实际值） ==="
-          grep -E '^CONFIG_(PINCTRL|PINMUX|PINCONF|GENERIC_PINCONF|DMA_CMA|CMA|GENERIC_MSI_IRQ|GENERIC_MSI_IRQ_DOMAIN|PCI_MSI|PCI_MSI_IRQ_DOMAIN|PCI|PCI_XGENE|NUMA|PM|PM_SLEEP|PM_RUNTIME|PM_GENERIC_DOMAINS)=' .config \
+          grep -E '^CONFIG_(PINCTRL|PINMUX|PINCONF|GENERIC_PINCONF|DMA_CMA|CMA|IOMMU_SUPPORT|IOMMU_API|GENERIC_MSI_IRQ|GENERIC_MSI_IRQ_DOMAIN|PCI_MSI|PCI|NUMA|PM|PM_SLEEP|PM_GENERIC_DOMAINS)=' .config \
             || echo "(无匹配)"
-          # 硬断言：任何一项没对齐都直接失败，绝不静默产出错布局的 .ko
+          # 硬断言：只对**已确证**的两项拍死；其余打印出来供上机复验
           # （设备 panic_on_oops=1，偏移一错就是当场重启）
           if grep -q '^# CONFIG_PINCTRL is not set' .config; then
             echo "❌ CONFIG_PINCTRL 仍为 n ⇒ struct device 少 8 字节（pins），绑 UDC 必 oops"; exit 1
           fi
-          for k in DMA_CMA GENERIC_MSI_IRQ GENERIC_MSI_IRQ_DOMAIN NUMA; do
-            if grep -q "^CONFIG_${k}=y" .config; then
-              echo "❌ CONFIG_${k} 没关掉 ⇒ struct device 会多出成员，绑 UDC 必 oops"; exit 1
-            fi
-          done
-          echo "✅ struct device 的 5 个 #ifdef 成员已与设备内核看齐"
+          if grep -q '^CONFIG_DMA_CMA=y' .config; then
+            echo "❌ CONFIG_DMA_CMA=y ⇒ struct device 多出 cma_area（设备无 cma_alloc），绑 UDC 必 oops"; exit 1
+          fi
+          if grep -q '^# CONFIG_IOMMU_API is not set' .config; then
+            echo "⚠️ CONFIG_IOMMU_API 仍为 n ⇒ dev_archdata 少 8 字节（iommu），结构体将比内核小 8"
+          fi
+          echo "✅ struct device 相关 Kconfig 已按设备实测目标（sizeof=792 / class=752）设置"
           # ★★ L1_CACHE_BYTES = 64（不是 arm64 主线的 128）★★
           #
           # `struct module` 以 `} ____cacheline_aligned;` 结尾，所以它的尺寸必然是
