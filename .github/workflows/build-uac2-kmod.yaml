@@ -1,0 +1,183 @@
+name: Build UAC2 Kernel Module
+
+# 为什么需要这个 workflow
+# ------------------------
+# 目标：让词典笔通过 USB 被电脑识别成「免驱音频设备」（电脑端零安装）。
+# 电脑端零安装的 USB 音频只有一条标准路径：USB Audio Class（UAC）。
+#
+# 但设备内核实测缺两样东西：
+#   1) configfs 建不出 uac2.0 —— 内核没编 f_uac2 / u_audio
+#      （用原厂脚本的真实实例名 uac1.gs0/uac2.gs0/uac1.0/audio.0 复测，全部 ENOENT）
+#   2) FunctionFS 也写不出 UAC 描述符 —— 4.4 的 f_fs.c 里 ffs_do_single_desc()
+#      对 bDescriptorType 是精确 switch，只认 INTERFACE(0x04)/ENDPOINT(0x05)/
+#      HID_DT_HID(0x21)/OTG(0x09)/IASSOC(0x0B)/SS_EP_COMP(0x30)，其余落 default
+#      直接 -EINVAL。UAC 必需的 CS_INTERFACE(0x24)/CS_ENDPOINT(0x25) 必然被拒。
+#      （实测：0x21 能过不是「透传」，而是它恰好等于 HID_DT_HID）
+#
+# 唯一的出路：自己编 f_uac2.ko + u_audio.ko 加载进内核。实测这三条同时成立：
+#   * CONFIG_MODULES=y      —— /proc/modules 里真跑着 hci_uart / 8723ds
+#   * CONFIG_MODVERSIONS=n  —— 现有 .ko 里 __crc_ 符号数 = 0
+#                              ⇒ 不需要 Module.symvers，**不必编译整个内核**
+#   * 模块未签名、modules_disabled=0
+#   * vermagic = 4.4.159 SMP mod_unload aarch64（精确版本已知）
+#   * f_uac2 依赖的 gadget 核心符号（usb_add_function / usb_ep_autoconfig /
+#     config_ep_by_speed ...）与 ALSA 符号在设备 kallsyms 中全部存在
+#
+# 因为 vermagic 里的版本号必须严格是 4.4.159，而 4.4.159 恰好是上游正式发布版，
+# 直接取 kernel.org 的源码即可拿到天然匹配的 vermagic，无需手工篡改。
+#
+# ⚠️ 本 workflow 只负责「编译 + 静态校验」，**不接触设备**。
+#    加载与验证在本地用 adb 分台阶做（见 tools/uac2-kmod/ 注释）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: '目标内核版本（必须与设备 vermagic 一致，当前 = 4.4.159）'
+        required: true
+        default: '4.4.159'
+
+env:
+  KVER: ${{ github.event.inputs.kernel_version || '4.4.159' }}
+  CROSS: aarch64-linux-gnu-
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: 安装构建依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            build-essential bc flex bison libssl-dev libelf-dev \
+            wget xz-utils gcc-aarch64-linux-gnu
+          # 用系统 GCC 11 编 host 工具（modpost/fixdep）。
+          # 不用 archlinux:latest 是因为它的 GCC 14+ 会把
+          # implicit-function-declaration 升级成 error，编不过 4.4 的老脚本。
+          aarch64-linux-gnu-gcc --version | head -1
+          gcc --version | head -1
+
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 缓存内核源码包
+        id: cache-ksrc
+        uses: actions/cache@v4
+        with:
+          path: linux-${{ env.KVER }}.tar.xz
+          key: linux-src-tar-${{ env.KVER }}
+
+      - name: 下载内核源码
+        if: steps.cache-ksrc.outputs.cache-hit != 'true'
+        run: |
+          wget -q "https://cdn.kernel.org/pub/linux/kernel/v4.x/linux-${KVER}.tar.xz"
+          ls -la "linux-${KVER}.tar.xz"
+
+      - name: 解压内核源码
+        run: |
+          tar xf "linux-${KVER}.tar.xz"
+          ls -d "linux-${KVER}"
+          head -5 "linux-${KVER}/Makefile"
+
+      - name: 配置内核并准备模块头文件
+        run: |
+          cd "linux-${KVER}"
+          make ARCH=arm64 CROSS_COMPILE="${CROSS}" defconfig
+          # 关掉会引入 libssl 3.x 不兼容的签名相关项（省掉 extract-cert 编译坑）
+          ./scripts/config \
+            --disable MODULE_SIG --disable MODULE_SIG_ALL \
+            --disable SYSTEM_TRUSTED_KEYRING --disable SYSTEM_REVOCATION_KEYS \
+            --disable MODULE_SIG_FORCE || true
+          # 打开 UAC2 / ALSA 依赖，让 u_audio.c 能拿到完整的 sound 头文件
+          ./scripts/config \
+            --enable SND --enable SND_PCM --enable SND_PCM_ELD \
+            --enable USB_GADGET --enable USB_LIBCOMPOSITE \
+            --enable USB_CONFIGFS --enable USB_CONFIGFS_F_UAC2 || true
+          make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig
+          # 记录关键配置项，便于和设备的 vermagic 对照
+          echo "=== 影响 vermagic 的关键项 ==="
+          grep -E '^CONFIG_(SMP|PREEMPT|PREEMPT_VOLUNTARY|PREEMPT_NONE|MODULE_UNLOAD|MODVERSIONS|MODULE_SIG|ARM64_4K_PAGES|ARM64_VA_BITS)' .config | sort
+          make ARCH=arm64 CROSS_COMPILE="${CROSS}" modules_prepare -j"$(nproc)"
+
+      - name: 诊断内核源码中的 UAC 文件
+        run: |
+          FN="linux-${KVER}/drivers/usb/gadget/function"
+          echo "=== function 目录里的 uac / audio 相关文件 ==="
+          ls -la "$FN" | grep -iE 'uac|audio' || echo "(无匹配)"
+          echo "=== Makefile 中的 uac2 规则 ==="
+          grep -n -iE 'uac2|u_audio|g_audio' "$FN/Makefile" || true
+          echo "=== 全树搜索 u_audio.h ==="
+          find "linux-${KVER}" -name 'u_audio.h' -o -name 'u_uac2.h' | head
+          echo "=== f_uac2.c / u_audio.c 的本地 #include 依赖 ==="
+          grep -ho '^#include "[^"]*"' "$FN/f_uac2.c" "$FN/u_audio.c" 2>/dev/null | sort -u || true
+
+      - name: 组装 out-of-tree 模块目录
+        run: |
+          FN="linux-${KVER}/drivers/usb/gadget/function"
+          DEST="$GITHUB_WORKSPACE/tools/uac2-kmod"
+          # 复制主源文件
+          cp -v "$FN/f_uac2.c" "$FN/u_audio.c" "$DEST/"
+          # 自动解析并复制本地引号头（含二级依赖），避免手工遗漏
+          for pass in 1 2 3; do
+            for h in $(grep -ho '^#include "[^"]*"' "$DEST"/*.c "$DEST"/*.h 2>/dev/null \
+                       | sed 's/.*"\(.*\)"/\1/' | sort -u); do
+              [ -f "$DEST/$h" ] && continue
+              if   [ -f "$FN/$h" ];                then cp -v "$FN/$h" "$DEST/"
+              elif [ -f "linux-${KVER}/drivers/usb/gadget/$h" ]; then cp -v "linux-${KVER}/drivers/usb/gadget/$h" "$DEST/"
+              fi
+            done
+          done
+          echo "=== 模块目录最终内容 ==="
+          ls -la "$DEST"
+
+      - name: 编译 utest.ko（空模块探针，验证整条工具链）
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          make -C "linux-${KVER}" M="$PWD/tools/uac2-kmod" \
+            ARCH=arm64 CROSS_COMPILE="${CROSS}" modules
+          ls -la tools/uac2-kmod/*.ko
+
+      - name: 编译 usb_uac2.ko（真实 UAC2 gadget 模块）
+        id: build-uac2
+        continue-on-error: true
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          make -C "linux-${KVER}" M="$PWD/tools/uac2-kmod" \
+            ARCH=arm64 CROSS_COMPILE="${CROSS}" WITH_UAC2=1 modules
+          ls -la tools/uac2-kmod/*.ko
+
+      - name: 静态校验产物（vermagic / 未决符号 / 段信息）
+        run: |
+          cd "$GITHUB_WORKSPACE/tools/uac2-kmod"
+          OUT="$GITHUB_WORKSPACE/kmod-report.txt"
+          : > "$OUT"
+          for k in *.ko; do
+            [ -e "$k" ] || continue
+            {
+              echo "############ $k ############"
+              echo "--- 文件大小 ---"; ls -la "$k"
+              echo "--- vermagic（必须 = 4.4.159 SMP mod_unload aarch64）---"
+              strings "$k" | grep -E '^vermagic=' | sort -u
+              echo "--- 模块元信息 ---"
+              strings "$k" | grep -E '^(name|license|description|author)=' | sort -u
+              echo "--- 未决符号（需由内核提供，应与设备 kallsyms 对得上）---"
+              aarch64-linux-gnu-nm -u "$k" | awk '{print $NF}' | sort -u
+              echo "--- 本模块导出的符号 ---"
+              aarch64-linux-gnu-nm --defined-only "$k" | grep -E ' [TtDdBbRr] ' | head -40 || true
+              echo
+            } >> "$OUT"
+            echo "=== $k ==="; strings "$k" | grep -E '^vermagic=' | sort -u
+          done
+          cat "$OUT"
+
+      - name: 上传内核模块产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: penmods-uac2-kmod-${{ env.KVER }}-${{ github.sha }}
+          path: |
+            tools/uac2-kmod/*.ko
+            kmod-report.txt
+          if-no-files-found: error
+          retention-days: 7
