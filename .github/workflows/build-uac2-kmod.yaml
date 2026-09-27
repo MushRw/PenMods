@@ -262,27 +262,28 @@ jobs:
           retention-days: 7
 
       # ─────────────────────────────────────────────────────────────────────
-      # 布局诊断：拿「内核真实字段偏移」做判据（不是猜 config）
+      # 布局诊断：解 struct module 布局之谜（判据 = init/exit 偏移 + 总大小）
       # ─────────────────────────────────────────────────────────────────────
-      # 关键突破：厂商自己的 .ko（/usr/lib/modules/hci_uart.ko、
-      # /system/lib/modules/8723ds.ko）的 `.gnu.linkonce.this_module` 节里，
-      # 每条重定位的 r_offset 就是该字段在 struct module 中的偏移。
-      # 实测两者给出完全一致的指纹：
-      #     size=704  offsetof(init)=368  offsetof(exit)=680
-      # 而我们的产物是：
-      #     size=768  offsetof(init)=344  offsetof(exit)=672
+      # 已确认的事实链：
+      #  1) 厂商 .ko 的 .gnu.linkonce.this_module 重定位 r_offset = 内核真实字段偏移
+      #     hci_uart.ko / 8723ds.ko 一致给出：size=704 init=368 exit=680
+      #     我们的产物：                      size=768 init=344 exit=672
+      #  2) include/linux/module.h 里 struct module 结尾是 `} ____cacheline_aligned;`，
+      #     且 `void *module_init ____cacheline_aligned;` —— 即按 SMP_CACHE_BYTES 对齐。
+      #  3) arch/arm64/include/asm/cache.h 里 **硬编码** `#define L1_CACHE_SHIFT 7`
+      #     ⇒ L1_CACHE_BYTES = SMP_CACHE_BYTES = 128。
+      #     而设备是 704 = 11*64，**不是 128 的整数倍** ⇒ 厂商内核的 L1_CACHE_BYTES = 64。
+      #  4) pahole 显示我们的成员在偏移 684 处结束，align64(684) = 704 —— 完全吻合。
       #
-      # ⚠️ 只看总大小会被 padding 骗（结构体带 aligned 属性），必须看 init/exit 偏移。
+      # ⇒ 需要三件事同时成立：
+      #      A) L1_CACHE_SHIFT 改成 6（必须改头文件，不是 Kconfig）
+      #      B) init 之前要多 24 字节
+      #      C) init→exit 之间要多 8 字节
+      #    下面把这个假设直接编出来验证，并量化各候选开关的贡献。
       #
-      # ⚠️⚠️ 另一个必须记住的坑：`make olddefconfig` **只写 .config**，
-      #     不重新生成 include/generated/autoconf.h。上一轮矩阵因此所有指纹
-      #     完全不变（连 -SMP 都是 768/344/672）—— 不是配置没影响，是压根没生效。
-      #     必须再跑一次 `make silentoldconfig` 才会同步 autoconf.h + auto.conf。
-      #     下面 probe() 里加了断言，直接打印 CONFIG_SMP 在 autoconf.h 里的样子。
-      #
-      # ⚠️ 本步骤故意放在「上传产物」**之后**：它会反复改 .config，绝不能污染
-      #    待上传的 .ko（md5 要和设备侧比对）。
-      - name: 布局诊断（struct module 定义 + pahole 全字段 + 配置矩阵指纹）
+      # ⚠️ 本步骤故意放在「上传产物」**之后**：它会改 .config 和 cache.h，
+      #    绝不能污染待上传的 .ko（md5 要和设备侧比对）。
+      - name: 布局诊断（对齐常量 + 子结构体尺寸 + 配置矩阵指纹）
         if: always()
         continue-on-error: true
         run: |
@@ -294,95 +295,96 @@ jobs:
           #include <linux/module.h>
           #include <linux/kernel.h>
           #include <linux/init.h>
+          #include <linux/mutex.h>
+          #include <linux/kobject.h>
           #include <asm/cache.h>
-          /* 真实实例 + 几个尺寸探针：DWARF 与 nm -S 都能读出关键常量 */
           struct module penmods_dummy_module __attribute__((used));
           char penmods_l1_cache_bytes[L1_CACHE_BYTES] __attribute__((used));
           char penmods_smp_cache_bytes[SMP_CACHE_BYTES] __attribute__((used));
-          #ifdef MODULE_INIT_ALIGN
-          char penmods_module_init_align[MODULE_INIT_ALIGN + 1] __attribute__((used));
-          #endif
+          char penmods_sz_mutex[sizeof(struct mutex)] __attribute__((used));
+          char penmods_sz_kobject[sizeof(struct kobject)] __attribute__((used));
+          char penmods_sz_mkobj[sizeof(struct module_kobject)] __attribute__((used));
+          char penmods_sz_modarch[sizeof(struct mod_arch_specific) + 1] __attribute__((used));
           static int __init p_init(void) { return 0; }
           static void __exit p_exit(void) { }
           module_init(p_init);
           module_exit(p_exit);
           MODULE_LICENSE("GPL");
           EOF
-          cp .config /tmp/base.config
 
+          CACHEH=arch/arm64/include/asm/cache.h
+          cp "$CACHEH" /tmp/cache.h.orig
+          set_cache_shift() {
+            cp /tmp/cache.h.orig "$CACHEH"
+            sed -i "s/^#define L1_CACHE_SHIFT.*/#define L1_CACHE_SHIFT\t\t$1/" "$CACHEH"
+          }
+          cp .config /tmp/base.config
           reset_cfg() {
             cp /tmp/base.config .config
             make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig >/dev/null 2>&1
-            # ★ 关键：这一句才会同步 include/generated/autoconf.h + include/config/auto.conf
             make ARCH=arm64 CROSS_COMPILE="${CROSS}" silentoldconfig < /dev/null >/dev/null 2>&1
           }
           fp() { python3 "$GITHUB_WORKSPACE/tools/uac2-kmod/kmod-layout.py" --fingerprint "$1" 2>/dev/null \
                    | awk '{printf "%-30s", $1" "$2" "$3}'; }
           rebuild() {
-            find /tmp/lp -name '*.o' -delete 2>/dev/null
-            find /tmp/lp -name '*.ko' -delete 2>/dev/null
+            find /tmp/lp -name '*.o'    -delete 2>/dev/null
+            find /tmp/lp -name '*.ko'   -delete 2>/dev/null
             find /tmp/lp -name '.*.cmd' -delete 2>/dev/null
             rm -f /tmp/lp/modules.order /tmp/lp/Module.symvers 2>/dev/null
-            make M=/tmp/lp ARCH=arm64 CROSS_COMPILE="${CROSS}" modules >/dev/null 2>&1
+            make M=/tmp/lp ARCH=arm64 CROSS_COMPILE="${CROSS}" modules >/tmp/lp/build.log 2>&1
           }
+          symstate() {  # $1=CONFIG_XXX -> Y / N
+            if grep -q "^$1=" .config; then echo -n Y; else echo -n N; fi
+          }
+          # probe <label> <要自检的config名> <toggles...>   环境变量 SHIFT 控制对齐
           probe() {
-            local label="$1"; shift
+            local label="$1"; local sym="$2"; shift 2
             reset_cfg
             if [ "$#" -gt 0 ]; then ./scripts/config "$@" >/dev/null 2>&1; fi
             make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig >/dev/null 2>&1
             make ARCH=arm64 CROSS_COMPILE="${CROSS}" silentoldconfig < /dev/null >/dev/null 2>&1
+            set_cache_shift "${SHIFT:-7}"
             rebuild
-            # SMP 只用来做「配置到底有没有生效」的自检
-            local smp
-            smp=$(grep -c '^#define CONFIG_SMP ' include/generated/autoconf.h)
-            printf '  %-34s %s [SMP@autoconf=%s]\n' "$label" "$(fp /tmp/lp/p.ko)" "$smp"
+            printf '  %-32s %s [%s=%s]\n' "$label" "$(fp /tmp/lp/p.ko)" "$sym" "$(symstate "$sym")"
           }
 
-          echo "################ 1. include/linux/module.h 里 struct module 的定义 ################"
-          H="include/linux/module.h"
-          S=$(grep -n '^struct module {' "$H" | head -1 | cut -d: -f1)
-          E=$(awk -v s="$S" 'NR>s && /^}/ {print NR; exit}' "$H")
-          echo ">>> $H  行 $S..$E"
-          if [ -n "$S" ] && [ -n "$E" ]; then sed -n "${S},${E}p" "$H"; fi
+          echo "################ 1. 关键常量与子结构体尺寸（cache.h shift=7 原样）################"
+          reset_cfg; set_cache_shift 7; rebuild
+          aarch64-linux-gnu-nm -S /tmp/lp/p.ko 2>/dev/null | grep -E 'penmods_(l1|smp|sz_|dummy)' || true
 
           echo
-          echo "################ 2. 对齐相关：arm64 cache.h / module.h ################"
-          grep -n -E 'L1_CACHE_SHIFT|L1_CACHE_BYTES|SMP_CACHE_BYTES|SMP_CACHE_SHIFT' arch/arm64/include/asm/cache.h || true
-          echo "--- arch/arm64/include/asm/module.h ---"
-          grep -n -E 'MODULE_INIT_ALIGN|aligned|mod_arch_specific' arch/arm64/include/asm/module.h || true
-          echo "--- include/linux/module.h 里的 MODULE_INIT_ALIGN / aligned ---"
-          grep -n -E 'MODULE_INIT_ALIGN|aligned\(128\)|____cacheline_aligned' "$H" || true
+          echo "################ 2. 假设验证：L1_CACHE_SHIFT 6 vs 7 ################"
+          echo "--- 目标：size=704 init=368 exit=680 ---"
+          SHIFT=7 probe "L1SHIFT=7 BASE"            CONFIG_SMP
+          SHIFT=6 probe "L1SHIFT=6 BASE"            CONFIG_SMP
 
           echo
-          echo "################ 3. BASE 的 struct module 全字段（pahole）################"
-          reset_cfg
-          rebuild
-          command -v pahole >/dev/null 2>&1 || sudo apt-get install -y -qq dwarves >/dev/null 2>&1 || true
-          pahole -C module /tmp/lp/p.ko 2>&1 | head -160 || true
-          echo "--- 尺寸探针（nm -S）---"
-          aarch64-linux-gnu-nm -S /tmp/lp/p.ko 2>/dev/null | grep -E 'penmods_dummy|penmods_l1|penmods_smp|penmods_module_init' || true
+          echo "################ 3. 在 L1SHIFT=6 基础上找 init 之前那 24 字节 ################"
+          SHIFT=6 probe "+UNUSED_SYMBOLS"           CONFIG_UNUSED_SYMBOLS --enable UNUSED_SYMBOLS
+          SHIFT=6 probe "+MODULE_SIG"               CONFIG_MODULE_SIG     --enable MODULE_SIG
+          SHIFT=6 probe "+DEBUG_MUTEXES"            CONFIG_DEBUG_MUTEXES  --enable DEBUG_MUTEXES
+          SHIFT=6 probe "+DEBUG_SPINLOCK"           CONFIG_DEBUG_SPINLOCK --enable DEBUG_SPINLOCK
+          SHIFT=6 probe "+DEBUG_SPINLOCK+DEBUG_MUTEXES" CONFIG_DEBUG_MUTEXES --enable DEBUG_SPINLOCK --enable DEBUG_MUTEXES
+          SHIFT=6 probe "+DEBUG_LOCK_ALLOC"         CONFIG_DEBUG_LOCK_ALLOC --enable DEBUG_LOCK_ALLOC
+          SHIFT=6 probe "+LOCKDEP"                  CONFIG_LOCKDEP        --enable LOCKDEP
+          SHIFT=6 probe "+DEBUG_KOBJECT_RELEASE"    CONFIG_DEBUG_KOBJECT_RELEASE --enable DEBUG_KOBJECT_RELEASE
+          SHIFT=6 probe "-SYSFS"                    CONFIG_SYSFS          --disable SYSFS
+          SHIFT=6 probe "+DEBUG_KERNEL"             CONFIG_DEBUG_KERNEL   --enable DEBUG_KERNEL
+          SHIFT=6 probe "+DEBUG_KERNEL+DEBUG_MUTEXES+DEBUG_SPINLOCK" CONFIG_DEBUG_SPINLOCK --enable DEBUG_KERNEL --enable DEBUG_MUTEXES --enable DEBUG_SPINLOCK
+          SHIFT=6 probe "-MUTEX_SPIN_ON_OWNER"      CONFIG_MUTEX_SPIN_ON_OWNER --disable MUTEX_SPIN_ON_OWNER
 
           echo
-          echo "################ 4. 配置矩阵指纹（目标：size=704 init=368 exit=680）################"
-          probe "BASE（当前 config）"
-          probe "-MODULES_TREE_LOOKUP"       --disable MODULES_TREE_LOOKUP
-          probe "-MUTEX_SPIN_ON_OWNER"      --disable MUTEX_SPIN_ON_OWNER
-          probe "-SMP"                      --disable SMP
-          probe "-KALLSYMS"                 --disable KALLSYMS
-          probe "-GENERIC_BUG"              --disable GENERIC_BUG
-          probe "-MODULE_UNLOAD"            --disable MODULE_UNLOAD
-          probe "+MODULE_SIG"               --enable  MODULE_SIG
-          probe "+UNUSED_SYMBOLS"           --enable  UNUSED_SYMBOLS
-          probe "+DEBUG_LOCK_ALLOC+LOCKDEP" --enable  LOCKDEP --enable DEBUG_LOCK_ALLOC
-          probe "+DEBUG_MUTEXES"            --enable  DEBUG_MUTEXES
-          probe "+DEBUG_KOBJECT_RELEASE"    --enable  DEBUG_KOBJECT_RELEASE
-          probe "-SYSFS"                    --disable SYSFS
-          probe "-MTL -MUTEX_SPIN"          --disable MODULES_TREE_LOOKUP --disable MUTEX_SPIN_ON_OWNER
-          probe "-MTL +SIG +UNUSED"         --disable MODULES_TREE_LOOKUP --enable MODULE_SIG --enable UNUSED_SYMBOLS
+          echo "################ 4. 在 L1SHIFT=6 基础上找 init→exit 的那 8 字节 ################"
+          SHIFT=6 probe "-MODULES_TREE_LOOKUP"      CONFIG_MODULES_TREE_LOOKUP --disable MODULES_TREE_LOOKUP
+          SHIFT=6 probe "-GENERIC_BUG"              CONFIG_GENERIC_BUG    --disable GENERIC_BUG
+          SHIFT=6 probe "-KALLSYMS"                 CONFIG_KALLSYMS       --disable KALLSYMS
+          SHIFT=6 probe "+TRACEPOINTS"              CONFIG_TRACEPOINTS    --enable TRACEPOINTS
+          SHIFT=6 probe "+JUMP_LABEL"               CONFIG_JUMP_LABEL     --enable JUMP_LABEL
+          SHIFT=6 probe "+LIVEPATCH"                CONFIG_LIVEPATCH      --enable LIVEPATCH
 
           echo
           echo "################ 5. 关键 config 现状（BASE）################"
-          reset_cfg
-          grep -E '^CONFIG_(UNUSED_SYMBOLS|MODULE_SIG|LIVEPATCH|GENERIC_BUG|MODULE_UNLOAD|KALLSYMS|KALLSYMS_ALL|SYSFS|DEBUG_KOBJECT_RELEASE|LOCKDEP|DEBUG_LOCK_ALLOC|MUTEX_SPIN_ON_OWNER|DEBUG_MUTEXES|MODULE_FORCE_LOAD|STRICT_MODULE_RWX|MODULES_TREE_LOOKUP|TRACEPOINTS|TRACING|EVENT_TRACING|FTRACE_MCOUNT_RECORD|FUNCTION_TRACER|JUMP_LABEL|PERF_EVENTS|BPF_SYSCALL|SMP|MODVERSIONS|DEBUG_INFO|ARM64_L1_CACHE_SHIFT)=' .config | sort
-          echo "--- arch/arm64/Kconfig 里的 ARM64_L1_CACHE_SHIFT ---"
-          grep -n -A4 'config ARM64_L1_CACHE_SHIFT' arch/arm64/Kconfig || true
+          reset_cfg; set_cache_shift 7
+          grep -E '^CONFIG_(UNUSED_SYMBOLS|MODULE_SIG|LIVEPATCH|GENERIC_BUG|MODULE_UNLOAD|KALLSYMS|KALLSYMS_ALL|SYSFS|DEBUG_KOBJECT_RELEASE|DEBUG_KERNEL|LOCKDEP|DEBUG_LOCK_ALLOC|DEBUG_SPINLOCK|MUTEX_SPIN_ON_OWNER|DEBUG_MUTEXES|MODULES_TREE_LOOKUP|TRACEPOINTS|TRACING|EVENT_TRACING|JUMP_LABEL|SMP|HAVE_MOD_ARCH_SPECIFIC)=' .config | sort
+          echo "--- 未设置的 ---"
+          grep -E '^# CONFIG_(DEBUG_KERNEL|DEBUG_MUTEXES|DEBUG_SPINLOCK|DEBUG_LOCK_ALLOC|LOCKDEP|UNUSED_SYMBOLS|MODULE_SIG|MODULES_TREE_LOOKUP|LIVEPATCH|TRACEPOINTS|JUMP_LABEL) is not set' .config | sort
