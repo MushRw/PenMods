@@ -1,0 +1,40 @@
+# PenMods —— 设备内核 struct module 的 ABI 基准
+# ============================================
+#
+# 这份文件里的数字**不是猜的、也不是从某个 defconfig 推的**，是从设备上现成的
+# 厂商模块里直接读出来的：
+#
+#   内核加载模块时，`.gnu.linkonce.this_module` 这块内存里的字段是**内核按它
+#   自己的偏移**读写的；而 `.init = init_module` / `.exit = cleanup_module`
+#   这类字段指向本模块自己的符号，链接器会在**该字段所在位置**生成一条重定位。
+#   所以那条重定位的 `r_offset` 就是**内核真实的 offsetof(字段)**。
+#
+#   （`r_offset` 是相对被重定位节的偏移，而该节的内容就是一个 `struct module`，
+#     因此 r_offset 直接等于字段偏移；节内没有别的起始填充。）
+#
+# 样本（两份互相印证，结果完全一致）
+# ---------------------------------
+#   /usr/lib/modules/hci_uart.ko     1476064 B   md5 8e08f526fc16c0a7df1fc627248e05bc
+#   /system/lib/modules/8723ds.ko    2264408 B   md5 b88aa90b47504c4cb76200a2d3060cf9
+#
+# 复核方式（本机执行，需要设备在线）
+# ---------------------------------
+#   export MSYS_NO_PATHCONV=1
+#   adb -s 2AB2900000800514 pull /usr/lib/modules/hci_uart.ko
+#   python3 tools/uac2-kmod/kmod-layout.py --fingerprint hci_uart.ko
+#   # ⇒ size=704  init=368  exit=680
+#
+# 对照（上游 linux-4.4.159 + 我们 CI 的那套 config）
+# -------------------------------------------------
+#   init=344  exit=672   ⇒ 差 +24 / +8；那 24 字节来自 struct mutex 里的
+#   spinlock_t（设备 CONFIG_DEBUG_SPINLOCK=y，raw_spinlock_t 24 字节）。
+#
+# 注意：align=64 不是从 .ko 的 this_module 节得到的那两个数字里推出来的，
+# 而是该节的 sh_addralign（`struct module` 以 `} ____cacheline_aligned;` 结尾，
+# 而 704 = 64x11 不是 128 的整数倍 ⇒ L1_CACHE_BYTES=64）。
+#
+size  = 704
+align = 64
+name  = 24
+init  = 368
+exit  = 680

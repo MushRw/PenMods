@@ -344,22 +344,88 @@ jobs:
       - name: ABI 修正 —— 把 this_module 的两条重定位搬到设备内核的字段偏移
         run: |
           cd "$GITHUB_WORKSPACE"
-          # 目标偏移**不硬编码**：直接从原厂模块现取（kmod-out/vendor 是随仓库
-          # 提交的设备实测样本），这样判据永远和设备一致。
-          REF=""
-          for c in kmod-out/vendor/hci_uart.ko kmod-out/vendor/8723ds.ko; do
-            [ -f "$c" ] && REF="$c" && break
-          done
+          # 目标偏移的来源分两级，保证「可追溯」同时「CI 里自足」：
+          #
+          #   ① 若本机放有厂商参考模块（PENMODS_ABI_REF 或 kmod-out/vendor/*.ko），
+          #      就**现取**偏移 —— 判据永远和设备一致。这是首选。
+          #   ② 否则读仓库里提交的 tools/uac2-kmod/ref-abi.txt —— 一份只有 5 个
+          #      数字的基准文件，里面写清了这两份厂商模块的路径与 md5，
+          #      任何人都能拿设备上的 .ko 复核。
+          #      ⚠️ 不把 2MB+ 的厂商二进制塞进仓库（体积 + 授权都不合适）。
+          #   两条路都必须与 layout-patch.py 内置的实测默认值**对账**，
+          #   任何一侧漂移就硬失败 —— 不允许静默用错偏移。
+          REF="${PENMODS_ABI_REF:-}"
           if [ -z "$REF" ]; then
-            echo "❌ 找不到原厂参考模块（kmod-out/vendor/*.ko）—— 不能用硬编码偏移，直接失败"
-            exit 1
+            for c in kmod-out/vendor/hci_uart.ko kmod-out/vendor/8723ds.ko; do
+              [ -f "$c" ] && REF="$c" && break
+            done
           fi
-          echo "参考模块: $REF"
-          python3 tools/uac2-kmod/kmod-layout.py "$REF"
+          python3 - "$REF" <<'PYABI'
+          import importlib.util, re, sys
+          ref_ko = sys.argv[1] if len(sys.argv) > 1 else ''
+          spec = importlib.util.spec_from_file_location('lp', 'tools/uac2-kmod/layout-patch.py')
+          lp = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(lp)
+          builtin = {'size': lp.DEF_SIZE, 'name': lp.DEF_NAME_OFF,
+                     'init': lp.DEF_INIT, 'exit': lp.DEF_EXIT}
+
+          if ref_ko:
+              kl = lp.KL
+              d, shs = kl.load(ref_ko)
+              syms = kl.symbols(d, shs)
+              tm = rela = None
+              for sh in shs:
+                  if sh['sname'] == '.gnu.linkonce.this_module':
+                      tm = sh
+                  if sh['sname'] == '.rela.gnu.linkonce.this_module':
+                      rela = sh
+              if tm is None or rela is None:
+                  sys.exit('❌ 参考模块 %s 里没有 this_module 节/重定位' % ref_ko)
+              got = {'size': tm['size']}
+              for r_offset, sidx, _ in kl.relocs(d, shs, rela):
+                  nm = syms[sidx][0]
+                  if nm == 'init_module':
+                      got['init'] = r_offset
+                  elif nm == 'cleanup_module':
+                      got['exit'] = r_offset
+              # 名字偏移直接扫
+              body = kl.section_bytes(d, tm)
+              for i in range(min(len(body), 256)):
+                  j = body.find(b'\0', i)
+                  if j < 0:
+                      break
+                  seg = body[i:j]
+                  if 2 <= len(seg) <= 56 and all(32 <= c < 127 for c in seg):
+                      got['name'] = i
+                      break
+              src = '厂商参考模块 %s' % ref_ko
+          else:
+              txt = open('tools/uac2-kmod/ref-abi.txt', encoding='utf-8').read()
+              got = {k: int(v) for k, v in
+                     re.findall(r'^(size|align|name|init|exit)\s*=\s*(\d+)', txt, re.M)}
+              src = 'tools/uac2-kmod/ref-abi.txt'
+
+          print('基准来源:', src)
+          print('  基准值  :', got)
+          print('  工具内置:', builtin)
+          bad = [k for k, v in builtin.items() if got.get(k) != v]
+          if bad:
+              sys.exit('❌ 基准漂移: %s —— 基准(%s) 与 layout-patch.py 内置值(%s) 不一致，终止'
+                       % (', '.join(bad), got, builtin))
+          if got.get('align') not in (None, 64):
+              sys.exit('❌ align 基准应为 64（L1_CACHE_BYTES=64），实为 %s' % got.get('align'))
+          print('✅ 基准自洽（size=%d name=%d init=%d exit=%d align=64）'
+                % (got['size'], got['name'], got['init'], got['exit']))
+          PYABI
+
           rc=0
           for k in tools/uac2-kmod/*.ko; do
             [ -e "$k" ] || continue
-            python3 tools/uac2-kmod/layout-patch.py "$k" --ref "$REF" || rc=1
+            if [ -n "$REF" ]; then
+              python3 tools/uac2-kmod/layout-patch.py "$k" --ref "$REF" || rc=1
+            else
+              python3 tools/uac2-kmod/layout-patch.py "$k" || rc=1
+            fi
           done
           if [ "$rc" != 0 ]; then
             echo "❌ ABI 修正失败 —— 产物不可用，终止（不要让下载到错布局的 .ko）"

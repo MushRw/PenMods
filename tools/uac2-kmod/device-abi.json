@@ -1,0 +1,31 @@
+{
+  "_readme": [
+    "设备内核 struct module 的真实布局 —— 这是 layout-patch.py 的判据来源（仓库内契约）。",
+    "为什么不是一个 .ko 二进制：原厂模块（hci_uart.ko 1.4MB / 8723ds.ko）不在本仓库里，",
+    "CI 的 checkout 看不到它们；而这几个数字才是真正需要冻结的契约。",
+    "证据是可复现的：把原厂模块拿回来，跑",
+    "    python3 tools/uac2-kmod/kmod-layout.py <vendor.ko>",
+    "就会打印同一组 (size, init, exit)。md5 如下，任何人可复核。"
+  ],
+  "kernel": "4.4.159 SMP mod_unload aarch64",
+  "device": "YoudaoDictionaryPen-514 / rk3326-youdao-exam (Exam_V0)",
+  "derived_from": [
+    { "file": "/usr/lib/modules/hci_uart.ko",  "md5": "8e08f526fc16c0a7df1fc627248e05bc" },
+    { "file": "/system/lib/modules/8723ds.ko", "md5": "b88aa90b47504c4cb76200a2d3060cf9" }
+  ],
+  "how": "读 .rela.gnu.linkonce.this_module 的 r_offset：链接器把 .init=init_module / .exit=cleanup_module 放在该节里对应字段的位置，而该节内容就是一个 struct module ⇒ r_offset 即 offsetof()。两个模块互相印证，数值完全一致。",
+
+  "struct_module": {
+    "size": 704,
+    "align": 64,
+    "name_off": 24,
+    "init_off": 368,
+    "exit_off": 680
+  },
+
+  "_why_704_and_64": "struct module 结尾是 `} ____cacheline_aligned;`，尺寸必为对齐数整数倍。704 = 64x11 不是 128 的整数倍 ⇒ 厂商内核 L1_CACHE_BYTES = 64（arm64 主线 arch/arm64/include/asm/cache.h 写的是 7 = 128）。",
+
+  "_why_init_368": "struct module 里有 `#ifdef CONFIG_SYSFS struct mutex param_lock;`。厂商 8723ds.ko 的 .bss 里 _lock(=struct mutex) = 64 字节、_sema(=struct semaphore) = 48 字节，两者都只在 CONFIG_DEBUG_SPINLOCK=y 时成立（否则是 40 / 24）。打开 DEBUG_SPINLOCK 后我们的 init 正好从 344 变成 368。",
+
+  "_why_exit_680": "剩余 8 字节差异的 #ifdef 归属尚未定位（候选都不成立：JUMP_LABEL/TRACEPOINTS/TRACING/EVENT_TRACING 厂商都是 n，LIVEPATCH 在 arm64 4.4 上不可选）。⇒ 不继续猜配置，由 layout-patch.py 在链接后把这两条重定位直接搬到实测偏移上；节内容只有『模块名 + 全 0』，与原厂模块逐字节语义等价。"
+}
