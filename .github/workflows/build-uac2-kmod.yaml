@@ -106,7 +106,13 @@ jobs:
           # 记录关键配置项，便于和设备的 vermagic 对照
           echo "=== 影响 vermagic 的关键项 ==="
           grep -E '^CONFIG_(SMP|PREEMPT|PREEMPT_VOLUNTARY|PREEMPT_NONE|MODULE_UNLOAD|MODVERSIONS|MODULE_SIG|ARM64_4K_PAGES|ARM64_VA_BITS)' .config | sort
-          make ARCH=arm64 CROSS_COMPILE="${CROSS}" modules_prepare -j"$(nproc)"
+          # ⚠️ GCC 10+ 默认 -fno-common，而 4.4 里 flex/bison 预生成的 dtc 老代码
+          #    （dtc-lexer.lex.c 与 dtc-parser.tab.c）**各自定义了一份 `YYLTYPE yylloc;`**，
+          #    于是链接脚本时报 multiple definition of `yylloc`。给 host 工具加回 -fcommon
+          #    即可（这里显式复刻 4.4 的默认 HOSTCFLAGS 再追加，避免命令行覆盖丢 flag）。
+          HOST_FLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
+          make ARCH=arm64 CROSS_COMPILE="${CROSS}" HOSTCFLAGS="$HOST_FLAGS" \
+            modules_prepare -j"$(nproc)"
 
       - name: 诊断内核源码中的 UAC 文件
         run: |
