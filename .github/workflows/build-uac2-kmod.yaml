@@ -144,6 +144,50 @@ jobs:
             --disable ARM64_VA_BITS_48 --enable ARM64_VA_BITS_39 \
             || true
           make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig
+          # ★★ ABI 复刻：把 struct module 的字段偏移对齐到设备内核 ★★
+          # 为什么需要：modpost 生成的 .mod.c 里，我们只给
+          #   .name / .init / .exit / .arch 四个字段赋初值；
+          # 其余字段全部由内核按【它自己的】偏移读写，自成一套、彼此自洽。
+          # ⇒ 唯一必须对齐的是 name / init / exit 三个偏移（name 天然在 24）。
+          # 实测（厂商 .ko 的重定位表，两份互相印证）：
+          #   size=704  offsetof(init)=368  offsetof(exit)=680
+          # 上游 4.4.159 + 任何我们能找到的 Kconfig 组合都编不出 368/680：
+          #   我们的 init=344（init 之前少 24 字节）、exit=672（init→exit 之间少 8 字节）。
+          # 那 24 字节最可能是 struct mutex 里 spinlock_t 的尺寸差（实测 +DEBUG_SPINLOCK
+          # 恰好把 init 顶到 368），但与其猜配置，不如按实测偏移直接补齐 —— 只影响
+          # struct module 这一个 ABI，不牵动其它任何结构体。
+          python3 - <<'PYPATCH'
+          import io
+          p = 'include/linux/module.h'
+          s = io.open(p, encoding='utf-8').read()
+          pad0 = (
+              "\t/*\n"
+              "\t * [PenMods ABI 复刻] 设备内核的 struct module 在 init 之前比上游\n"
+              "\t * 4.4.159 多 24 字节（实测厂商 hci_uart.ko / 8723ds.ko 的 init 在\n"
+              "\t * 偏移 368，上游源码编出来是 344）。内核按它自己的偏移读\n"
+              "\t * mod->init/.exit，而我们按自己的偏移写这两个值，所以必须对齐。\n"
+              "\t * 其余字段内核自成一套、彼此自洽，无需对齐。\n"
+              "\t */\n"
+              "\tchar __penmods_abi_pad0[24];\n\n"
+          )
+          old = "\t/* Startup function. */\n\tint (*init)(void);"
+          print('init 锚点出现次数 =', s.count(old))
+          if s.count(old) == 1:
+              s = s.replace(old, pad0 + old)
+          else:
+              print('!!! init 锚点不唯一，未应用补丁')
+          old2 = "\tstruct list_head source_list;"
+          print('source_list 锚点出现次数 =', s.count(old2))
+          if s.count(old2) == 1:
+              pad1 = ("\t/* [PenMods ABI 复刻] init→exit 之间再多 8 字节"
+                      "（实测 exit 在 680，上游是 672） */\n"
+                      "\tchar __penmods_abi_pad1[8];\n\n")
+              s = s.replace(old2, pad1 + old2, 1)
+          else:
+              print('!!! source_list 锚点不唯一，未应用补丁')
+          io.open(p, 'w', encoding='utf-8', newline='').write(s)
+          print('module.h ABI 补丁已应用')
+          PYPATCH
           # 记录关键配置项，便于和设备的 vermagic 对照
           echo "=== 影响 vermagic 的关键项 ==="
           grep -E '^CONFIG_(SMP|PREEMPT|PREEMPT_VOLUNTARY|PREEMPT_NONE|MODULE_UNLOAD|MODVERSIONS|MODULE_SIG|ARM64_4K_PAGES|ARM64_VA_BITS)' .config | sort
@@ -240,6 +284,16 @@ jobs:
                 fi
               else
                 echo "  ⚠️ 未找到 .gnu.linkonce.this_module 节"
+              fi
+              echo "--- ABI 指纹（设备实测：init=368 exit=680，必须一致）---"
+              fpout=$(python3 "$GITHUB_WORKSPACE/tools/uac2-kmod/kmod-layout.py" --fingerprint "$k" 2>/dev/null)
+              echo "  $fpout"
+              finit=$(echo "$fpout" | sed -n 's/.*init=\([0-9]*\).*/\1/p')
+              fexit=$(echo "$fpout" | sed -n 's/.*exit=\([0-9]*\).*/\1/p')
+              if [ "$finit" = "368" ] && [ "$fexit" = "680" ]; then
+                echo "  ✅ init/exit 偏移与设备内核一致"
+              else
+                echo "  ❌ init=$finit exit=$fexit —— 设备要求 init=368 exit=680，模块无法被正确 init/exit"
               fi
               echo "--- 未决符号（需由内核提供，应与设备 kallsyms 对得上）---"
               aarch64-linux-gnu-nm -u "$k" | awk '{print $NF}' | sort -u
