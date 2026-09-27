@@ -271,16 +271,18 @@ jobs:
       #     size=704  offsetof(init)=368  offsetof(exit)=680
       # 而我们的产物是：
       #     size=768  offsetof(init)=344  offsetof(exit)=672
-      # 三段拆解：init 之前内核多 24 字节；init→exit 之间我们多 16 字节；
-      #           exit 之后我们多 72 字节（24 - 16 - 72 = -64 ✓）
       #
-      # ⚠️ 只看总大小会被 padding 骗：arm64 上 struct module 结尾带
-      #    ____cacheline_aligned(64)，总大小永远取整到 64 的倍数，
-      #    小于 64 的差异完全看不出来。所以必须以 init/exit 偏移为准。
+      # ⚠️ 只看总大小会被 padding 骗（结构体带 aligned 属性），必须看 init/exit 偏移。
+      #
+      # ⚠️⚠️ 另一个必须记住的坑：`make olddefconfig` **只写 .config**，
+      #     不重新生成 include/generated/autoconf.h。上一轮矩阵因此所有指纹
+      #     完全不变（连 -SMP 都是 768/344/672）—— 不是配置没影响，是压根没生效。
+      #     必须再跑一次 `make silentoldconfig` 才会同步 autoconf.h + auto.conf。
+      #     下面 probe() 里加了断言，直接打印 CONFIG_SMP 在 autoconf.h 里的样子。
       #
       # ⚠️ 本步骤故意放在「上传产物」**之后**：它会反复改 .config，绝不能污染
       #    待上传的 .ko（md5 要和设备侧比对）。
-      - name: 布局诊断（pahole 全字段 + 配置矩阵指纹，仅诊断）
+      - name: 布局诊断（struct module 定义 + pahole 全字段 + 配置矩阵指纹）
         if: always()
         continue-on-error: true
         run: |
@@ -292,8 +294,14 @@ jobs:
           #include <linux/module.h>
           #include <linux/kernel.h>
           #include <linux/init.h>
-          /* 有一个真实的 struct module 实例，DWARF 才会带上完整类型定义 */
+          #include <asm/cache.h>
+          /* 真实实例 + 几个尺寸探针：DWARF 与 nm -S 都能读出关键常量 */
           struct module penmods_dummy_module __attribute__((used));
+          char penmods_l1_cache_bytes[L1_CACHE_BYTES] __attribute__((used));
+          char penmods_smp_cache_bytes[SMP_CACHE_BYTES] __attribute__((used));
+          #ifdef MODULE_INIT_ALIGN
+          char penmods_module_init_align[MODULE_INIT_ALIGN + 1] __attribute__((used));
+          #endif
           static int __init p_init(void) { return 0; }
           static void __exit p_exit(void) { }
           module_init(p_init);
@@ -302,60 +310,79 @@ jobs:
           EOF
           cp .config /tmp/base.config
 
-          fp() {  # $1=.ko  ->  打印 size/init/exit 指纹
-            python3 "$GITHUB_WORKSPACE/tools/uac2-kmod/kmod-layout.py" --fingerprint "$1" 2>/dev/null \
-              | awk '{printf "%-32s", $1" "$2" "$3}'
+          reset_cfg() {
+            cp /tmp/base.config .config
+            make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig >/dev/null 2>&1
+            # ★ 关键：这一句才会同步 include/generated/autoconf.h + include/config/auto.conf
+            make ARCH=arm64 CROSS_COMPILE="${CROSS}" silentoldconfig < /dev/null >/dev/null 2>&1
+          }
+          fp() { python3 "$GITHUB_WORKSPACE/tools/uac2-kmod/kmod-layout.py" --fingerprint "$1" 2>/dev/null \
+                   | awk '{printf "%-30s", $1" "$2" "$3}'; }
+          rebuild() {
+            find /tmp/lp -name '*.o' -delete 2>/dev/null
+            find /tmp/lp -name '*.ko' -delete 2>/dev/null
+            find /tmp/lp -name '.*.cmd' -delete 2>/dev/null
+            rm -f /tmp/lp/modules.order /tmp/lp/Module.symvers 2>/dev/null
+            make M=/tmp/lp ARCH=arm64 CROSS_COMPILE="${CROSS}" modules >/dev/null 2>&1
           }
           probe() {
             local label="$1"; shift
-            cp /tmp/base.config .config
+            reset_cfg
             if [ "$#" -gt 0 ]; then ./scripts/config "$@" >/dev/null 2>&1; fi
             make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig >/dev/null 2>&1
-            find /tmp/lp -name '*.o'     -delete 2>/dev/null
-            find /tmp/lp -name '*.ko'    -delete 2>/dev/null
-            find /tmp/lp -name '.*.cmd'  -delete 2>/dev/null
-            rm -f /tmp/lp/modules.order /tmp/lp/Module.symvers 2>/dev/null
-            make M=/tmp/lp ARCH=arm64 CROSS_COMPILE="${CROSS}" modules >/dev/null 2>&1
-            printf '  %-40s %s\n' "$label" "$(fp /tmp/lp/p.ko)"
+            make ARCH=arm64 CROSS_COMPILE="${CROSS}" silentoldconfig < /dev/null >/dev/null 2>&1
+            rebuild
+            # SMP 只用来做「配置到底有没有生效」的自检
+            local smp
+            smp=$(grep -c '^#define CONFIG_SMP ' include/generated/autoconf.h)
+            printf '  %-34s %s [SMP@autoconf=%s]\n' "$label" "$(fp /tmp/lp/p.ko)" "$smp"
           }
 
-          echo "############ BASE 的 struct module 全字段（pahole）############"
-          cp /tmp/base.config .config
-          make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig >/dev/null 2>&1
-          find /tmp/lp -name '*.o' -delete 2>/dev/null; find /tmp/lp -name '*.ko' -delete 2>/dev/null
-          find /tmp/lp -name '.*.cmd' -delete 2>/dev/null
-          make M=/tmp/lp ARCH=arm64 CROSS_COMPILE="${CROSS}" modules >/dev/null 2>&1
+          echo "################ 1. include/linux/module.h 里 struct module 的定义 ################"
+          H="include/linux/module.h"
+          S=$(grep -n '^struct module {' "$H" | head -1 | cut -d: -f1)
+          E=$(awk -v s="$S" 'NR>s && /^}/ {print NR; exit}' "$H")
+          echo ">>> $H  行 $S..$E"
+          if [ -n "$S" ] && [ -n "$E" ]; then sed -n "${S},${E}p" "$H"; fi
+
+          echo
+          echo "################ 2. 对齐相关：arm64 cache.h / module.h ################"
+          grep -n -E 'L1_CACHE_SHIFT|L1_CACHE_BYTES|SMP_CACHE_BYTES|SMP_CACHE_SHIFT' arch/arm64/include/asm/cache.h || true
+          echo "--- arch/arm64/include/asm/module.h ---"
+          grep -n -E 'MODULE_INIT_ALIGN|aligned|mod_arch_specific' arch/arm64/include/asm/module.h || true
+          echo "--- include/linux/module.h 里的 MODULE_INIT_ALIGN / aligned ---"
+          grep -n -E 'MODULE_INIT_ALIGN|aligned\(128\)|____cacheline_aligned' "$H" || true
+
+          echo
+          echo "################ 3. BASE 的 struct module 全字段（pahole）################"
+          reset_cfg
+          rebuild
           command -v pahole >/dev/null 2>&1 || sudo apt-get install -y -qq dwarves >/dev/null 2>&1 || true
           pahole -C module /tmp/lp/p.ko 2>&1 | head -160 || true
-          echo "--- penmods_dummy_module 的对象大小（= sizeof(struct module)）---"
-          aarch64-linux-gnu-nm -S --size-sort /tmp/lp/p.ko 2>/dev/null | grep -i penmods_dummy || true
+          echo "--- 尺寸探针（nm -S）---"
+          aarch64-linux-gnu-nm -S /tmp/lp/p.ko 2>/dev/null | grep -E 'penmods_dummy|penmods_l1|penmods_smp|penmods_module_init' || true
 
           echo
-          echo "############ 配置矩阵指纹（目标：size=704 init=368 exit=680）############"
+          echo "################ 4. 配置矩阵指纹（目标：size=704 init=368 exit=680）################"
           probe "BASE（当前 config）"
-          probe "+UNUSED_SYMBOLS"           --enable  UNUSED_SYMBOLS
-          probe "+MODULE_SIG"               --enable  MODULE_SIG
-          probe "+LIVEPATCH"                --enable  LIVEPATCH
-          probe "-GENERIC_BUG"              --disable GENERIC_BUG
-          probe "-MODULE_UNLOAD"            --disable MODULE_UNLOAD
-          probe "-KALLSYMS"                 --disable KALLSYMS
-          probe "-SYSFS"                    --disable SYSFS
-          probe "+DEBUG_KOBJECT_RELEASE"    --enable  DEBUG_KOBJECT_RELEASE
-          probe "+LOCKDEP"                  --enable  LOCKDEP --enable DEBUG_LOCK_ALLOC
-          probe "+DEBUG_MUTEXES"            --enable  DEBUG_MUTEXES
+          probe "-MODULES_TREE_LOOKUP"       --disable MODULES_TREE_LOOKUP
           probe "-MUTEX_SPIN_ON_OWNER"      --disable MUTEX_SPIN_ON_OWNER
           probe "-SMP"                      --disable SMP
-          probe "-PERF_EVENTS"              --disable PERF_EVENTS
-          probe "-BPF_SYSCALL"              --disable BPF_SYSCALL
-          probe "+TRACEPOINTS+TRACING+EVENT_TRACING+FTRACE_MCOUNT_RECORD+JUMP_LABEL" \
-                --enable TRACEPOINTS --enable TRACING --enable EVENT_TRACING \
-                --enable FTRACE_MCOUNT_RECORD --enable JUMP_LABEL
-          probe "-MODULES_TREE_LOOKUP"      --disable MODULES_TREE_LOOKUP
-          probe "+MODULE_SIG+UNUSED_SYMBOLS+DEBUG_MUTEXES" \
-                --enable MODULE_SIG --enable UNUSED_SYMBOLS --enable DEBUG_MUTEXES
+          probe "-KALLSYMS"                 --disable KALLSYMS
+          probe "-GENERIC_BUG"              --disable GENERIC_BUG
+          probe "-MODULE_UNLOAD"            --disable MODULE_UNLOAD
+          probe "+MODULE_SIG"               --enable  MODULE_SIG
+          probe "+UNUSED_SYMBOLS"           --enable  UNUSED_SYMBOLS
+          probe "+DEBUG_LOCK_ALLOC+LOCKDEP" --enable  LOCKDEP --enable DEBUG_LOCK_ALLOC
+          probe "+DEBUG_MUTEXES"            --enable  DEBUG_MUTEXES
+          probe "+DEBUG_KOBJECT_RELEASE"    --enable  DEBUG_KOBJECT_RELEASE
+          probe "-SYSFS"                    --disable SYSFS
+          probe "-MTL -MUTEX_SPIN"          --disable MODULES_TREE_LOOKUP --disable MUTEX_SPIN_ON_OWNER
+          probe "-MTL +SIG +UNUSED"         --disable MODULES_TREE_LOOKUP --enable MODULE_SIG --enable UNUSED_SYMBOLS
 
           echo
-          echo "############ 关键 config 现状（BASE）############"
-          cp /tmp/base.config .config
-          make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig >/dev/null 2>&1
-          grep -E '^CONFIG_(UNUSED_SYMBOLS|MODULE_SIG|LIVEPATCH|GENERIC_BUG|MODULE_UNLOAD|KALLSYMS|KALLSYMS_ALL|SYSFS|DEBUG_KOBJECT_RELEASE|LOCKDEP|DEBUG_LOCK_ALLOC|MUTEX_SPIN_ON_OWNER|DEBUG_MUTEXES|MODULE_FORCE_LOAD|STRICT_MODULE_RWX|MODULES_TREE_LOOKUP|TRACEPOINTS|TRACING|EVENT_TRACING|FTRACE_MCOUNT_RECORD|FUNCTION_TRACER|JUMP_LABEL|PERF_EVENTS|BPF_SYSCALL|SMP|MODVERSIONS|MODULE_SRCVERSION_ALL|DEBUG_INFO)=' .config | sort
+          echo "################ 5. 关键 config 现状（BASE）################"
+          reset_cfg
+          grep -E '^CONFIG_(UNUSED_SYMBOLS|MODULE_SIG|LIVEPATCH|GENERIC_BUG|MODULE_UNLOAD|KALLSYMS|KALLSYMS_ALL|SYSFS|DEBUG_KOBJECT_RELEASE|LOCKDEP|DEBUG_LOCK_ALLOC|MUTEX_SPIN_ON_OWNER|DEBUG_MUTEXES|MODULE_FORCE_LOAD|STRICT_MODULE_RWX|MODULES_TREE_LOOKUP|TRACEPOINTS|TRACING|EVENT_TRACING|FTRACE_MCOUNT_RECORD|FUNCTION_TRACER|JUMP_LABEL|PERF_EVENTS|BPF_SYSCALL|SMP|MODVERSIONS|DEBUG_INFO|ARM64_L1_CACHE_SHIFT)=' .config | sort
+          echo "--- arch/arm64/Kconfig 里的 ARM64_L1_CACHE_SHIFT ---"
+          grep -n -A4 'config ARM64_L1_CACHE_SHIFT' arch/arm64/Kconfig || true
