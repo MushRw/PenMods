@@ -29,6 +29,7 @@
 #include <linux/err.h>
 #include <linux/configfs.h>
 #include <linux/usb/composite.h>
+#include <linux/device.h>
 
 #define ABIPROBE_BUFSZ 512
 #define ABIPROBE_NAME  "PMABIPROBE"
@@ -215,6 +216,150 @@ static void abiprobe_uac2_roundtrip(void)
 		"free_func_inst，ABI 自洽\n");
 }
 
+/* ── struct device 布局探测（2026-09-27 的 oops 逼出来的）──────────────────
+ *
+ * 事故：把 uac2.0 link 进 configs/b.1 并绑 UDC 时炸在
+ *     afunc_bind() → platform_device_register() → platform_device_add()
+ *     → device_add() → sysfs_create_groups() → internal_create_group()
+ *     Unable to handle kernel paging request at virtual address a9be7bfdd65f03d8
+ * 即：内核从 `dev->groups` 读到一个垃圾指针（里面是 `ret` 的指令编码
+ * d65f03c0），说明 **offsetof(struct device, groups) 两边不一致**。
+ *
+ * 为什么 mkdir/rmdir 一路平安：4.4 的 f_uac2 把 platform_device 的创建放在
+ * `afunc_bind()` 里，只有 function 真正 bind（link + 绑 UDC）才走到那里。
+ *
+ * 为什么难对齐：`struct device` 是 Kconfig 影响最多的结构体之一
+ * （CONFIG_PM / NUMA / ACPI / DMA_CMA / IOMMU / PINCTRL ...），而我们 CI 用的是
+ * **上游 arm64 defconfig**，设备是厂商定制 config（且 /proc/config.gz 没开，
+ * 拿不到真 config）。
+ *
+ * 探测手法：`device_add()` 里必然有一句
+ *     sysfs_create_groups(&dev->kobj, dev->groups);
+ * ⇒ 在它的机器码里找到 `bl sysfs_create_groups`，把它前面十几条指令打出来：
+ *   其中 `ldr xN, [dev寄存器, #imm]` 的 imm 就是内核认为的 offsetof(groups)，
+ *   `add xN, dev寄存器, #imm` 的 imm 是 offsetof(kobj)（可交叉验证）。
+ * 全程**只读内核 .text**，不写、不注册、不碰 USB/UDC/ALSA ⇒ 可放心 insmod。
+ */
+static void abiprobe_dump_insns(const u32 *p, int from, int to, const char *tag)
+{
+	int i;
+
+	for (i = from; i <= to; i++) {
+		u32 w = p[i];
+
+		if ((w & 0xFFC00000) == 0xF9400000) {		/* ldr xN,[xM,#imm] */
+			pr_info("penmods-abiprobe: [dev] %s +0x%03x: ldr x%u, [x%u, #%lu]\n",
+				tag, i * 4, w & 0x1F, (w >> 5) & 0x1F,
+				(unsigned long)(((w >> 10) & 0xFFF) * 8));
+		} else if ((w & 0xFFC00000) == 0xF9000000) {	/* str xN,[xM,#imm] */
+			pr_info("penmods-abiprobe: [dev] %s +0x%03x: str x%u, [x%u, #%lu]\n",
+				tag, i * 4, w & 0x1F, (w >> 5) & 0x1F,
+				(unsigned long)(((w >> 10) & 0xFFF) * 8));
+		} else if ((w & 0xFF800000) == 0x91000000) {	/* add xN,xM,#imm */
+			unsigned long imm = (w >> 10) & 0xFFF;
+
+			if (w & 0x00400000)			/* sh=1 ⇒ imm << 12 */
+				imm <<= 12;
+			pr_info("penmods-abiprobe: [dev] %s +0x%03x: add x%u, x%u, #%lu\n",
+				tag, i * 4, w & 0x1F, (w >> 5) & 0x1F, imm);
+		} else if ((w & 0xFFE0FFE0) == 0xAA0003E0) {	/* mov xN, xM */
+			pr_info("penmods-abiprobe: [dev] %s +0x%03x: mov x%u, x%u\n",
+				tag, i * 4, w & 0x1F, (w >> 16) & 0x1F);
+		} else if ((w & 0xFC000000) == 0x94000000) {	/* bl */
+			int o26 = w & 0x03FFFFFF;
+
+			if (o26 & 0x02000000)
+				o26 |= (int)~0x03FFFFFF;
+			pr_info("penmods-abiprobe: [dev] %s +0x%03x: bl %+d\n",
+				tag, i * 4, o26 * 4);
+		} else if (w == 0xD65F03C0) {
+			pr_info("penmods-abiprobe: [dev] %s +0x%03x: ret\n", tag, i * 4);
+		} else {
+			pr_info("penmods-abiprobe: [dev] %s +0x%03x: .word 0x%08x\n",
+				tag, i * 4, w);
+		}
+	}
+}
+
+#define ABIPROBE_DEV_SCAN_INSNS 430	/* device_add 约 0x514 字节，够覆盖 */
+
+static void abiprobe_check_device_add(void)
+{
+	const u32 *p;
+	unsigned long addr, scg;
+	int i, hits = 0;
+
+	pr_info("penmods-abiprobe: ============== struct device 布局探测 ==============\n");
+	if (!kallsyms_lookup_name) {
+		pr_info("penmods-abiprobe: [dev] kallsyms_lookup_name 不可用，跳过\n");
+		return;
+	}
+
+	pr_info("penmods-abiprobe: [dev] ours: sizeof(struct device)=%d "
+		"sizeof(struct platform_device)=%d\n",
+		(int)sizeof(struct device), (int)sizeof(struct platform_device));
+	pr_info("penmods-abiprobe: [dev] ours: kobject=%d mutex=%d dev_pm_info=%d\n",
+		(int)sizeof(struct kobject), (int)sizeof(struct mutex),
+		(int)sizeof(struct dev_pm_info));
+	pr_info("penmods-abiprobe: [dev] ours: parent=%d p=%d kobj=%d init_name=%d type=%d\n",
+		(int)offsetof(struct device, parent), (int)offsetof(struct device, p),
+		(int)offsetof(struct device, kobj), (int)offsetof(struct device, init_name),
+		(int)offsetof(struct device, type));
+	pr_info("penmods-abiprobe: [dev] ours: mutex=%d bus=%d driver=%d platform_data=%d\n",
+		(int)offsetof(struct device, mutex), (int)offsetof(struct device, bus),
+		(int)offsetof(struct device, driver),
+		(int)offsetof(struct device, platform_data));
+#ifdef CONFIG_NUMA
+	pr_info("penmods-abiprobe: [dev] ours: numa_node=%d (CONFIG_NUMA=y)\n",
+		(int)offsetof(struct device, numa_node));
+#else
+	pr_info("penmods-abiprobe: [dev] ours: CONFIG_NUMA=n（内核若为 y 则整体偏移会差 8）\n");
+#endif
+#ifdef CONFIG_PM
+	pr_info("penmods-abiprobe: [dev] ours: power=%d pm_domain=%d (CONFIG_PM=y)\n",
+		(int)offsetof(struct device, power),
+		(int)offsetof(struct device, pm_domain));
+#else
+	pr_info("penmods-abiprobe: [dev] ours: CONFIG_PM=n（内核若为 y 则整体偏移会差很多）\n");
+#endif
+	pr_info("penmods-abiprobe: [dev] ours: ★groups=%d release=%d\n",
+		(int)offsetof(struct device, groups),
+		(int)offsetof(struct device, release));
+
+	addr = kallsyms_lookup_name("device_add");
+	scg  = kallsyms_lookup_name("sysfs_create_groups");
+	if (!addr || !scg) {
+		pr_info("penmods-abiprobe: [dev] 符号缺失：device_add=0x%lx "
+			"sysfs_create_groups=0x%lx\n", addr, scg);
+		return;
+	}
+	pr_info("penmods-abiprobe: [dev] device_add @ 0x%lx，sysfs_create_groups @ 0x%lx\n",
+		addr, scg);
+
+	p = (const u32 *)addr;
+	for (i = 0; i < ABIPROBE_DEV_SCAN_INSNS; i++) {
+		u32 w = p[i];
+		int o26;
+		unsigned long tgt;
+
+		if ((w & 0xFC000000) != 0x94000000)
+			continue;
+		o26 = w & 0x03FFFFFF;
+		if (o26 & 0x02000000)
+			o26 |= (int)~0x03FFFFFF;
+		tgt = (unsigned long)(p + i) + ((long)o26 * 4);
+		if (tgt != scg)
+			continue;
+		hits++;
+		pr_info("penmods-abiprobe: [dev] ★ bl sysfs_create_groups @ +0x%x，"
+			"前 14 条指令：\n", i * 4);
+		abiprobe_dump_insns(p, (i >= 14) ? i - 14 : 0, i, "dev");
+	}
+	if (!hits)
+		pr_info("penmods-abiprobe: [dev] ⚠️ 未找到 bl sysfs_create_groups"
+			"（扫了 %d 条指令）\n", ABIPROBE_DEV_SCAN_INSNS);
+}
+
 static void abiprobe_ours(void)
 {	pr_info("penmods-abiprobe: ================= 我们编译时的偏移 (ours) =================\n");
 	pr_info("penmods-abiprobe: ours: CONFIGFS_ITEM_NAME_LEN = %d\n",
@@ -276,6 +421,11 @@ static int __init abiprobe_init(void)
 	 *   哪怕上面 8 条 BUILD_BUG_ON 全过，也只能说明"我们的头文件自洽"，只有这条
 	 *   才能说明"内核和我们对上了"。 */
 	abiprobe_check_kernel_code("usb_put_function_instance");
+
+	/* ★ 探 struct device 的布局 —— 2026-09-27 绑 UDC 时崩在
+	 *   afunc_bind→platform_device_register→device_add→sysfs_create_groups，
+	 *   即 offsetof(struct device, groups) 两边不一致。 */
+	abiprobe_check_device_add();
 
 	buf = kzalloc(ABIPROBE_BUFSZ, GFP_KERNEL);
 	if (!buf)
