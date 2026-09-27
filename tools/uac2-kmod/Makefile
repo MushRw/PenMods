@@ -30,10 +30,14 @@ CROSS_COMPILE ?= aarch64-linux-gnu-
 # 空操作探针：任何情况下都可编，用来单独验证加载链路
 obj-m += utest.o
 
-# 真实模块：需要 f_uac2.c / u_audio.c 及其本地头文件先被复制到本目录
+# 真实模块。
+# ⚠️ 4.4 的 f_uac2.c 是**自包含**的：`usb_f_uac2-y := f_uac2.o`，只 include 一个
+#    u_uac2.h。被抽出来的 u_audio.c（ALSA 公共层）是 **4.6+** 才有的拆分，
+#    在 4.4 里根本不存在 —— 所以默认只编 f_uac2.o。
+#    为了兼容更新的内核，若 CI 传入了 UAC2_OBJS 就以它为准。
 ifdef WITH_UAC2
 obj-m += usb_uac2.o
-usb_uac2-y := f_uac2.o u_audio.o
+usb_uac2-y := $(if $(UAC2_OBJS),$(UAC2_OBJS),f_uac2.o)
 endif
 
 .PHONY: all clean

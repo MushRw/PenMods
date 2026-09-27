@@ -97,7 +97,8 @@ jobs:
             --disable MODULE_SIG --disable MODULE_SIG_ALL \
             --disable SYSTEM_TRUSTED_KEYRING --disable SYSTEM_REVOCATION_KEYS \
             --disable MODULE_SIG_FORCE || true
-          # 打开 UAC2 / ALSA 依赖，让 u_audio.c 能拿到完整的 sound 头文件
+          # 打开 UAC2 / ALSA 依赖，让 f_uac2.c 能拿到完整的 sound / gadget 头文件
+          # （4.4 的实际开关名是 USB_F_UAC2，由 USB_CONFIGFS_F_UAC2 select）
           ./scripts/config \
             --enable SND --enable SND_PCM --enable SND_PCM_ELD \
             --enable USB_GADGET --enable USB_LIBCOMPOSITE \
@@ -130,8 +131,12 @@ jobs:
         run: |
           FN="linux-${KVER}/drivers/usb/gadget/function"
           DEST="$GITHUB_WORKSPACE/tools/uac2-kmod"
-          # 复制主源文件
-          cp -v "$FN/f_uac2.c" "$FN/u_audio.c" "$DEST/"
+          # 复制主源文件。4.4 只有 f_uac2.c（**自包含**，只 include u_uac2.h）；
+          # u_audio.c 是 4.6+ 才从 f_uac2.c 抽出的 ALSA 公共层，4.4 里不存在，
+          # 所以这里用循环试探而非硬列，避免 cp 某个不存在的文件直接崩。
+          for f in f_uac2.c u_audio.c; do
+            if [ -f "$FN/$f" ]; then cp -v "$FN/$f" "$DEST/"; else echo "(skip) $f 在本内核版本中不存在"; fi
+          done
           # 自动解析并复制本地引号头（含二级依赖），避免手工遗漏
           for pass in 1 2 3; do
             for h in $(grep -ho '^#include "[^"]*"' "$DEST"/*.c "$DEST"/*.h 2>/dev/null \
@@ -157,8 +162,15 @@ jobs:
         continue-on-error: true
         run: |
           cd "$GITHUB_WORKSPACE"
+          # 依据实际复制到的源文件组装目标文件列表（4.4 只会是 f_uac2.o）
+          OBJS=""
+          for f in f_uac2.c u_audio.c; do
+            [ -f "tools/uac2-kmod/$f" ] && OBJS="$OBJS ${f%.c}.o"
+          done
+          OBJS="${OBJS# }"
+          echo "UAC2_OBJS = [$OBJS]"
           make -C "linux-${KVER}" M="$PWD/tools/uac2-kmod" \
-            ARCH=arm64 CROSS_COMPILE="${CROSS}" WITH_UAC2=1 modules
+            ARCH=arm64 CROSS_COMPILE="${CROSS}" WITH_UAC2=1 UAC2_OBJS="$OBJS" modules
           ls -la tools/uac2-kmod/*.ko
 
       - name: 静态校验产物（vermagic / 未决符号 / 段信息）
