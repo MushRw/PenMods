@@ -306,26 +306,87 @@ static void abiprobe_check_device_add(void)
 		(int)offsetof(struct device, parent), (int)offsetof(struct device, p),
 		(int)offsetof(struct device, kobj), (int)offsetof(struct device, init_name),
 		(int)offsetof(struct device, type));
-	pr_info("penmods-abiprobe: [dev] ours: mutex=%d bus=%d driver=%d platform_data=%d\n",
+	pr_info("penmods-abiprobe: [dev] ours: mutex=%d bus=%d driver=%d platform_data=%d "
+		"driver_data=%d power=%d pm_domain=%d\n",
 		(int)offsetof(struct device, mutex), (int)offsetof(struct device, bus),
 		(int)offsetof(struct device, driver),
-		(int)offsetof(struct device, platform_data));
-#ifdef CONFIG_NUMA
-	pr_info("penmods-abiprobe: [dev] ours: numa_node=%d (CONFIG_NUMA=y)\n",
-		(int)offsetof(struct device, numa_node));
-#else
-	pr_info("penmods-abiprobe: [dev] ours: CONFIG_NUMA=n（内核若为 y 则整体偏移会差 8）\n");
-#endif
-#ifdef CONFIG_PM
-	pr_info("penmods-abiprobe: [dev] ours: power=%d pm_domain=%d (CONFIG_PM=y)\n",
+		(int)offsetof(struct device, platform_data),
+		(int)offsetof(struct device, driver_data),
 		(int)offsetof(struct device, power),
 		(int)offsetof(struct device, pm_domain));
-#else
-	pr_info("penmods-abiprobe: [dev] ours: CONFIG_PM=n（内核若为 y 则整体偏移会差很多）\n");
+#ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
+	pr_info("penmods-abiprobe: [dev] ours: msi_domain=%d\n",
+		(int)offsetof(struct device, msi_domain));
 #endif
-	pr_info("penmods-abiprobe: [dev] ours: ★groups=%d release=%d\n",
+#ifdef CONFIG_PINCTRL
+	pr_info("penmods-abiprobe: [dev] ours: pins=%d\n",
+		(int)offsetof(struct device, pins));
+#endif
+#ifdef CONFIG_GENERIC_MSI_IRQ
+	pr_info("penmods-abiprobe: [dev] ours: msi_list=%d\n",
+		(int)offsetof(struct device, msi_list));
+#endif
+#ifdef CONFIG_NUMA
+	pr_info("penmods-abiprobe: [dev] ours: numa_node=%d\n",
+		(int)offsetof(struct device, numa_node));
+#endif
+	pr_info("penmods-abiprobe: [dev] ours: dma_mask=%d coherent=%d dma_pfn_offset=%d "
+		"dma_parms=%d dma_pools=%d dma_mem=%d\n",
+		(int)offsetof(struct device, dma_mask),
+		(int)offsetof(struct device, coherent_dma_mask),
+		(int)offsetof(struct device, dma_pfn_offset),
+		(int)offsetof(struct device, dma_parms),
+		(int)offsetof(struct device, dma_pools),
+		(int)offsetof(struct device, dma_mem));
+#ifdef CONFIG_DMA_CMA
+	pr_info("penmods-abiprobe: [dev] ours: cma_area=%d\n",
+		(int)offsetof(struct device, cma_area));
+#endif
+	pr_info("penmods-abiprobe: [dev] ours: of_node=%d fwnode=%d devt=%d id=%d "
+		"devres_lock=%d devres_head=%d knode_class=%d\n",
+		(int)offsetof(struct device, of_node),
+		(int)offsetof(struct device, fwnode),
+		(int)offsetof(struct device, devt),
+		(int)offsetof(struct device, id),
+		(int)offsetof(struct device, devres_lock),
+		(int)offsetof(struct device, devres_head),
+		(int)offsetof(struct device, knode_class));
+	pr_info("penmods-abiprobe: [dev] ours: ★class=%d groups=%d release=%d iommu_group=%d\n",
+		(int)offsetof(struct device, class),
 		(int)offsetof(struct device, groups),
-		(int)offsetof(struct device, release));
+		(int)offsetof(struct device, release),
+		(int)offsetof(struct device, iommu_group));
+	/* #ifdef 状态：一眼看出哪一项与设备内核不一致 */
+#ifdef CONFIG_PINCTRL
+	pr_info("penmods-abiprobe: [dev] ours: CONFIG_PINCTRL=y\n");
+#else
+	pr_info("penmods-abiprobe: [dev] ours: CONFIG_PINCTRL=n\n");
+#endif
+#ifdef CONFIG_DMA_CMA
+	pr_info("penmods-abiprobe: [dev] ours: CONFIG_DMA_CMA=y\n");
+#else
+	pr_info("penmods-abiprobe: [dev] ours: CONFIG_DMA_CMA=n\n");
+#endif
+#ifdef CONFIG_GENERIC_MSI_IRQ
+	pr_info("penmods-abiprobe: [dev] ours: CONFIG_GENERIC_MSI_IRQ=y\n");
+#else
+	pr_info("penmods-abiprobe: [dev] ours: CONFIG_GENERIC_MSI_IRQ=n\n");
+#endif
+#ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
+	pr_info("penmods-abiprobe: [dev] ours: CONFIG_GENERIC_MSI_IRQ_DOMAIN=y\n");
+#else
+	pr_info("penmods-abiprobe: [dev] ours: CONFIG_GENERIC_MSI_IRQ_DOMAIN=n\n");
+#endif
+#ifdef CONFIG_NUMA
+	pr_info("penmods-abiprobe: [dev] ours: CONFIG_NUMA=y\n");
+#else
+	pr_info("penmods-abiprobe: [dev] ours: CONFIG_NUMA=n\n");
+#endif
+#ifdef CONFIG_PM_SLEEP
+	pr_info("penmods-abiprobe: [dev] ours: CONFIG_PM_SLEEP=y\n");
+#else
+	pr_info("penmods-abiprobe: [dev] ours: CONFIG_PM_SLEEP=n\n");
+#endif
 
 	addr = kallsyms_lookup_name("device_add");
 	scg  = kallsyms_lookup_name("sysfs_create_groups");
@@ -359,6 +420,39 @@ static void abiprobe_check_device_add(void)
 	if (!hits)
 		pr_info("penmods-abiprobe: [dev] ⚠️ 未找到 bl sysfs_create_groups"
 			"（扫了 %d 条指令）\n", ABIPROBE_DEV_SCAN_INSNS);
+
+	/* ── 把 device_add 里**所有** [x19, #imm] 的访问打出来 ──────────────
+	 * x19 在 device_add 里就是 dev —— 已由三条访问交叉证实：
+	 *     [x19,#88]  = dev->type    （与我们一致）
+	 *     [x19,#752] = dev->class   （我们 744）
+	 *     [x19,#760] = dev->groups  （我们 752）
+	 * 把这些偏移逐一与我们编译的成员表对照，就能**定位差异落在哪一段**
+	 * —— 是关键区间的某个 #ifdef 成员，还是 struct dev_pm_info 内部差了。 */
+	pr_info("penmods-abiprobe: [dev] device_add 里所有 [x19, #imm] 访问（x19 = dev）：\n");
+	{
+		int cnt = 0;
+		int j;
+
+		for (j = 0; j < ABIPROBE_DEV_SCAN_INSNS; j++) {
+			u32 w = p[j];
+			unsigned long imm;
+
+			if (((w >> 5) & 0x1F) != 19)
+				continue;
+			if ((w & 0xFFC00000) == 0xF9400000) {
+				imm = ((w >> 10) & 0xFFF) * 8;
+				pr_info("penmods-abiprobe: [dev]   +0x%03x: ldr x%u, [x19, #%lu]\n",
+					j * 4, w & 0x1F, imm);
+				cnt++;
+			} else if ((w & 0xFFC00000) == 0xF9000000) {
+				imm = ((w >> 10) & 0xFFF) * 8;
+				pr_info("penmods-abiprobe: [dev]   +0x%03x: str x%u, [x19, #%lu]\n",
+					j * 4, w & 0x1F, imm);
+				cnt++;
+			}
+		}
+		pr_info("penmods-abiprobe: [dev] 共 %d 条 [x19, #imm] 访问\n", cnt);
+	}
 }
 
 static void abiprobe_ours(void)

@@ -167,6 +167,61 @@ jobs:
           #   读写内核结构体的错误字段 —— 那是真的会搞坏内核，而不是"加载失败而已"。
           ./scripts/config --enable DEBUG_KERNEL --enable DEBUG_SPINLOCK || true
           make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig
+          # ★★★ 第五处 ABI 复刻：struct device 的 #ifdef 成员 ★★★
+          #
+          # 实测（2026-09-27 真机 oops + abiprobe 读内核机器码）：
+          #   afunc_bind → platform_device_register → device_add → sysfs_create_groups
+          #   → internal_create_group 处 "Unable to handle kernel paging request"
+          # 即 offsetof(struct device, groups) 两边不一致。abiprobe 从内核自己的
+          # device_add 机器码里读出（x19 = dev）：
+          #     [x19,#88]  = dev->type    （我们 88  ✅ 一致）
+          #     [x19,#752] = dev->class   （我们 744 ❌ 差 8）
+          #     [x19,#760] = dev->groups  （我们 752 ❌ 差 8）
+          # ⇒ 内核的 struct device 比我们**多 8 字节**，差异落在 type(88)~class 之间。
+          #
+          # struct device 里受 Kconfig 影响的成员一共只有 5 个：
+          #     CONFIG_GENERIC_MSI_IRQ_DOMAIN  struct irq_domain *msi_domain  +8
+          #     CONFIG_PINCTRL                 struct dev_pin_info *pins     +8
+          #     CONFIG_GENERIC_MSI_IRQ         struct list_head msi_list     +16
+          #     CONFIG_NUMA                    int numa_node                 +4
+          #     CONFIG_DMA_CMA                 struct cma *cma_area          +8
+          #
+          # 设备内核侧实测（/proc/kallsyms 反推，数据符号列不全但函数够用）：
+          #     pinctrl_register / pinctrl_unregister / devm_pinctrl_get 都在
+          #         ⇒ CONFIG_PINCTRL = y
+          #     cma_alloc / dma_alloc_from_contiguous 都没有
+          #         ⇒ CONFIG_DMA_CMA = n
+          #     pci_scan_bus / __pci_register_driver / msi_create_irq_domain 都没有，
+          #     且 /sys/bus/pci 不存在 ⇒ PCI_MSI / GENERIC_MSI_IRQ* 全 = n
+          # 而我们的上游 arm64 defconfig 恰好相反：
+          #     DMA_CMA=y（line 83）、PCI_MSI=y（会 select GENERIC_MSI_IRQ）
+          #     PINCTRL 反而因 defconfig 里的 PINCTRL_MSM8916 依赖 ARCH_QCOM
+          #     被 Kconfig 静默关掉 ⇒ CONFIG_PINCTRL = n
+          # ⇒ 全部向设备看齐。
+          ./scripts/config \
+            --disable DMA_CMA --disable NUMA \
+            --disable PCI_MSI --disable PCI_XGENE \
+            --disable PCIE_DW --disable PCIE_DW_HOST --disable PCIE_DW_PLAT \
+            || true
+          make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig
+          # CONFIG_PINCTRL 没有 prompt（只能被驱动 select），要在 olddefconfig 之后补。
+          # 我们并不编译内核本体，只让 include/linux/device.h 里的
+          # `#ifdef CONFIG_PINCTRL` 成立，从而 struct device 多出 `pins` 这一个指针。
+          ./scripts/config --enable PINCTRL || true
+          echo "=== struct device 相关 Kconfig（实际值） ==="
+          grep -E '^CONFIG_(PINCTRL|PINMUX|PINCONF|GENERIC_PINCONF|DMA_CMA|CMA|GENERIC_MSI_IRQ|GENERIC_MSI_IRQ_DOMAIN|PCI_MSI|PCI_MSI_IRQ_DOMAIN|PCI|PCI_XGENE|NUMA|PM|PM_SLEEP|PM_RUNTIME|PM_GENERIC_DOMAINS)=' .config \
+            || echo "(无匹配)"
+          # 硬断言：任何一项没对齐都直接失败，绝不静默产出错布局的 .ko
+          # （设备 panic_on_oops=1，偏移一错就是当场重启）
+          if grep -q '^# CONFIG_PINCTRL is not set' .config; then
+            echo "❌ CONFIG_PINCTRL 仍为 n ⇒ struct device 少 8 字节（pins），绑 UDC 必 oops"; exit 1
+          fi
+          for k in DMA_CMA GENERIC_MSI_IRQ GENERIC_MSI_IRQ_DOMAIN NUMA; do
+            if grep -q "^CONFIG_${k}=y" .config; then
+              echo "❌ CONFIG_${k} 没关掉 ⇒ struct device 会多出成员，绑 UDC 必 oops"; exit 1
+            fi
+          done
+          echo "✅ struct device 的 5 个 #ifdef 成员已与设备内核看齐"
           # ★★ L1_CACHE_BYTES = 64（不是 arm64 主线的 128）★★
           #
           # `struct module` 以 `} ____cacheline_aligned;` 结尾，所以它的尺寸必然是
