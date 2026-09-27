@@ -26,6 +26,7 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/string.h>
+#include <linux/err.h>
 #include <linux/configfs.h>
 #include <linux/usb/composite.h>
 
@@ -74,9 +75,65 @@ static void abiprobe_find_ptr(const char *tag, void *buf, int n, unsigned long w
 	}
 }
 
-static void abiprobe_ours(void)
+/* ── uac2 function instance 往返测试（零 configfs mkdir / 零 USB / 零 UDC）────
+ *
+ * 目的：把 `mkdir functions/uac2.0` 里**唯一真正危险的那段路径**单独跑一遍，
+ * 但不创建任何 configfs 目录、不碰 UDC ⇒ 随时可以撤销、不会影响 adb。
+ *
+ *   ① usb_get_function_instance("uac2")
+ *        内核按**它自己的**偏移读 usb_function_driver.alloc_inst（我们的代码）
+ *        → 我们的 uac2_alloc_inst() 分配 f_uac2_opts，并调
+ *          config_group_init_type_name(&fi->group, "uac2", &uac2_func_type)
+ *          —— **内核按它自己的偏移往我们这块内存里写 config_group 的字段**
+ *   ② usb_put_function_instance(fi)
+ *        → 内核按**它自己的**偏移读 fi->free_func_inst 并调用
+ *
+ * 两处都是"内核用自己的偏移读/写我们的结构体"。布局一旦不对就是当场 oops，
+ * 而设备 panic_on_oops=1 ⇒ 立刻重启。反过来说：
+ * **"跑完没崩 + 两条日志都在 + rmmod rc=0" 就是 configfs/usb_function_instance
+ *   ABI 正确的强判据**，而且比 mkdir 更早、更安全地暴露问题。
+ *
+ * 用 __attribute__((weak)) 引用符号：万一内核没导出它们，也不会编译/链接失败，
+ * 只会打印"符号不可用"。
+ */
+extern struct usb_function_instance *usb_get_function_instance(const char *name)
+	__attribute__((weak));
+extern void usb_put_function_instance(struct usb_function_instance *fi)
+	__attribute__((weak));
+
+static void abiprobe_uac2_roundtrip(void)
 {
-	pr_info("penmods-abiprobe: ================= 我们编译时的偏移 (ours) =================\n");
+	struct usb_function_instance *fi;
+
+	pr_info("penmods-abiprobe: ================= uac2 往返测试 =================\n");
+	if (!usb_get_function_instance || !usb_put_function_instance) {
+		pr_info("penmods-abiprobe: [uac2] 符号未导出，跳过往返测试\n");
+		return;
+	}
+
+	fi = usb_get_function_instance("uac2");
+	if (IS_ERR(fi)) {
+		pr_info("penmods-abiprobe: [uac2] 拿不到实例 err=%ld "
+			"（-19=ENODEV ⇒ usb_uac2.ko 没加载，或它的 init 没被执行）\n",
+			(long)PTR_ERR(fi));
+		return;
+	}
+
+	pr_info("penmods-abiprobe: [uac2] 拿到实例 OK ⇒ usb_uac2 的 init 确实注册了 uac2\n");
+	pr_info("penmods-abiprobe: [uac2] ours: sizeof(usb_function_instance)=%d "
+		"fd=%d set_inst_name=%d free_func_inst=%d\n",
+		(int)sizeof(struct usb_function_instance),
+		(int)offsetof(struct usb_function_instance, fd),
+		(int)offsetof(struct usb_function_instance, set_inst_name),
+		(int)offsetof(struct usb_function_instance, free_func_inst));
+
+	usb_put_function_instance(fi);
+	pr_info("penmods-abiprobe: [uac2] put 往返成功 —— 内核按它的偏移读到了我们的 "
+		"free_func_inst，ABI 自洽\n");
+}
+
+static void abiprobe_ours(void)
+{	pr_info("penmods-abiprobe: ================= 我们编译时的偏移 (ours) =================\n");
 	pr_info("penmods-abiprobe: ours: CONFIGFS_ITEM_NAME_LEN = %d\n",
 		(int)CONFIGFS_ITEM_NAME_LEN);
 	pr_info("penmods-abiprobe: ours: sizeof(config_item)=%d sizeof(config_group)=%d\n",
@@ -152,6 +209,10 @@ static int __init abiprobe_init(void)
 	abiprobe_scan_selflist("config_group", buf, ABIPROBE_BUFSZ);
 
 	kfree(buf);
+
+	/* 再跑一遍 uac2 的实例创建/销毁往返（需要 usb_uac2.ko 已加载） */
+	abiprobe_uac2_roundtrip();
+
 	return 0;
 }
 
