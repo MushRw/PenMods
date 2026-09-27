@@ -30,6 +30,7 @@
 #include <linux/configfs.h>
 #include <linux/usb/composite.h>
 #include <linux/device.h>
+#include <linux/platform_device.h>	/* sizeof(struct platform_device) 需要完整类型 */
 
 #define ABIPROBE_BUFSZ 512
 #define ABIPROBE_NAME  "PMABIPROBE"
