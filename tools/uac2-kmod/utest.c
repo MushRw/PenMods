@@ -45,6 +45,11 @@
 
 extern struct module __this_module;
 
+/* 前置声明：utest_init 里要拿 utest_exit 的地址来反扫内核偏移，
+ * 而 utest_exit 定义在后面（C 里用后定义的标识符必须先知会编译器）。 */
+static int __init utest_init(void);
+static void __exit utest_exit(void);
+
 /* 只扫描我们自己那块 this_module 内存；超出 sizeof 的字节不碰 */
 #define SCAN_MAX ((int)sizeof(struct module))
 
