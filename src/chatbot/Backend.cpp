@@ -2766,10 +2766,10 @@ bool ChatBot::addModel(const QString& modelJson) {
     newModel["endpoint"]                      = endpoint;
     newModel["apiKey"]                        = input["apiKey"].toString().toStdString();
     newModel["modelId"]                       = modelId;
-    newModel["maxContextSize"]                = input.contains("maxContextSize") ? input["maxContextSize"].toInt() : kDefaultMaxContextSize;
+    QString apiProtocol                       = input["apiProtocol"].toString();
     newModel["apiProtocol"]                   = apiProtocol == "responses" ? "responses" : "chat_completions";
     newModel["temperature"]                   = input.contains("temperature") ? input["temperature"].toDouble() : 0.7;
-    newModel["maxContextSize"]                = input.contains("maxContextSize") ? input["maxContextSize"].toInt() : 0;
+    newModel["maxContextSize"]                = input.contains("maxContextSize") ? input["maxContextSize"].toInt() : kDefaultMaxContextSize;
     QString                  reasoningEffort  = input["reasoningEffort"].toString();
     static const QStringList reasoningEfforts = {"none", "minimal", "low", "medium", "high", "xhigh"};
     newModel["reasoningEffort"] =
