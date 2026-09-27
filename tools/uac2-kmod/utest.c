@@ -20,7 +20,14 @@
 
 static int __init utest_init(void)
 {
-	pr_info("penmods-utest: loaded OK on Linux %s\n", UTS_RELEASE);
+	/* 故意不用 UTS_RELEASE —— 它在 include/generated/utsrelease.h 里，
+	 * 需要额外 include 才能拿到，而 LINUX_VERSION_CODE 由 linux/version.h
+	 * 直接提供，省一个依赖。 */
+	pr_info("penmods-utest: loaded OK (built for kernel %u.%u.%u, code %u)\n",
+		(LINUX_VERSION_CODE >> 16) & 0xff,
+		(LINUX_VERSION_CODE >> 8) & 0xff,
+		LINUX_VERSION_CODE & 0xff,
+		LINUX_VERSION_CODE);
 	return 0;
 }
 
