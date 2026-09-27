@@ -5,6 +5,28 @@ import QtGraphicalEffects 1.14
 import "./commons"
 import "./components"
 
+// 下拉快速设置面板
+//
+// 【2026-09-27 合并修复】上游 23 提交曾把本文件整体换成它的 Grid 版（218 行），
+// 我方 424 行的视觉定制（状态块 / 45° 胶囊 / 圆形开关按钮 / 实时毛玻璃）被覆盖。
+// 本次以我方版本为基底恢复，并把上游新增的「快捷音乐控制」
+// （YQuickMusicPlayer + 左下角音乐入口）融合回来：
+//   · 音乐可用时，打开面板默认进音乐视图（上游语义），左下角按钮可在两个视图间切换
+//   · 音乐不可用时，只显示设置视图
+//
+// 布局（320x170，屏幕边距 16、节奏 8）：
+//   · 左上竖排：时间（大）→ 日期 → 电量 + 百分比
+//   · 中间两条 45° 胶囊（音量在左下、亮度在右上），图标在胶囊左端并反向旋转保持正立
+//   · 右侧两个圆：WiFi（上）/ 蓝牙（下），圆心 (272,54)/(272,124)、半径 26
+//   · 左下空档放音乐入口
+//
+// 几何约束（按参考图重算，参考图那版状态块与胶囊外接框是重叠的）：
+//   胶囊外接框 = (100+24)/±√2 ≈ ±44，所以：
+//     状态块 x 16..104 / y 10..76
+//     音量圆心 (150,80) -> 外接框 106..194 / 36..124
+//     亮度圆心 (198,116) -> 外接框 154..242 / 72..160
+//     右侧圆     x 246..298
+//   两条胶囊的垂直间距 = |Δx+Δy|·0.707 ≈ 59 > 胶囊厚度 24，所以视觉上不会压在一起。
 Item {
     id: id_quick_setting_layer_root
     width: YEnum.Screen.Width
@@ -12,13 +34,41 @@ Item {
     state: "close"
 
     readonly property bool isOpening: ("open" === state)
+
+    // 背景内容（YFastBlurRectangle 实时取景用），由 YMainWindow 注入
+    property Item backdropItem: null
+
+    // ---- 状态块（时间 / 日期 / 电量）----
+    property string timeString: "00:00"
+    property string dateString: ""
+    property string shortDateString: ""
+
+    // ---- 上游：快捷音乐控制 ----
+    // 「有音乐可控制」判据与上游一致：悬浮窗隐藏 + 音频模式 + 有标题 + 非停止态
     readonly property bool musicControlsAvailable: musicPlayer.hideFloatingWindow
                                         && mediaPlayerManager.playerMode === YEnum.PM_AudioPlayer
                                         && mediaPlayerManager.title.length > 0
                                         && mediaPlayerManager.playState !== YEnum.STOPPED
-
+    // true = 显示音乐控制视图；false = 显示设置视图（音量/亮度/WiFi/蓝牙）
     property bool showingMusicControls: false
-    property alias fastBlurTarget: id_fast_blur.source
+
+    function _tickClock() {
+        var now = new Date();
+        var weekDays = ["日", "一", "二", "三", "四", "五", "六"];
+        timeString = Qt.formatTime(now, "HH:mm");
+        dateString = now.getFullYear() + "/" + (now.getMonth() + 1) + "/" + now.getDate()
+                + " 周" + weekDays[now.getDay()];
+        shortDateString = (now.getMonth() + 1) + "/" + now.getDate() + " 周" + weekDays[now.getDay()];
+    }
+
+    Timer {
+        interval: 20000
+        repeat: true
+        running: true
+        onTriggered: id_quick_setting_layer_root._tickClock()
+    }
+
+    Component.onCompleted: _tickClock()
 
     function close() {
         if ("open" === state) {
@@ -34,9 +84,11 @@ Item {
 
     function reopen() {
         state = "openning"
+        // 上游语义：每次打开时按当前播放状态决定是否直接进音乐视图
         showingMusicControls = musicControlsAvailable
         id_open_close_animator.to = 0
         id_open_close_animator.restart()
+        _tickClock()
         settingManager.updateVolumeAndLcd()
     }
 
@@ -87,12 +139,16 @@ Item {
         }
     }
 
-    YAnimator {
+    // 用标准 NumberAnimation，不用 YAnimator：
+    // YAnimator 动画期间不保证发出 y 的变更通知，毛玻璃取景框绑定的是 y，
+    // 收不到更新就会停在松手那一刻 —— 面板回弹时模糊背景跟着面板一起跑。
+    NumberAnimation {
         id: id_open_close_animator
         target: id_quick_setting_layer_root
+        property: "y"
         from: id_quick_setting_layer_root.y
         to: - id_quick_setting_layer_root.height
-        duration: 120
+        duration: 200
         running: false
         alwaysRunToEnd: true
         onRunningChanged: {
@@ -106,17 +162,310 @@ Item {
         }
     }
 
-    FastBlur {
-        id: id_fast_blur
+    // 面板表面：统一走 commons/YFastBlurRectangle（与插件抽屉、听力练习左侧栏同一份实现）
+    // 毛玻璃档是实时模糊：取景框用面板根节点的 y 显式绑定，面板滑动时跟着重算，
+    // 模糊内容钉在背景上（不能用 mapToItem：QML 依赖追踪抓不到它，取景框会永久停在屏外）
+    YFastBlurRectangle {
         anchors.fill: parent
-        radius: 16
+        backdrop: id_quick_setting_layer_root.backdropItem
+        sourceY: id_quick_setting_layer_root.y
     }
 
-    Rectangle {
+    // ================= 设置视图（我方布局）=================
+    Item {
+        id: id_settings_panel
         anchors.fill: parent
-        color: "#E6000000"
+        visible: !id_quick_setting_layer_root.showingMusicControls
+                 || !id_quick_setting_layer_root.musicControlsAvailable
+
+        // ---- 左上：时间 / 日期 / 电量（竖排）----
+        Column {
+            id: id_status_block
+            anchors.left: parent.left
+            anchors.top: parent.top
+            // 时间和电量往角上再靠一点
+            anchors.leftMargin: 10
+            anchors.topMargin: 8
+            spacing: 4
+
+            // 时间 + 日期压成一行（第二次改），电量仍两行，放在下方
+            Row {
+                spacing: 6
+
+                YText {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: id_quick_setting_layer_root.timeString
+                    font.pixelSize: 20
+                    font.weight: Font.Bold
+                    color: YColors.white
+                }
+
+                YText {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: id_quick_setting_layer_root.shortDateString
+                    font.pixelSize: 10
+                    color: YColors.textSecondary
+                }
+            }
+
+            // 电量：间距照原版标题栏（百分比 —12px— 电池框 —0px— 充电闪电，闪电紧贴框）
+            Row {
+                spacing: 12
+
+                YText {
+                    anchors.verticalCenter: parent.verticalCenter
+                    font.pixelSize: 16
+                    text: ("%1%").arg(batteryManager.power)
+                    width: paintedWidth
+                    height: paintedHeight
+                }
+
+                Row {
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 0
+
+                    Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 28
+                        height: 14
+                        radius: 10
+                        color: "transparent"
+                        border.width: 2
+                        border.color: YColors.white
+
+                        Item {
+                            width: 22
+                            height: 8
+                            anchors.centerIn: parent
+
+                            Item {
+                                anchors.fill: parent
+                                clip: true
+                                anchors.rightMargin: (100 - batteryManager.power) * 22 / 100
+
+                                Rectangle {
+                                    width: 22
+                                    height: 8
+                                    radius: height / 2
+                                    color: {
+                                        if (batteryManager.charging)
+                                            return (100 > batteryManager.power) ? "#00FF66" : YColors.white;
+                                        return (20 > batteryManager.power) ? YColors.red : YColors.white;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    YImage {
+                        anchors.verticalCenter: parent.verticalCenter
+                        sourceSize: Qt.size(14, 14)
+                        width: 14
+                        height: 14
+                        imageName: "ic_battery_flash"
+                        visible: batteryManager.charging
+                    }
+                }
+            }
+        }
+
+        // ================= 两条 45° 胶囊：音量（左下）/ 亮度（右上）=================
+        // 音量
+        YVolmueAdjustor {
+            id: id_volum_setting
+            implicitWidth: 170
+            implicitHeight: 44
+            rotation: -45
+            iconVisible: false
+            anchors.horizontalCenter: parent.left
+            anchors.verticalCenter: parent.top
+            // 整组右移（圆也右移后解锁）：中心 94 -> 112，间距 73 不变 -> 仍是约 7.6px
+            anchors.horizontalCenterOffset: 112
+            anchors.verticalCenterOffset: 85
+
+            YImage {
+                sourceSize: Qt.size(24, 24)
+                width: 24
+                height: 24
+                rotation: 45
+                anchors.left: parent.left
+                anchors.leftMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                imageName: {
+                    if (0 === id_volum_setting.value)
+                        return "slide/volum_off";
+                    if (id_volum_setting.value <= 50)
+                        return "slide/volum_half";
+                    return "slide/volum";
+                }
+            }
+        }
+
+        // 亮度
+        YTouchRegulator {
+            id: id_lum_setting
+            implicitWidth: 170
+            implicitHeight: 44
+            rotation: -45
+            anchors.horizontalCenter: parent.left
+            anchors.verticalCenter: parent.top
+            // 厚度 44，中心距 73（间距不变）；整组右移：中心 167 -> 185
+            anchors.horizontalCenterOffset: 185
+            anchors.verticalCenterOffset: 85
+
+            property int lcdSettingBrightness: settingManager.lcdBrightness
+
+            onValueChanged: {
+                if (lcdSettingBrightness != value) {
+                    settingManager.setLcdBrightness(value)
+                }
+            }
+            onLcdSettingBrightnessChanged: {
+                if (lcdSettingBrightness != value) {
+                    value = lcdSettingBrightness
+                }
+            }
+
+            function rebinding() {
+                value = Qt.binding(function(){ return lcdSettingBrightness })
+            }
+
+            Component.onCompleted: rebinding()
+
+            YImage {
+                sourceSize: Qt.size(24, 24)
+                width: 24
+                height: 24
+                rotation: 45
+                anchors.left: parent.left
+                anchors.leftMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                imageName: {
+                    if (0 === id_lum_setting.value)
+                        return "slide/lum_off";
+                    if (id_lum_setting.value <= 50)
+                        return "slide/lum_half";
+                    return "slide/lum";
+                }
+            }
+        }
+
+        // ================= 右侧两个按钮：WiFi（上）/ 蓝牙（下）=================
+        // 底样式照原版 YButtonBase / YThreeStatesButton：关闭=grayNormal 灰底，开启=蓝渐变
+        // #4DA0FF->#457AE6；但按用户要求做成**圆形**（radius = width/2）。
+        Item {
+            id: id_wifi_button
+            width: 52
+            height: 52
+            anchors.horizontalCenter: parent.left
+            anchors.verticalCenter: parent.top
+            anchors.horizontalCenterOffset: 290
+            anchors.verticalCenterOffset: 54
+
+            Rectangle {
+                anchors.fill: parent
+                radius: width / 2
+                color: YColors.surface
+                visible: !wifiManager.onoff
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                radius: width / 2
+                visible: wifiManager.onoff
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: YColors.accentTop }
+                    GradientStop { position: 1.0; color: YColors.accentBottom }
+                }
+            }
+
+            YImage {
+                anchors.centerIn: parent
+                sourceSize: Qt.size(26, 26)
+                width: 26
+                height: 26
+                imageName: wifiManager.onoff ? "slide/wifi_on" : "slide/wifi_off"
+            }
+
+            YMouseArea {
+                anchors.fill: parent
+                onClicked: {
+                    if (wifiManager.onoff)
+                        wifiManager.turnOff();
+                    else
+                        wifiManager.turnOn();
+                }
+                onPressAndHold: qmlGlobal.requestSettingPage(YEnum.SettingIndex.Network)
+            }
+        }
+
+        Item {
+            id: id_bt_button
+            width: 52
+            height: 52
+            anchors.horizontalCenter: parent.left
+            anchors.verticalCenter: parent.top
+            anchors.horizontalCenterOffset: 290
+            anchors.verticalCenterOffset: 124
+
+            Rectangle {
+                anchors.fill: parent
+                radius: width / 2
+                color: YColors.surface
+                visible: !blueToothManager.onoff
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                radius: width / 2
+                visible: blueToothManager.onoff
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: YColors.accentTop }
+                    GradientStop { position: 1.0; color: YColors.accentBottom }
+                }
+            }
+
+            YImage {
+                anchors.centerIn: parent
+                sourceSize: Qt.size(26, 26)
+                width: 26
+                height: 26
+                imageName: blueToothManager.onoff ? "slide/bt_on" : "slide/bt_off"
+            }
+
+            YMouseArea {
+                anchors.fill: parent
+                onClicked: {
+                    if (blueToothManager.onoff)
+                        blueToothManager.turnOff();
+                    else
+                        blueToothManager.turnOn();
+                }
+                onPressAndHold: qmlGlobal.requestSettingPage(YEnum.SettingIndex.Bluetooth)
+            }
+        }
+
+        // ================= 左下空档：音乐控制入口（上游功能）=================
+        // 仅在「有音乐可控制」时出现；点击切到音乐视图（再在音乐视图里点"调整设置"切回）
+        YIconButton {
+            id: id_show_music_button
+            anchors.horizontalCenter: parent.left
+            anchors.verticalCenter: parent.top
+            anchors.horizontalCenterOffset: 40
+            anchors.verticalCenterOffset: 136
+            implicitWidth: 40
+            implicitHeight: 40
+            radius: 20
+            mouseAreaMargins: -4
+            sourceSize: Qt.size(22, 22)
+            imageName: "audioplayer/authorized_play"
+            visible: id_quick_setting_layer_root.musicControlsAvailable
+            onValidClicked: id_quick_setting_layer_root.showingMusicControls = true
+            objectName: "YQuickSettingLayer.qml_id_show_music_button"
+        }
     }
 
+    // ================= 上游：快捷音乐控制视图 =================
     YQuickMusicPlayer {
         visible: id_quick_setting_layer_root.showingMusicControls
                  && id_quick_setting_layer_root.musicControlsAvailable
@@ -124,86 +473,6 @@ Item {
         onPlayerRequested: {
             id_quick_setting_layer_root.forceClose()
             qmlGlobal.showAudioPlayer()
-        }
-    }
-
-    Item {
-        id: id_settings_panel
-        anchors.fill: parent
-        visible: !id_quick_setting_layer_root.showingMusicControls
-                 || !id_quick_setting_layer_root.musicControlsAvailable
-
-        YIconButton {
-            anchors.right: parent.right
-            anchors.rightMargin: 4
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: 0
-            implicitWidth: 24
-            implicitHeight: 24
-            radius: 6
-            mouseAreaMargins: -3
-            sourceSize: Qt.size(16, 16)
-            imageName: "audioplayer/authorized_play"
-            visible: id_quick_setting_layer_root.musicControlsAvailable
-            onValidClicked: id_quick_setting_layer_root.showingMusicControls = true
-            objectName: "YQuickSettingLayer.qml_id_show_music_button"
-        }
-
-        Grid {
-            anchors.top: parent.top
-            columns: 2
-            rows: 2
-            rowSpacing: 12
-            columnSpacing: 24
-            padding: 20
-
-            YVolmueAdjustor {
-                id: id_volum_setting
-            }
-
-            YSlideWifiSetting {
-                id: id_slide_wifi
-            }
-
-            YTouchRegulator {
-                id: id_lum_setting
-                property int lcdSettingBrightness: settingManager.lcdBrightness
-                YImage {
-                    sourceSize: Qt.size(30, 30)
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    anchors.leftMargin: 16
-                    imageName: {
-                        if (0 === id_lum_setting.value) {
-                            return "slide/lum_off"
-                        } else if (id_lum_setting.value <= 50) {
-                            return "slide/lum_half"
-                        } else {
-                            return "slide/lum"
-                        }
-                    }
-                }
-                onValueChanged: {
-                    if (lcdSettingBrightness != value) {
-                        settingManager.setLcdBrightness(value)
-                    }
-                }
-                onLcdSettingBrightnessChanged: {
-                    if (lcdSettingBrightness != value) {
-                        value = lcdSettingBrightness
-                    }
-                }
-
-                function rebinding() {
-                    value = Qt.binding(function(){ return lcdSettingBrightness })
-                }
-
-                Component.onCompleted: rebinding()
-            }
-
-            YSlideBluetoothSetting {
-                id: id_slide_bluetooth
-            }
         }
     }
 
@@ -215,4 +484,3 @@ Item {
         imageName: "slide/ic_collapse"
     }
 }
-

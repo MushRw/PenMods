@@ -48,9 +48,9 @@ YWindow {
     YQuickSettingLayer {
         id: id_quick_setting_layer
         y: - id_quick_setting_layer.height
-        // 合并上游：快速设置面板毛玻璃改用 fastBlurTarget（内部 FastBlur），
-        // 取景对象 = 主窗口内容容器（等效旧 backdropItem 实时取景语义）
-        fastBlurTarget: id_inner_item
+        // 毛玻璃取景交给 YFastBlurRectangle 实时做（backdrop + 显式 sourceY 绑定），
+        // 取景对象 = 主窗口内容容器。与插件抽屉、听力练习左侧栏同一份实现。
+        backdropItem: id_inner_item
     }
 
     YMouseArea {
