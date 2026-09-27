@@ -189,65 +189,93 @@ jobs:
             echo "❌ L1_CACHE_SHIFT 补丁没打上（锚点不匹配？）；直接失败，避免静默产出错布局"
             exit 1
           fi
-          # ★★ 第二处 ABI 复刻：configfs 的 struct config_group（+8 字节）★★
+          # ★★★ 第二处 ABI 复刻：usb_function_instance 尾部多一个 8 字节字段 ★★★
           #
-          # 实测路径（全部来自真机，不是推演）：
-          #  1) abiprobe.ko 调用内核的 config_group_init_type_name() 写我们自己
-          #     kzalloc 的内存，再扫描内核写下的特征值：
-          #       内核自指 list_head @ 32  ↔  我们 ci_entry     @ 32   ✓
-          #       内核自指 list_head @ 80  ↔  我们 cg_children  @ 80   ✓
-          #       内核名字串写在 8         ↔  我们 ci_namebuf  @ 8    ✓
-          #       内核 ci_name 指针 @ 0    ↔  我们 ci_name      @ 0    ✓
-          #     ⇒ struct config_item 完全一致（80 字节）。
-          #  2) 真机上 mkdir/rmdir functions/uac2.0 的两次 oops 反推出内核的
-          #     usb_function_instance 真实偏移（内嵌 config_group，所以两者联动）：
-          #       内核 fd=136  set_inst_name=144  free_func_inst=152
-          #     推理：
-          #       · 内核把 fi->fd 写在 136（落在我们的 cfs_list 里，无害）
-          #       · function_make() 检查 `if (fi->set_inst_name)` → 读我们的 144
-          #         是 0（我们从没赋过 set_inst_name）⇒ 跳过 ⇒ mkdir 才没崩
-          #       · rmdir 时 usb_put_function_instance() 调 `fi->free_func_inst`
-          #         → 读我们的 152 = 0 ⇒ 调到 NULL ⇒ oops（这才是那次崩溃）
-          #     ⇒ 内核的 offsets 比"上游 4.4.159 + 12 字节"小 8。
-          #  3) 换算：cfs_list 紧跟 group，所以
-          #       sizeof(内核 config_group) = 136 - 16 = 120 = 我们上游的 112 + 8
-          #     ➜ 尾部差 8 字节，来源正是 configfs 的 `default_groups` 改造：
-          #         上游 4.4.159 ： struct config_group **default_groups;  （8）
-          #         设备内核     ： struct list_head       default_groups;  （16）
-          #       厂商把 `default_groups` 从"指针数组"回移植成了"list_head"。
+          # 结论先写：**设备内核的 `struct config_group` 是 112 字节，与上游 4.4.159
+          # 完全一样。configfs.h 不需要任何改动。** 前两轮把 +16 / +8 加在 configfs.h
+          # 上，都是**推断错了**（把 free_func_inst 的偏移当成了 set_inst_name）。
           #
-          # ⚠️ 我一开始按"list_head + default_groups_array"补了 16 字节 —— 多了 8。
-          #    症状很有欺骗性：mkdir 反而成功了（因为内核的 set_inst_name 落在我们
-          #    的 0 上），只在 rmdir 时才崩。**判据必须是 mkdir + rmdir 都过。**
-          python3 - <<'PYPATCH_CFG'
+          # 这次不再推理 —— 证据是**内核自己的机器码**：
+          #   oops 现场自带 `usb_put_function_instance` 的代码 dump（LR 指向它）；
+          #   kallsyms 报 lr = usb_put_function_instance+0x20/0x38，把它反汇编：
+          #       0x563c  cbz  x0, ...            ; if (!fi) return;
+          #       0x5640  stp  x29,x30,[sp,#-32]!
+          #       0x5644  mov  x29, sp
+          #       0x5648  str  x19,[sp,#16]
+          #       0x564c  ldr  x2, [x0, #128]     ; x2 = fi->fd
+          #       0x5650  ldr  x1, [x0, #152]     ; x1 = fi->free_func_inst
+          #       0x5654  ldr  x19,[x2, #8]       ; x19 = fd->mod
+          #       0x5658  blr  x1                 ; ← 崩在这一条
+          #       0x565c  mov  x0, x19
+          #       0x5660  bl   module_put
+          #   与 4.4 源码 `mod = fi->fd->mod; fi->free_func_inst(fi); module_put(mod);`
+          #   逐条对上 ⇒ 这两条 ldr 就是这两个字段的偏移，没有别的解释空间。
+          #
+          # 由此推：
+          #   fd @128，且 `struct list_head cfs_list` 占 16 字节
+          #     ⇒ sizeof(config_group) = 128 - 16 = 112   ← 与上游一致
+          #   free_func_inst @152，而上游布局里它应在 144
+          #     ⇒ 设备内核在 set_inst_name(136) 之后**多了一个 8 字节字段**，
+          #       sizeof(usb_function_instance) = 160（上游 152）
+          #
+          # 两条旁证：
+          #   * abiprobe 探到内核写下的自指 list_head **只在 @32(ci_entry) 和
+          #     @80(cg_children)**。若 config_group 真是 128（尾部长 16），新版
+          #     config_group_init() 会 INIT_LIST_HEAD(default_groups)，
+          #     就该多冒出一个 @104 的自指 list_head —— **没有**。
+          #   * config_item 的字段（ci_namebuf@8 / ci_entry@32 / 名字在 8）完全对上。
+          #
+          # ⚠️ 前两轮为什么会被骗（这一段值得记住）：
+          #   两次 oops 是同一个 bug 的两面 —— 内核去 `free_func_inst` 的位置取函数指针：
+          #     · 补丁前：我们的 func_inst 只有 152 字节 ⇒ 152 处是 p_chmask=3 /
+          #       p_srate=48000 ⇒ 调到 0x0000bb8000000003（第一次 oops 的 pc 就是它）
+          #     · 加 +16 后：我们的 free_func_inst 落到 160，内核仍读 152
+          #       ⇒ 152 处是我们的 set_inst_name = 0 ⇒ blr NULL（第二次 oops）
+          #     · 加 +8 那一版**碰巧**把 free_func_inst 顶到 152，于是 mkdir/rmdir
+          #       都能过 —— 但它是"凑对的"：cfs_list 被顶到 120，内核以为在 112，
+          #       于是内核的 list_add_tail(&fi->cfs_list, ...) 写进了我们
+          #       config_group 的尾部。功能上无害（那些字段我们不用），语义是错的。
+          #   ⇒ 现在改成"每一项都落在内核期望的位置"。
+          #
+          # 🔴 还有个关键坑：为什么补错了 mkdir 却能成功、只有 rmdir 才崩？
+          #   因为 4.4 的 `afunc_alloc_inst()` **从不设 set_inst_name**
+          #   （f_uac2.c 里压根没有这个函数），而 function_make() 写的是
+          #       if (fi->set_inst_name) { ret = fi->set_inst_name(fi, instance_name); }
+          #   —— NULL 就跳过。所以 136~151 这一段"赌"什么都看不出来，
+          #   只有 rmdir 走 usb_put_function_instance() 时才暴露。
+          #   ⇒ **判据必须是 mkdir 和 rmdir 都过。**
+          python3 - <<'PYPATCH_UAC2FI'
           import io, sys, re
-          p = 'include/linux/configfs.h'
+          p = 'include/linux/usb/composite.h'
           s = io.open(p, encoding='utf-8').read()
-          pat = re.compile(r'^[ \t]*struct config_group[ \t]+\*\*default_groups;[ \t]*$', re.M)
+          pat = re.compile(r'^[ \t]*void \(\*free_func_inst\)\(struct usb_function_instance \*inst\);[ \t]*$', re.M)
           hits = pat.findall(s)
-          print('config_group **default_groups 锚点命中数 =', len(hits))
+          print('usb_function_instance.free_func_inst 锚点命中数 =', len(hits))
           if len(hits) != 1:
               sys.exit('❌ 锚点不是恰好 1 处，终止（不允许静默产出错布局）')
           new = (
               "\t/*\n"
-              "\t * [PenMods ABI 复刻] 设备内核把 configfs 的 default_groups 从\n"
-              "\t * `struct config_group **default_groups` 回移植成了\n"
-              "\t * `struct list_head default_groups`（8 → 16 字节）。\n"
-              "\t * 整个 struct config_group 因此是 120 而非上游的 112；\n"
-              "\t * usb_function_instance 内嵌它，于是 fd/set_inst_name/\n"
-              "\t * free_func_inst 的偏移全部 +8（实测 136/144/152）。\n"
+              "\t * [PenMods ABI 复刻] 设备内核（rk3326 4.4.159）在这个位置多一个\n"
+              "\t * 8 字节字段。依据是内核自己的 usb_put_function_instance() 机器码：\n"
+              "\t *     ldr x2,[x0,#128]   ; fi->fd           ⇒ config_group 是 112\n"
+              "\t *     ldr x1,[x0,#152]   ; fi->free_func_inst（上游应在 144）\n"
+              "\t * 即 set_inst_name 仍在 136，free_func_inst 落在 152，中间 144 处\n"
+              "\t * 必然还有一个 8 字节字段。\n"
+              "\t * 保持 0 即可：4.4 的 f_uac2 根本不设 set_inst_name，内核也不会用到\n"
+              "\t * 这个额外字段。\n"
               "\t * 不对齐的后果（真机 oops）：rmdir functions/uac2.0 时\n"
-              "\t * usb_put_function_instance() 读到的 free_func_inst 是 0，\n"
-              "\t * 直接调到 NULL ⇒ oops ⇒ panic_on_oops=1 ⇒ 设备重启。\n"
+              "\t * usb_put_function_instance() 按 152 读到的不是我们的函数指针\n"
+              "\t * （是 0，或 p_chmask/p_srate 之类的垃圾）⇒ blr 到 NULL/垃圾 ⇒\n"
+              "\t * panic_on_oops=1 ⇒ 设备立刻重启。\n"
               "\t */\n"
-              "\tstruct list_head\t\tdefault_groups;"
+              "\tvoid *__penmods_abi_pad;\n"
+              "\tvoid (*free_func_inst)(struct usb_function_instance *inst);"
           )
           s = pat.sub(lambda _m: new, s, count=1)
           io.open(p, 'w', encoding='utf-8', newline='').write(s)
-          print('configfs.h ABI 补丁已应用（+8）')
-          PYPATCH_CFG
-          grep -n 'default_groups' include/linux/configfs.h
-          grep -n 'default_groups' include/linux/configfs.h
+          print('composite.h ABI 补丁已应用（+8 字节占位）')
+          PYPATCH_UAC2FI
+          grep -n 'set_inst_name\|free_func_inst\|__penmods_abi_pad' include/linux/usb/composite.h
 
           # ★★★ 关于 struct module 的 init/exit 偏移 ★★★
           #

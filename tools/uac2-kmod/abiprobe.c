@@ -75,6 +75,89 @@ static void abiprobe_find_ptr(const char *tag, void *buf, int n, unsigned long w
 	}
 }
 
+/* ── 运行时反查：解码**内核自己**的 usb_put_function_instance 机器码 ──────────
+ *
+ * 为什么值得做：`BUILD_BUG_ON` 只能证明"**我们的头文件**自洽"，证明不了
+ * "**内核和我们**对上了"。而这次踩的两次坑，恰恰都是后者错、前者过。
+ * 最可靠的 ground truth 是内核自己的机器码 —— 平时看不到，但 oops 现场会带。
+ * 这里在**正常运行时**把它读出来（零风险：只读内核 .text，不写、不注册）。
+ *
+ * 4.4 的 `usb_put_function_instance()` 只做 4 件事：
+ *     if (!fi) return;
+ *     mod = fi->fd->mod;
+ *     fi->free_func_inst(fi);
+ *     module_put(mod);
+ * ⇒ 机器码里必然有两条 `ldr xN, [x0, #imm]`（x0 = fi），
+ *   它们的 imm 就是内核认为的 offsetof(fd) 和 offsetof(free_func_inst)。
+ *   和我们头文件里的 offsetof 一比，立刻知道内核侧对不对。
+ *
+ * 设备实测（见 CI 里 composite.h 补丁的注释）：
+ *     ldr x2, [x0, #128]   ; fi->fd
+ *     ldr x1, [x0, #152]   ; fi->free_func_inst
+ *
+ * kallsyms_lookup_name 在 4.4 是 EXPORT_SYMBOL_GPL；用 weak 引用，
+ * 万一某内核不导出也不会让编译/加载失败，只会打印"不可用"。
+ */
+extern unsigned long kallsyms_lookup_name(const char *name)
+	__attribute__((weak));
+
+static void abiprobe_check_kernel_code(const char *fname)
+{
+	const u32 *p;
+	unsigned long addr;
+	int i, found = 0, offs[4];
+
+	pr_info("penmods-abiprobe: ============ 内核自己怎么读这个结构体 ============\n");
+	if (!kallsyms_lookup_name) {
+		pr_info("penmods-abiprobe: [内核码] kallsyms_lookup_name 不可用，跳过\n");
+		return;
+	}
+	addr = kallsyms_lookup_name(fname);
+	if (!addr) {
+		pr_info("penmods-abiprobe: [内核码] 找不到 %s\n", fname);
+		return;
+	}
+	pr_info("penmods-abiprobe: [内核码] %s @ 0x%lx\n", fname, addr);
+
+	p = (const u32 *)addr;
+	for (i = 0; i < 24 && found < 4; i++) {
+		u32 w = p[i];
+		int imm;
+
+		/* LDR (immediate, unsigned offset), 64-bit：
+		 *   11 111 0 01 01 imm12 Rn Rt   ⇒ 掩码 bits[31:22] == 0xF9400000/2^22 */
+		if ((w & 0xFFC00000) != 0xF9400000)
+			continue;
+		if (((w >> 5) & 0x1F) != 0)	/* Rn 必须是 x0（= fi） */
+			continue;
+		imm = (int)(((w >> 10) & 0xFFF) * 8);
+		offs[found++] = imm;
+		pr_info("penmods-abiprobe: [内核码]   +0x%02x: ldr x%u, [x0, #%d]\n",
+			i * 4, w & 0x1F, imm);
+	}
+
+	if (found < 2) {
+		pr_info("penmods-abiprobe: [内核码] ⚠️ 只扫到 %d 条 ldr xN,[x0,#imm]"
+			"（编译器换了写法？）—— 不作结论\n", found);
+		return;
+	}
+	/* 源码顺序：先 fd，后 free_func_inst */
+	if (offs[0] == (int)offsetof(struct usb_function_instance, fd) &&
+	    offs[1] == (int)offsetof(struct usb_function_instance, free_func_inst))
+		pr_info("penmods-abiprobe: [内核码] ✅ 内核按 fd=%d / free_func_inst=%d 读，"
+			"与我们头文件的 %d / %d 完全一致\n",
+			offs[0], offs[1],
+			(int)offsetof(struct usb_function_instance, fd),
+			(int)offsetof(struct usb_function_instance, free_func_inst));
+	else
+		pr_info("penmods-abiprobe: [内核码] ❌ 偏移不一致！内核用 %d / %d，"
+			"我们头文件是 %d / %d ⇒ **绝对不要**再往下建 uac2 function，"
+			"先把这两个偏移对齐\n",
+			offs[0], offs[1],
+			(int)offsetof(struct usb_function_instance, fd),
+			(int)offsetof(struct usb_function_instance, free_func_inst));
+}
+
 /* ── uac2 function instance 往返测试（零 configfs mkdir / 零 USB / 零 UDC）────
  *
  * 目的：把 `mkdir functions/uac2.0` 里**唯一真正危险的那段路径**单独跑一遍，
@@ -165,32 +248,43 @@ static int __init abiprobe_init(void)
 	void *buf;
 	int off;
 
-	/* ── 编译期硬门禁：configfs ABI 复刻的目标值 ──────────────────────
-	 * 全部由真机实测反推（见 CI 里 configfs.h 补丁的注释、本文件顶部说明）：
-	 *   sizeof(struct config_group) = 120     （上游 4.4.159 是 112，差 +8：
-	 *                                          设备把 default_groups 从
-	 *                                          `**` 指针回移植成 list_head）
-	 *   usb_function_instance: fd=136  set_inst_name=144  free_func_inst=152
-	 *                          sizeof=160
+	/* ── 编译期硬门禁：ABI 复刻的目标值 ────────────────────────────────
+	 * `config_group` / `config_item` 与上游 4.4.159 **完全一致**（112 / 80）。
+	 * `usb_function_instance` 尾部多一个 8 字节字段（见 CI 里 composite.h 补丁
+	 * 的注释）：设备内核自己的 usb_put_function_instance() 机器码是
+	 *     ldr x2, [x0, #128]   ; fi->fd
+	 *     ldr x1, [x0, #152]   ; fi->free_func_inst（上游应在 144）
+	 * ⇒ fd=128、set_inst_name=136、free_func_inst=152、sizeof=160。
 	 * 一旦补丁失效、锚点变了或被谁删了，这里**直接编译失败**，而不是产出一个
 	 * 会把内核 oops 掉的模块 —— 设备 panic_on_oops=1，偏移一错就当场重启。
-	 * ⚠️ 判据必须 mkdir + rmdir 都过：加多了 8 字节时 mkdir 照样成功，
-	 *    只在 rmdir 调 free_func_inst 时才崩。 */
-	BUILD_BUG_ON(sizeof(struct config_group) != 120);
+	 * ⚠️ 判据必须 mkdir + rmdir 都过：4.4 的 f_uac2 从不设 set_inst_name，
+	 *    所以 set_inst_name 那一段赌错也看不出来，只有 rmdir 走
+	 *    usb_put_function_instance() 取 free_func_inst 时才暴露。 */
+	BUILD_BUG_ON(sizeof(struct config_item) != 80);
+	BUILD_BUG_ON(sizeof(struct config_group) != 112);
+	BUILD_BUG_ON(offsetof(struct config_group, cg_children) != 80);
+	BUILD_BUG_ON(offsetof(struct config_group, default_groups) != 104);
 	BUILD_BUG_ON(sizeof(struct usb_function_instance) != 160);
-	BUILD_BUG_ON(offsetof(struct usb_function_instance, fd) != 136);
-	BUILD_BUG_ON(offsetof(struct usb_function_instance, set_inst_name) != 144);
+	BUILD_BUG_ON(offsetof(struct usb_function_instance, fd) != 128);
+	BUILD_BUG_ON(offsetof(struct usb_function_instance, set_inst_name) != 136);
 	BUILD_BUG_ON(offsetof(struct usb_function_instance, free_func_inst) != 152);
 
 	abiprobe_ours();
+
+	/* ★ 运行时再验一次：直接解码**内核自己**的 usb_put_function_instance 机器码，
+	 *   看它从 fi 的哪个偏移取 fd / free_func_inst。这是独立于我们头文件的证据 ——
+	 *   哪怕上面 8 条 BUILD_BUG_ON 全过，也只能说明"我们的头文件自洽"，只有这条
+	 *   才能说明"内核和我们对上了"。 */
+	abiprobe_check_kernel_code("usb_put_function_instance");
 
 	buf = kzalloc(ABIPROBE_BUFSZ, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
 	/* ★ 关键：让内核按它自己的偏移初始化一个 config_group。
-	 * 内核会写 cg_item（含名字）以及 cg_children / default_groups 两个
-	 * 自指 list_head。 */
+	 * 内核会初始化 cg_item（含名字）以及 cg_children 自指 list_head。
+	 * （4.4 的 default_groups 是个普通指针，不会被 INIT_LIST_HEAD，
+	 *   所以只该看到 ci_entry@32 和 cg_children@80 两个自指 list_head。） */
 	memset(&t, 0, sizeof(t));
 	t.ct_owner = THIS_MODULE;
 	config_group_init_type_name((struct config_group *)buf, ABIPROBE_NAME, &t);
