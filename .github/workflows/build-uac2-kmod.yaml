@@ -103,6 +103,13 @@ jobs:
             --enable SND --enable SND_PCM --enable SND_PCM_ELD \
             --enable USB_GADGET --enable USB_LIBCOMPOSITE \
             --enable USB_CONFIGFS --enable USB_CONFIGFS_F_UAC2 || true
+          # ⚠️ 必须关掉 PREEMPT：上游 arm64 defconfig 开着 CONFIG_PREEMPT，编出来的
+          #    vermagic 是 "4.4.159 SMP preempt mod_unload aarch64"，而设备实测是
+          #    "4.4.159 SMP mod_unload aarch64"（无 preempt）。差一个词就 insmod 不了
+          #    （invalid module format），而且 PREEMPT 本身也会影响部分结构体布局。
+          ./scripts/config \
+            --disable PREEMPT --disable PREEMPT_VOLUNTARY \
+            --enable PREEMPT_NONE --disable PREEMPT_COUNT || true
           make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig
           # 记录关键配置项，便于和设备的 vermagic 对照
           echo "=== 影响 vermagic 的关键项 ==="
