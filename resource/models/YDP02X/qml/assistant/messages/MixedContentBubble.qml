@@ -564,7 +564,9 @@ Item {
                             model: modelData
                             delegate: Loader {
                                 property real contentWidth: parent.width
-                                width: contentWidth
+                                // 不能给 Loader 显式 width：会把每个 segment 撑成整行，
+                                // Flow 流式排版失效，行内公式会把同行文字挤跑（视觉上"吞字"）。
+                                // 保持 Loader 自动取 item 宽度（与 paragraphComponent 一致）。
                                 sourceComponent: modelData.type === "math" ? inlineMathComponent : textComponent
                                 onLoaded: {
                                     if (modelData.type !== "math")
@@ -602,9 +604,14 @@ Item {
                 Repeater {
                     model: parent.parent.mSegments
                     delegate: Loader {
-                        width: quoteCol.width - 8
+                        property real contentWidth: quoteCol.width - 8
+                        // 不给 Loader 显式宽度（同 listBlock：会把每个 segment 撑成整行破坏流式排版）
                         sourceComponent: modelData.type === "math" ? inlineMathComponent : quoteTextComponent
-                        onLoaded: item.mContent = modelData.content
+                        onLoaded: {
+                            if (modelData.type !== "math")
+                                item.availableWidth = contentWidth;
+                            item.mContent = modelData.content;
+                        }
                     }
                 }
             }
@@ -616,9 +623,10 @@ Item {
         id: quoteTextComponent
         Text {
             property string mContent: ""
+            property real availableWidth: root.maxWidth
             text: _renderMarkdownInline(mContent)
             textFormat: Text.RichText
-            width: parent ? parent.width : root.maxWidth
+            width: Math.min(implicitWidth, availableWidth)
             wrapMode: Text.WrapAnywhere
             color: "#AAAAAA"
             font.pixelSize: 14
