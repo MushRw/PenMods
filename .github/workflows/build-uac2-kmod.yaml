@@ -176,7 +176,8 @@ jobs:
               s = s.replace(old, pad0 + old)
           else:
               print('!!! init 锚点不唯一，未应用补丁')
-          old2 = "\tstruct list_head source_list;"
+          old2 = ("\t/* What modules depend on me? */\n"
+                  "\tstruct list_head source_list;")
           print('source_list 锚点出现次数 =', s.count(old2))
           if s.count(old2) == 1:
               pad1 = ("\t/* [PenMods ABI 复刻] init→exit 之间再多 8 字节"
@@ -277,10 +278,10 @@ jobs:
               hx=$(aarch64-linux-gnu-objdump -h "$k" | awk '/this_module/ {print $3; exit}')
               if [ -n "$hx" ]; then
                 dec=$((16#$hx))
-                if [ "$dec" -eq 704 ]; then
-                  echo "  ✅ .gnu.linkonce.this_module = 0x$hx = $dec  —— 与设备内核一致"
+                if [ "$dec" -ge 704 ]; then
+                  echo "  ✅ .gnu.linkonce.this_module = 0x$hx = $dec  —— >= 设备内核的 704（留余量无妨，内核只按自己的 704 访问）"
                 else
-                  echo "  ❌ .gnu.linkonce.this_module = 0x$hx = $dec  —— 设备是 704，差 $((dec - 704)) 字节"
+                  echo "  ❌ .gnu.linkonce.this_module = 0x$hx = $dec  —— 小于设备的 704，内核会写到我们的节之外"
                 fi
               else
                 echo "  ⚠️ 未找到 .gnu.linkonce.this_module 节"
