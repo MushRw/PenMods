@@ -110,7 +110,7 @@ jobs:
           ./scripts/config \
             --disable PREEMPT --disable PREEMPT_VOLUNTARY \
             --enable PREEMPT_NONE --disable PREEMPT_COUNT || true
-          # ★★ 对齐设备内核的 struct module 布局（最关键的一步）
+          # ★★ 关掉 tracing 家族
           #
           # 实测证据：原厂 hci_uart.ko / 8723ds.ko 的 .gnu.linkonce.this_module
           # 节大小都是 704，而用上游 arm64 defconfig 编出来的是 768 —— 差 64 字节。
@@ -119,7 +119,7 @@ jobs:
           # module_core 基址 0x8F7000 附近），rmmod 报 EAGAIN
           # ("Resource temporarily unavailable")。
           #
-          # 差 64 字节的来源已用设备 /proc/kallsyms 反推确认（函数符号表是完整的）：
+          # 判据是设备 /proc/kallsyms 里的函数符号（数据符号列不全，但够用）：
           #   | 判据（kallsyms 里的符号）        | 设备 | 结论                        |
           #   | static_key*/jump_label* 计数     |  0   | CONFIG_JUMP_LABEL=n         |
           #   | *ftrace* 计数 / /sys/kernel/tracing | 0 / 无 | FTRACE/TRACING/TRACEPOINTS |
@@ -143,55 +143,81 @@ jobs:
             --disable KALLSYMS_ALL --disable DEBUG_INFO --disable DEBUG_INFO_DWARF4 \
             --disable ARM64_VA_BITS_48 --enable ARM64_VA_BITS_39 \
             || true
+          # ★★ 必须打开 CONFIG_DEBUG_SPINLOCK —— 厂商内核就是开的 ★★
+          #
+          # raw_spinlock_t 在 DEBUG_SPINLOCK=y 时从 4 字节变 24 字节
+          # （多 magic / owner_cpu / owner），于是：
+          #     spinlock_t          4 → 24
+          #     struct mutex       40 → 64
+          #     struct semaphore   24 → 48
+          # 这不是"猜"：三份互相独立的实测证据全部指向同一个结论 ——
+          #   A) 厂商 8723ds.ko 的 .bss 里
+          #        GLBtcBtMpOperLock（realtek 的 `_lock` = struct mutex）size = 64
+          #        wifi_control_sem / GLBtcBtMpRptSema（`_sema` = struct semaphore）size = 48
+          #      —— DEBUG_SPINLOCK=n 时这两个只可能是 40 / 24。
+          #   B) 厂商 .ko 的 struct module offsetof(init) = 368；本工作流的配置矩阵
+          #      实测只有 `+DEBUG_SPINLOCK` 能把我们的 344 顶到 368（因为 struct
+          #      module 里正好有 `#ifdef CONFIG_SYSFS struct mutex param_lock;`）。
+          #   C) 上面两个尺寸与 A) 完全自洽（mutex 64 - semaphore 48 = 16，两种
+          #      配置下差值都是 16，所以 64/48 这一对只能来自 DEBUG_SPINLOCK）。
+          #
+          # ⚠️ 为什么这条对本项目是**安全红线**而不是锦上添花：
+          #   snd_card / snd_pcm_runtime / snd_pcm_substream / usb_gadget 这些
+          #   结构体内部都有 spinlock_t / struct mutex。偏移一错，usb_uac2.ko 就会
+          #   读写内核结构体的错误字段 —— 那是真的会搞坏内核，而不是"加载失败而已"。
+          ./scripts/config --enable DEBUG_KERNEL --enable DEBUG_SPINLOCK || true
           make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig
-          # ★★ ABI 复刻：把 struct module 的字段偏移对齐到设备内核 ★★
-          # 为什么需要：modpost 生成的 .mod.c 里，我们只给
-          #   .name / .init / .exit / .arch 四个字段赋初值；
-          # 其余字段全部由内核按【它自己的】偏移读写，自成一套、彼此自洽。
-          # ⇒ 唯一必须对齐的是 name / init / exit 三个偏移（name 天然在 24）。
-          # 实测（厂商 .ko 的重定位表，两份互相印证）：
-          #   size=704  offsetof(init)=368  offsetof(exit)=680
-          # 上游 4.4.159 + 任何我们能找到的 Kconfig 组合都编不出 368/680：
-          #   我们的 init=344（init 之前少 24 字节）、exit=672（init→exit 之间少 8 字节）。
-          # 那 24 字节最可能是 struct mutex 里 spinlock_t 的尺寸差（实测 +DEBUG_SPINLOCK
-          # 恰好把 init 顶到 368），但与其猜配置，不如按实测偏移直接补齐 —— 只影响
-          # struct module 这一个 ABI，不牵动其它任何结构体。
-          python3 - <<'PYPATCH'
-          import io
-          p = 'include/linux/module.h'
-          s = io.open(p, encoding='utf-8').read()
-          pad0 = (
-              "\t/*\n"
-              "\t * [PenMods ABI 复刻] 设备内核的 struct module 在 init 之前比上游\n"
-              "\t * 4.4.159 多 24 字节（实测厂商 hci_uart.ko / 8723ds.ko 的 init 在\n"
-              "\t * 偏移 368，上游源码编出来是 344）。内核按它自己的偏移读\n"
-              "\t * mod->init/.exit，而我们按自己的偏移写这两个值，所以必须对齐。\n"
-              "\t * 其余字段内核自成一套、彼此自洽，无需对齐。\n"
-              "\t */\n"
-              "\tchar __penmods_abi_pad0[24];\n\n"
-          )
-          old = "\t/* Startup function. */\n\tint (*init)(void);"
-          print('init 锚点出现次数 =', s.count(old))
-          if s.count(old) == 1:
-              s = s.replace(old, pad0 + old)
-          else:
-              print('!!! init 锚点不唯一，未应用补丁')
-          old2 = ("\t/* What modules depend on me? */\n"
-                  "\tstruct list_head source_list;")
-          print('source_list 锚点出现次数 =', s.count(old2))
-          if s.count(old2) == 1:
-              pad1 = ("\t/* [PenMods ABI 复刻] init→exit 之间再多 8 字节"
-                      "（实测 exit 在 680，上游是 672） */\n"
-                      "\tchar __penmods_abi_pad1[8];\n\n")
-              s = s.replace(old2, pad1 + old2, 1)
-          else:
-              print('!!! source_list 锚点不唯一，未应用补丁')
-          io.open(p, 'w', encoding='utf-8', newline='').write(s)
-          print('module.h ABI 补丁已应用')
-          PYPATCH
+          # ★★ L1_CACHE_BYTES = 64（不是 arm64 主线的 128）★★
+          #
+          # `struct module` 以 `} ____cacheline_aligned;` 结尾，所以它的尺寸必然是
+          # 对齐数的整数倍。设备实测（原厂 .ko 直读）：
+          #     .gnu.linkonce.this_module  sh_size = 704，sh_addralign = 64
+          # 而 704 = 64×11 —— **不是 128 的整数倍** ⇒ 厂商内核的
+          # `____cacheline_aligned` = SMP_CACHE_BYTES = L1_CACHE_BYTES = 64。
+          # arm64 主线 arch/arm64/include/asm/cache.h 里是
+          #     #define L1_CACHE_SHIFT		7      → 128
+          # 厂商改成了 6 → 64（Cortex-A35 的 L1 行本来就是 64 字节）。
+          # 上一步 `set_cache_shift 7` 的实测对照：
+          #     SHIFT=7 → size=768    SHIFT=6 → size=704   ← 与设备一致
+          # 只改这一个宏：它只影响 `____cacheline_aligned` 的使用者，而我们的
+          # 模块里几乎没有；不碰任何 Kconfig。
+          CACHEH=arch/arm64/include/asm/cache.h
+          echo "--- 原样 ---"; grep -n '^#define L1_CACHE_SHIFT' "$CACHEH"
+          sed -i 's/^#define L1_CACHE_SHIFT.*/#define L1_CACHE_SHIFT\t\t6/' "$CACHEH"
+          echo "--- 修正后 ---"; grep -n '^#define L1_CACHE_SHIFT' "$CACHEH"
+          if ! grep -qE '^#define L1_CACHE_SHIFT[[:space:]]+6$' "$CACHEH"; then
+            echo "❌ L1_CACHE_SHIFT 补丁没打上（锚点不匹配？）；直接失败，避免静默产出错布局"
+            exit 1
+          fi
+
+          # ★★★ 关于 struct module 的 init/exit 偏移 ★★★
+          #
+          # 实测（原厂 hci_uart.ko / 8723ds.ko 的重定位表，两份互相印证）：
+          #     sh_size=704   offsetof(name)=24   offsetof(init)=368   offsetof(exit)=680
+          # arm64 4.4.159 在上面这套配置下编出来的是 init=344 / exit=672。
+          #
+          # ⚠️ 曾经在这里用 python 往 include/linux/module.h 里插
+          #    `char __penmods_abi_pad0[24]` / `__penmods_abi_pad1[8]` 来凑偏移，
+          #    但**那段代码从未真正执行过**（CI 日志里整段缺失，诊断步的
+          #    SHIFT=7 BASE 仍然读出 init=344 就是铁证），而 patch 又是"锚点不匹配
+          #    就静默跳过"的写法 —— 于是变成了一个看不见的坑。
+          #    现在改成**链接后确定性改写**：tools/uac2-kmod/layout-patch.py
+          #    直接按原厂 .ko 实测出的偏移搬移那两条重定位，并且改完自校验、
+          #    不达标就 exit 1。见后面的「ABI 修正」步骤。
           # 记录关键配置项，便于和设备的 vermagic 对照
           echo "=== 影响 vermagic 的关键项 ==="
           grep -E '^CONFIG_(SMP|PREEMPT|PREEMPT_VOLUNTARY|PREEMPT_NONE|MODULE_UNLOAD|MODVERSIONS|MODULE_SIG|ARM64_4K_PAGES|ARM64_VA_BITS)' .config | sort
+          # 自检：不要把"配置没生效"变成静默错误（olddefconfig 的依赖解析、
+          # scripts/config 的拼写错误都可能导致静默失败）
+          for c in CONFIG_DEBUG_SPINLOCK CONFIG_DEBUG_KERNEL; do
+            if grep -q "^${c}=y" .config; then
+              echo "  ✅ ${c}=y"
+            else
+              echo "  ❌ ${c} 没打开 —— 含自旋锁/互斥锁的结构体会整体错位，终止"
+              exit 1
+            fi
+          done
+          grep -n '^#define L1_CACHE_SHIFT' arch/arm64/include/asm/cache.h
           # ⚠️ GCC 10+ 默认 -fno-common，而 4.4 里 flex/bison 预生成的 dtc 老代码
           #    （dtc-lexer.lex.c 与 dtc-parser.tab.c）**各自定义了一份 `YYLTYPE yylloc;`**，
           #    于是链接脚本时报 multiple definition of `yylloc`。给 host 工具加回 -fcommon
@@ -258,33 +284,72 @@ jobs:
             ARCH=arm64 CROSS_COMPILE="${CROSS}" WITH_UAC2=1 UAC2_OBJS="$OBJS" modules
           ls -la tools/uac2-kmod/*.ko
 
+      - name: ABI 修正 —— 把 this_module 的两条重定位搬到设备内核的字段偏移
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          # 目标偏移**不硬编码**：直接从原厂模块现取（kmod-out/vendor 是随仓库
+          # 提交的设备实测样本），这样判据永远和设备一致。
+          REF=""
+          for c in kmod-out/vendor/hci_uart.ko kmod-out/vendor/8723ds.ko; do
+            [ -f "$c" ] && REF="$c" && break
+          done
+          if [ -z "$REF" ]; then
+            echo "❌ 找不到原厂参考模块（kmod-out/vendor/*.ko）—— 不能用硬编码偏移，直接失败"
+            exit 1
+          fi
+          echo "参考模块: $REF"
+          python3 tools/uac2-kmod/kmod-layout.py "$REF"
+          rc=0
+          for k in tools/uac2-kmod/*.ko; do
+            [ -e "$k" ] || continue
+            python3 tools/uac2-kmod/layout-patch.py "$k" --ref "$REF" || rc=1
+          done
+          if [ "$rc" != 0 ]; then
+            echo "❌ ABI 修正失败 —— 产物不可用，终止（不要让下载到错布局的 .ko）"
+            exit 1
+          fi
+          echo "✅ 全部 .ko 的 this_module 布局已对齐设备内核"
+
       - name: 静态校验产物（vermagic / 未决符号 / 段信息）
         run: |
           cd "$GITHUB_WORKSPACE/tools/uac2-kmod"
           OUT="$GITHUB_WORKSPACE/kmod-report.txt"
           : > "$OUT"
+          FAIL=0
           for k in *.ko; do
             [ -e "$k" ] || continue
             {
               echo "############ $k ############"
               echo "--- 文件大小 ---"; ls -la "$k"
               echo "--- vermagic（必须 = 4.4.159 SMP mod_unload aarch64）---"
-              strings "$k" | grep -E '^vermagic=' | sort -u
+              vm=$(strings "$k" | grep -E '^vermagic=' | sort -u | head -1)
+              echo "  $vm"
+              if [ "$vm" != "vermagic=${KVER} SMP mod_unload aarch64" ]; then
+                echo "  ❌ vermagic 必须是 'vermagic=${KVER} SMP mod_unload aarch64'（多一个 preempt 都会 insmod 失败）"
+                FAIL=1
+              else
+                echo "  ✅ vermagic 逐字匹配"
+              fi
               echo "--- 模块元信息 ---"
               strings "$k" | grep -E '^(name|license|description|author)=' | sort -u
-              echo "--- sizeof(struct module)：设备实测 = 704（0x2c0），必须一致 ---"
+              echo "--- this_module 布局（设备实测：size=704 align=64 init=368 exit=680）---"
               # ⚠️ 不能用 awk 的 strtonum —— ubuntu runner 上的 awk 是 mawk，没有这个函数。
               #    改成 shell 的 16# 基数算术。
-              hx=$(aarch64-linux-gnu-objdump -h "$k" | awk '/this_module/ {print $3; exit}')
+              line=$(aarch64-linux-gnu-objdump -h "$k" | awk '/gnu.linkonce.this_module/ {print; exit}')
+              hx=$(echo "$line" | awk '{print $3}')
+              alg=$(echo "$line" | awk '{print $NF}')
               if [ -n "$hx" ]; then
                 dec=$((16#$hx))
-                if [ "$dec" -ge 704 ]; then
-                  echo "  ✅ .gnu.linkonce.this_module = 0x$hx = $dec  —— >= 设备内核的 704（留余量无妨，内核只按自己的 704 访问）"
+                if [ "$dec" -eq 704 ] && [ "$alg" = "2**6" ]; then
+                  echo "  ✅ size=$dec（=704）align=$alg（=64）—— 与原厂 .ko 逐字一致"
                 else
-                  echo "  ❌ .gnu.linkonce.this_module = 0x$hx = $dec  —— 小于设备的 704，内核会写到我们的节之外"
+                  echo "  ❌ size=$dec（期望 704）align=$alg（期望 2**6）"
+                  echo "     ⇒ L1_CACHE_BYTES 或 struct module 成员没对齐"
+                  FAIL=1
                 fi
               else
-                echo "  ⚠️ 未找到 .gnu.linkonce.this_module 节"
+                echo "  ❌ 未找到 .gnu.linkonce.this_module 节"
+                FAIL=1
               fi
               echo "--- ABI 指纹（设备实测：init=368 exit=680，必须一致）---"
               fpout=$(python3 "$GITHUB_WORKSPACE/tools/uac2-kmod/kmod-layout.py" --fingerprint "$k" 2>/dev/null)
@@ -295,6 +360,7 @@ jobs:
                 echo "  ✅ init/exit 偏移与设备内核一致"
               else
                 echo "  ❌ init=$finit exit=$fexit —— 设备要求 init=368 exit=680，模块无法被正确 init/exit"
+                FAIL=1
               fi
               echo "--- 未决符号（需由内核提供，应与设备 kallsyms 对得上）---"
               aarch64-linux-gnu-nm -u "$k" | awk '{print $NF}' | sort -u
@@ -305,6 +371,11 @@ jobs:
             echo "=== $k ==="; strings "$k" | grep -E '^vermagic=' | sort -u
           done
           cat "$OUT"
+          if [ "$FAIL" != 0 ]; then
+            echo "❌ 静态校验未通过（见上面的 ❌ 行）"
+            exit 1
+          fi
+          echo "✅ 静态校验全部通过"
 
       - name: 上传内核模块产物
         uses: actions/upload-artifact@v4
@@ -317,129 +388,27 @@ jobs:
           retention-days: 7
 
       # ─────────────────────────────────────────────────────────────────────
-      # 布局诊断：解 struct module 布局之谜（判据 = init/exit 偏移 + 总大小）
+      # 结构体尺寸指纹
       # ─────────────────────────────────────────────────────────────────────
-      # 已确认的事实链：
-      #  1) 厂商 .ko 的 .gnu.linkonce.this_module 重定位 r_offset = 内核真实字段偏移
-      #     hci_uart.ko / 8723ds.ko 一致给出：size=704 init=368 exit=680
-      #     我们的产物：                      size=768 init=344 exit=672
-      #  2) include/linux/module.h 里 struct module 结尾是 `} ____cacheline_aligned;`，
-      #     且 `void *module_init ____cacheline_aligned;` —— 即按 SMP_CACHE_BYTES 对齐。
-      #  3) arch/arm64/include/asm/cache.h 里 **硬编码** `#define L1_CACHE_SHIFT 7`
-      #     ⇒ L1_CACHE_BYTES = SMP_CACHE_BYTES = 128。
-      #     而设备是 704 = 11*64，**不是 128 的整数倍** ⇒ 厂商内核的 L1_CACHE_BYTES = 64。
-      #  4) pahole 显示我们的成员在偏移 684 处结束，align64(684) = 704 —— 完全吻合。
+      # 为什么需要：`struct module` 只是**一个** ABI。`usb_uac2.ko` 是**真驱动**，
+      # 会碰 ALSA/USB 那一大票**内含 spinlock_t / struct mutex 的内核结构体**
+      # （snd_card、snd_pcm_runtime、usb_gadget…）。这些结构体里任何一个成员
+      # 尺寸不对，整块内存的字段偏移就全错 ⇒ 我们按自己的偏移读写、内核按它的
+      # 偏移管理 = 真会搞坏内核。所以必须把「配置一致性」变成一个可测量的事实，
+      # 而不是"看起来差不多"。
       #
-      # ⇒ 需要三件事同时成立：
-      #      A) L1_CACHE_SHIFT 改成 6（必须改头文件，不是 Kconfig）
-      #      B) init 之前要多 24 字节
-      #      C) init→exit 之间要多 8 字节
-      #    下面把这个假设直接编出来验证，并量化各候选开关的贡献。
-      #
-      # ⚠️ 本步骤故意放在「上传产物」**之后**：它会改 .config 和 cache.h，
-      #    绝不能污染待上传的 .ko（md5 要和设备侧比对）。
-      - name: 布局诊断（对齐常量 + 子结构体尺寸 + 配置矩阵指纹）
-        if: always()
-        continue-on-error: true
+      # 判据从哪来：设备 `/proc/slabinfo` 的 objsize 就是内核自己调用
+      # `kmem_cache_create(name, sizeof(struct X), ...)` 的实参 —— ground truth。
+      # 这里把同一批 `sizeof()` 编出来打一份，两边一比即可。
+      - name: 结构体尺寸指纹（与设备 /proc/slabinfo 的 objsize 对照）
         run: |
-          set +e
-          cd "$GITHUB_WORKSPACE/linux-${KVER}"
-          mkdir -p /tmp/lp
-          printf 'obj-m += p.o\nCFLAGS_p.o := -g -fno-eliminate-unused-debug-types\n' > /tmp/lp/Makefile
-          cat > /tmp/lp/p.c <<'EOF'
-          #include <linux/module.h>
-          #include <linux/kernel.h>
-          #include <linux/init.h>
-          #include <linux/mutex.h>
-          #include <linux/kobject.h>
-          #include <asm/cache.h>
-          struct module penmods_dummy_module __attribute__((used));
-          char penmods_l1_cache_bytes[L1_CACHE_BYTES] __attribute__((used));
-          char penmods_smp_cache_bytes[SMP_CACHE_BYTES] __attribute__((used));
-          char penmods_sz_mutex[sizeof(struct mutex)] __attribute__((used));
-          char penmods_sz_kobject[sizeof(struct kobject)] __attribute__((used));
-          char penmods_sz_mkobj[sizeof(struct module_kobject)] __attribute__((used));
-          char penmods_sz_modarch[sizeof(struct mod_arch_specific) + 1] __attribute__((used));
-          static int __init p_init(void) { return 0; }
-          static void __exit p_exit(void) { }
-          module_init(p_init);
-          module_exit(p_exit);
-          MODULE_LICENSE("GPL");
-          EOF
-
-          CACHEH=arch/arm64/include/asm/cache.h
-          cp "$CACHEH" /tmp/cache.h.orig
-          set_cache_shift() {
-            cp /tmp/cache.h.orig "$CACHEH"
-            sed -i "s/^#define L1_CACHE_SHIFT.*/#define L1_CACHE_SHIFT\t\t$1/" "$CACHEH"
-          }
-          cp .config /tmp/base.config
-          reset_cfg() {
-            cp /tmp/base.config .config
-            make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig >/dev/null 2>&1
-            make ARCH=arm64 CROSS_COMPILE="${CROSS}" silentoldconfig < /dev/null >/dev/null 2>&1
-          }
-          fp() { python3 "$GITHUB_WORKSPACE/tools/uac2-kmod/kmod-layout.py" --fingerprint "$1" 2>/dev/null \
-                   | awk '{printf "%-30s", $1" "$2" "$3}'; }
-          rebuild() {
-            find /tmp/lp -name '*.o'    -delete 2>/dev/null
-            find /tmp/lp -name '*.ko'   -delete 2>/dev/null
-            find /tmp/lp -name '.*.cmd' -delete 2>/dev/null
-            rm -f /tmp/lp/modules.order /tmp/lp/Module.symvers 2>/dev/null
-            make M=/tmp/lp ARCH=arm64 CROSS_COMPILE="${CROSS}" modules >/tmp/lp/build.log 2>&1
-          }
-          symstate() {  # $1=CONFIG_XXX -> Y / N
-            if grep -q "^$1=" .config; then echo -n Y; else echo -n N; fi
-          }
-          # probe <label> <要自检的config名> <toggles...>   环境变量 SHIFT 控制对齐
-          probe() {
-            local label="$1"; local sym="$2"; shift 2
-            reset_cfg
-            if [ "$#" -gt 0 ]; then ./scripts/config "$@" >/dev/null 2>&1; fi
-            make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig >/dev/null 2>&1
-            make ARCH=arm64 CROSS_COMPILE="${CROSS}" silentoldconfig < /dev/null >/dev/null 2>&1
-            set_cache_shift "${SHIFT:-7}"
-            rebuild
-            printf '  %-32s %s [%s=%s]\n' "$label" "$(fp /tmp/lp/p.ko)" "$sym" "$(symstate "$sym")"
-          }
-
-          echo "################ 1. 关键常量与子结构体尺寸（cache.h shift=7 原样）################"
-          reset_cfg; set_cache_shift 7; rebuild
-          aarch64-linux-gnu-nm -S /tmp/lp/p.ko 2>/dev/null | grep -E 'penmods_(l1|smp|sz_|dummy)' || true
-
-          echo
-          echo "################ 2. 假设验证：L1_CACHE_SHIFT 6 vs 7 ################"
-          echo "--- 目标：size=704 init=368 exit=680 ---"
-          SHIFT=7 probe "L1SHIFT=7 BASE"            CONFIG_SMP
-          SHIFT=6 probe "L1SHIFT=6 BASE"            CONFIG_SMP
-
-          echo
-          echo "################ 3. 在 L1SHIFT=6 基础上找 init 之前那 24 字节 ################"
-          SHIFT=6 probe "+UNUSED_SYMBOLS"           CONFIG_UNUSED_SYMBOLS --enable UNUSED_SYMBOLS
-          SHIFT=6 probe "+MODULE_SIG"               CONFIG_MODULE_SIG     --enable MODULE_SIG
-          SHIFT=6 probe "+DEBUG_MUTEXES"            CONFIG_DEBUG_MUTEXES  --enable DEBUG_MUTEXES
-          SHIFT=6 probe "+DEBUG_SPINLOCK"           CONFIG_DEBUG_SPINLOCK --enable DEBUG_SPINLOCK
-          SHIFT=6 probe "+DEBUG_SPINLOCK+DEBUG_MUTEXES" CONFIG_DEBUG_MUTEXES --enable DEBUG_SPINLOCK --enable DEBUG_MUTEXES
-          SHIFT=6 probe "+DEBUG_LOCK_ALLOC"         CONFIG_DEBUG_LOCK_ALLOC --enable DEBUG_LOCK_ALLOC
-          SHIFT=6 probe "+LOCKDEP"                  CONFIG_LOCKDEP        --enable LOCKDEP
-          SHIFT=6 probe "+DEBUG_KOBJECT_RELEASE"    CONFIG_DEBUG_KOBJECT_RELEASE --enable DEBUG_KOBJECT_RELEASE
-          SHIFT=6 probe "-SYSFS"                    CONFIG_SYSFS          --disable SYSFS
-          SHIFT=6 probe "+DEBUG_KERNEL"             CONFIG_DEBUG_KERNEL   --enable DEBUG_KERNEL
-          SHIFT=6 probe "+DEBUG_KERNEL+DEBUG_MUTEXES+DEBUG_SPINLOCK" CONFIG_DEBUG_SPINLOCK --enable DEBUG_KERNEL --enable DEBUG_MUTEXES --enable DEBUG_SPINLOCK
-          SHIFT=6 probe "-MUTEX_SPIN_ON_OWNER"      CONFIG_MUTEX_SPIN_ON_OWNER --disable MUTEX_SPIN_ON_OWNER
-
-          echo
-          echo "################ 4. 在 L1SHIFT=6 基础上找 init→exit 的那 8 字节 ################"
-          SHIFT=6 probe "-MODULES_TREE_LOOKUP"      CONFIG_MODULES_TREE_LOOKUP --disable MODULES_TREE_LOOKUP
-          SHIFT=6 probe "-GENERIC_BUG"              CONFIG_GENERIC_BUG    --disable GENERIC_BUG
-          SHIFT=6 probe "-KALLSYMS"                 CONFIG_KALLSYMS       --disable KALLSYMS
-          SHIFT=6 probe "+TRACEPOINTS"              CONFIG_TRACEPOINTS    --enable TRACEPOINTS
-          SHIFT=6 probe "+JUMP_LABEL"               CONFIG_JUMP_LABEL     --enable JUMP_LABEL
-          SHIFT=6 probe "+LIVEPATCH"                CONFIG_LIVEPATCH      --enable LIVEPATCH
-
-          echo
-          echo "################ 5. 关键 config 现状（BASE）################"
-          reset_cfg; set_cache_shift 7
-          grep -E '^CONFIG_(UNUSED_SYMBOLS|MODULE_SIG|LIVEPATCH|GENERIC_BUG|MODULE_UNLOAD|KALLSYMS|KALLSYMS_ALL|SYSFS|DEBUG_KOBJECT_RELEASE|DEBUG_KERNEL|LOCKDEP|DEBUG_LOCK_ALLOC|DEBUG_SPINLOCK|MUTEX_SPIN_ON_OWNER|DEBUG_MUTEXES|MODULES_TREE_LOOKUP|TRACEPOINTS|TRACING|EVENT_TRACING|JUMP_LABEL|SMP|HAVE_MOD_ARCH_SPECIFIC)=' .config | sort
-          echo "--- 未设置的 ---"
-          grep -E '^# CONFIG_(DEBUG_KERNEL|DEBUG_MUTEXES|DEBUG_SPINLOCK|DEBUG_LOCK_ALLOC|LOCKDEP|UNUSED_SYMBOLS|MODULE_SIG|MODULES_TREE_LOOKUP|LIVEPATCH|TRACEPOINTS|JUMP_LABEL) is not set' .config | sort
+          cd "$GITHUB_WORKSPACE"
+          make -C "linux-${KVER}" M="$PWD/tools/uac2-kmod/sizeprobe" \
+            ARCH=arm64 CROSS_COMPILE="${CROSS}" modules
+          echo "=========== 结构体尺寸指纹（nm -S 的 size 列 = sizeof）==========="
+          aarch64-linux-gnu-nm -S --defined-only \
+            tools/uac2-kmod/sizeprobe/sizeprobe.ko \
+            | awk '$3 ~ /^[BbDdRr]$/ {print $2, $4}' | sort -k2
+          echo "=========== 影响这些尺寸的关键配置 ==========="
+          grep -E '^CONFIG_(DEBUG_KERNEL|DEBUG_SPINLOCK|DEBUG_MUTEXES|DEBUG_LOCK_ALLOC|LOCKDEP|SMP|SYSFS|KALLSYMS|GENERIC_BUG|MODULES_TREE_LOOKUP|MODULE_UNLOAD|TRACEPOINTS|JUMP_LABEL|SND|SND_PCM|USB_GADGET)=' \
+            "linux-${KVER}/.config" | sort
