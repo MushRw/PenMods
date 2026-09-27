@@ -1790,7 +1790,6 @@ void ChatBot::makeApiRequest(const QJsonArray& messages, bool isRetry) {
         || (usesResponsesApi() && (m_capImageGeneration || m_nativeWebSearchEnabled))) {
         injectToolDefinitions(requestBody);
     }
-#endif
 
     QJsonDocument requestDoc(requestBody);
     QByteArray    requestData = requestDoc.toJson(QJsonDocument::Compact);
@@ -2140,7 +2139,6 @@ void ChatBot::handleNetworkReply(QNetworkReply* reply, bool isStream) {
         m_retryCount = 0;
         if (isStream) {
             flushEmbeddedContent();
-            if (!m_toolCallsBuffer.isEmpty()) {
             if (!m_toolCallsBuffer.isEmpty()) {
                 json tcArr = json::array();
                 for (auto it = m_toolCallsBuffer.constBegin(); it != m_toolCallsBuffer.constEnd(); ++it)
