@@ -38,3 +38,55 @@ align = 64
 name  = 24
 init  = 368
 exit  = 680
+
+# ---------------------------------------------------------------------------
+# 第二份 ABI 基准：configfs / usb_function_instance（与 struct module 无关）
+# ---------------------------------------------------------------------------
+#
+# 这两组数字的来源**和上面不同**，但同样是硬证据 —— 这次是**内核自己的机器码**：
+#
+#   设备 oops 现场会附带崩溃函数的代码 dump（`LR:` 那一块）。
+#   把 `/proc/kallsyms` 报的 `lr = usb_put_function_instance+0x20/0x38` 反推回去，
+#   得到该函数的起始地址，再解码它的机器码：
+#
+#       0x563c  cbz  x0, ...            ; if (!fi) return;
+#       0x5640  stp  x29,x30,[sp,#-32]!
+#       0x5644  mov  x29, sp
+#       0x5648  str  x19,[sp,#16]
+#       0x564c  ldr  x2, [x0, #128]     ; x2 = fi->fd
+#       0x5650  ldr  x1, [x0, #152]     ; x1 = fi->free_func_inst
+#       0x5654  ldr  x19,[x2, #8]       ; x19 = fd->mod
+#       0x5658  blr  x1                 ; ← 崩在这一条（x1 = 0）
+#       0x565c  mov  x0, x19
+#       0x5660  bl   module_put
+#
+#   与 4.4 源码逐条对上
+#       mod = fi->fd->mod; fi->free_func_inst(fi); module_put(mod);
+#   ⇒ 128 / 152 就是内核认为的这两个字段的偏移，没有别的解释空间。
+#
+# 推论：
+#   * fd @128，而 `struct list_head cfs_list` 占 16 字节
+#       ⇒ cg_size = 128 - 16 = 112   ← **与上游 4.4.159 一致，configfs.h 不用改**
+#   * free_func_inst @152（上游布局里应是 144）
+#       ⇒ 设备内核在 set_inst_name(136) 之后**多了一个 8 字节字段**，
+#         fi_size = 160（上游 152）。该字段保持 0 即可：4.4 的 f_uac2 不设
+#         set_inst_name，内核也不会用到它。
+#
+#   旁证：abiprobe 探到内核写下的自指 list_head **只有 @32(ci_entry) 和
+#   @80(cg_children)**。若 config_group 真是 128，新版 config_group_init() 会
+#   INIT_LIST_HEAD(default_groups)，就该多一个 @104 的自指 list_head —— 没有。
+#
+# 复核方式（设备在线，零风险：只读自己的 kzalloc 内存 + 只读内核 .text）
+#   adb -s 2AB2900000800514 shell \
+#     "insmod /userdata/uac2-kmod/abiprobe.ko; dmesg | grep penmods-abiprobe"
+#   # abiprobe_check_kernel_code() 会自己解码内核机器码并和头文件对账
+#
+# 这些键名**故意不叫 size/init/exit**，避免被 layout-patch.py 的
+# `^(size|align|name|init|exit)\s*=` 正则误读成 struct module 的基准。
+cg_size       = 112
+cg_children   = 80
+cg_default_grp= 104
+fi_size       = 160
+fi_fd         = 128
+fi_set_name   = 136
+fi_free       = 152
