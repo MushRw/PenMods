@@ -30,6 +30,13 @@ name: Build UAC2 Kernel Module
 #    加载与验证在本地用 adb 分台阶做（见 tools/uac2-kmod/ 注释）。
 
 on:
+  # workflow_dispatch 端点只对「默认分支上存在的 workflow」注册，本文件目前
+  # 只在 fix/batch1-safety-perf 上，直接 dispatch 会 404，因此主入口走 push：
+  # 改动模块源码或本文件即自动重编，方便多轮迭代。
+  push:
+    paths:
+      - 'tools/uac2-kmod/**'
+      - '.github/workflows/build-uac2-kmod.yaml'
   workflow_dispatch:
     inputs:
       kernel_version:
