@@ -138,11 +138,16 @@ Item {
     Image {
         id: svgImage
         visible: root._state === MathCache.DONE
-        anchors.centerIn: parent
         source: root._state === MathCache.DONE ? root._svgData : ""
         fillMode: Image.PreserveAspectFit
-        width: root.maxWidth - 8
         smooth: true
         mipmap: true
+        // 块级公式占满行宽、左对齐；行内公式使用自然宽度（与 fallbackText 一致），
+        // 否则在大 maxWidth 下行内图片会溢出父容器、覆盖并"吞掉"同行其他文字
+        width: root.display ? (root.maxWidth - 8) : Math.min(implicitWidth, root.maxWidth)
+        anchors.left: root.display ? parent.left : undefined
+        anchors.leftMargin: root.display ? 8 : 0
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.horizontalCenter: root.display ? undefined : parent.horizontalCenter
     }
 }
