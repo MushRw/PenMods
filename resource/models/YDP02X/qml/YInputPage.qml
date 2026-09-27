@@ -427,9 +427,15 @@ YPage {
                 color: "#666666"
                 font.pixelSize: 12
             }
-            onRequestVoiceInput: {
-                toggleVoiceInput();
-            }
+            // 【2026-09-27 修复】这里原来挂着上游的 onRequestVoiceInput。
+            // 上游把该处理器绑在 YInputTextFunctionGroup 上，而我方键盘布局不用那个组件
+            // （功能键内联在各字符页里，见 YInputTextLowerChars.qml 的 ⌫/空/↵/123）。
+            // 三方合并时它被减进了本元素——一个纯 Item（候选词视图），Item 没有
+            // requestVoiceInput 信号 ⇒ "Cannot assign to non-existent property" ⇒
+            // 整个 YInputPage 编译失败 ⇒ Qt.createComponent("YInputPage") 返回 Error，
+            // 所有创建键盘的调用点静默跳过 ⇒ 表现为「点任何输入框键盘都不出现」。
+            // 已在设备用 qmlscene 最小复现实证，故整块移除（语音输入入口随 FunctionGroup
+            // 一并缺失，相关函数保留但当前无调用方）。
         }
 
         YInputTextLowerChars {
