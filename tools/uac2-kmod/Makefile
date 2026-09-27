@@ -30,6 +30,9 @@ CROSS_COMPILE ?= aarch64-linux-gnu-
 # 空操作探针：任何情况下都可编，用来单独验证加载链路
 obj-m += utest.o
 
+# ABI 探针：测量内核真实的结构体字段偏移（只读自己分配的内存，零副作用）
+obj-m += abiprobe.o
+
 # 真实模块。
 # ⚠️ 4.4 的 f_uac2.c 是**自包含**的：`usb_f_uac2-y := f_uac2.o`，只 include 一个
 #    u_uac2.h。被抽出来的 u_audio.c（ALSA 公共层）是 **4.6+** 才有的拆分，
