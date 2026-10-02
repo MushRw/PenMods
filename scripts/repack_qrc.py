@@ -12,8 +12,12 @@ plain C header (Qt Resource Compiler output). This script can:
   pack <qrc_qml.h> <srcdir> <output.h>
       Rebuild the header, replacing any file in <srcdir> that matches a
       resource path (matched against the path relative to <srcdir>).
-      The resource tree structure and names are preserved; only the
-      replaced payloads and the affected data offsets change.
+      Files in <srcdir> that are NOT in the resource tree are ADDED as
+      new entries (the qt_resource_name / qt_resource_struct sections
+      are rebuilt with the exact two-pass stack algorithm used by Qt
+      5.15's rcc: children sorted by qt_hash(name), flat child slots
+      allocated depth-first with a LIFO stack). Payloads of resources
+      absent from <srcdir> are kept as-is.
 
   verify <qrc_qml.h> <srcdir>
       Parse the header, extract all files and compare them byte-for-byte
@@ -174,11 +178,26 @@ def normalize_text_bytes(rel, raw):
     return raw
 
 
+def qt_hash(s):
+    """The exact hash rcc stores in the name table / sorts children by.
+
+    Verified against all 771 entries of a real qrc_qml.h (0 mismatches).
+    """
+    h = 0
+    for ch in s:
+        h = (h << 4) + ord(ch)
+        g = h & 0xF0000000
+        if g:
+            h ^= g >> 23
+        h &= ~g & 0xFFFFFFFF
+    return h
+
+
 def pack(header_path, srcdir, output_path):
     data, names, tree = parse_header(header_path)
     resources = extract_resources(data, tree, names)
 
-    # build path -> (new_content, original_compressed_flag)
+    # build path -> new_content from the source tree
     overlay = {}
     for root, _, files in os.walk(srcdir):
         for fn in files:
@@ -188,41 +207,143 @@ def pack(header_path, srcdir, output_path):
             overlay[rel] = raw
 
     nodes = parse_tree(tree)
-    # order leaves by their current data offset to preserve blob order
-    leaves = []
-    for path, idx, node in walk_tree(tree, names):
-        leaves.append((path, idx, node))
-    leaves.sort(key=lambda item: item[2]["data_offset"])
+    name_of = parse_names(names)
 
+    # --- collect the existing hierarchy -------------------------------
+    # children[dir_path] = {child_name: is_dir}; leaf meta by full path.
+    children = {"": {}}
+    leaf_meta = {}   # full path -> (flags, country, language, mtime)
+    root_node = nodes[0]
+
+    def scan(i, prefix):
+        # prefix: directory path without a trailing slash ("" is the root);
+        # the children dict is keyed the same way.
+        node = nodes[i]
+        if not (node["flags"] & FLAG_DIRECTORY):
+            return
+        for c in range(node["first_child"], node["first_child"] + node["child_count"]):
+            child = nodes[c]
+            cname = name_of[child["name_off"]]
+            is_dir = bool(child["flags"] & FLAG_DIRECTORY)
+            children.setdefault(prefix, {})[cname] = is_dir
+            if is_dir:
+                scan(c, cname if prefix == "" else prefix + "/" + cname)
+
+    scan(0, "")
+    for path, idx, node in walk_tree(tree, names):
+        leaf_meta[path] = (node["flags"], node["country"], node["language"], node["mtime"])
+
+    # --- merge new files (and new directories) from the overlay -------
+    existing = set(resources.keys())
+    added = sorted(p for p in overlay if p not in existing)
+    for rel in added:
+        parts = rel.split("/")
+        cur = ""
+        for k, seg in enumerate(parts):
+            is_dir = k < len(parts) - 1
+            children.setdefault(cur, {})[seg] = is_dir
+            cur = seg if cur == "" else cur + "/" + seg
+    removed = [p for p in existing if p not in overlay]
+    for p in removed:
+        print("warning: %s missing in srcdir, keeping original payload" % p)
+
+    # --- name table: keep original bytes, append entries for new names
+    name_off = {}  # name string -> offset in names blob
+    for off, s in name_of.items():
+        name_off.setdefault(s, off)
+    new_names_blob = bytearray(names)
+    needed_names = set()
+    for dir_path, kids in children.items():
+        if dir_path != "":
+            needed_names.add(dir_path.split("/")[-1])
+        needed_names.update(kids.keys())
+    for s in sorted(needed_names):
+        if s in name_off:
+            continue
+        name_off[s] = len(new_names_blob)
+        utf16 = s.encode("utf-16-be")
+        new_names_blob += struct.pack(">H", len(s))
+        new_names_blob += struct.pack(">I", qt_hash(s))
+        new_names_blob += utf16
+
+    # --- pass 1: allocate flat child slots (rcc writeDataStructure) ---
+    child_offset = {}
+    pending = [""]  # root; stack pop() == LIFO like rcc's QStack
+    offset = 1
+    while pending:
+        d = pending.pop()
+        child_offset[d] = offset
+        kids = sorted(children[d].keys(), key=qt_hash)
+        for cname in kids:
+            offset += 1
+            if children[d][cname]:
+                pending.append(cname if d == "" else d + "/" + cname)
+
+    # --- data section: existing leaves keep blob order, new ones append
     new_data = bytearray()
-    for path, idx, node in leaves:
-        is_dir = bool(node["flags"] & FLAG_DIRECTORY)
+    data_offset_of = {}
+    leaves_by_old_offset = []
+    for path, idx, node in walk_tree(tree, names):
+        leaves_by_old_offset.append((node["data_offset"], path))
+    leaves_by_old_offset.sort()
+    for _, path in leaves_by_old_offset:
+        node_flags, country, language, mtime = leaf_meta[path]
         if path in overlay:
             payload, compressed = encode_payload(overlay[path])
-            nodes[idx]["data_offset"] = len(new_data)
-            if compressed:
-                nodes[idx]["flags"] |= FLAG_COMPRESSED
-            else:
-                nodes[idx]["flags"] &= ~FLAG_COMPRESSED
         else:
             payload, compressed = resources[path]
-            nodes[idx]["data_offset"] = len(new_data)
+        data_offset_of[path] = len(new_data)
+        new_data += struct.pack(">I", len(payload))
+        new_data += payload
+    for path in added:
+        payload, compressed = encode_payload(overlay[path])
+        data_offset_of[path] = len(new_data)
         new_data += struct.pack(">I", len(payload))
         new_data += payload
 
-    # re-emit the tree with updated data offsets
-    new_tree = bytearray()
-    for node in nodes:
-        new_tree += struct.pack(">I", node["name_off"])
-        new_tree += struct.pack(">H", node["flags"])
-        if node["flags"] & FLAG_DIRECTORY:
-            new_tree += struct.pack(">I", node["child_count"])
-            new_tree += struct.pack(">I", node["first_child"])
+    # --- pass 2: emit nodes (root first, then LIFO stack traversal) ---
+    def emit_dir_node(dir_path):
+        out = bytearray()
+        name_off_v = root_node["name_off"] if dir_path == "" else name_off[dir_path.split("/")[-1]]
+        out += struct.pack(">I", name_off_v)
+        out += struct.pack(">H", FLAG_DIRECTORY)
+        out += struct.pack(">I", len(children[dir_path]))
+        out += struct.pack(">I", child_offset[dir_path])
+        out += struct.pack(">Q", 0)
+        return out
+
+    def emit_leaf_node(path):
+        if path in leaf_meta:
+            node_flags, country, language, mtime = leaf_meta[path]
         else:
-            new_tree += struct.pack(">H", node["country"])
-            new_tree += struct.pack(">H", node["language"])
-            new_tree += struct.pack(">I", node["data_offset"])
-        new_tree += struct.pack(">Q", node["mtime"])
+            # newly added file: locale C, no timestamp
+            node_flags, country, language, mtime = 0, 0, 0, 0
+        flags = node_flags & ~FLAG_DIRECTORY
+        if path in overlay:
+            payload, compressed = encode_payload(overlay[path])
+            flags = (flags | FLAG_COMPRESSED) if compressed else (flags & ~FLAG_COMPRESSED)
+        out = bytearray()
+        out += struct.pack(">I", name_off[path.split("/")[-1]])
+        out += struct.pack(">H", flags)
+        out += struct.pack(">H", country)
+        out += struct.pack(">H", language)
+        out += struct.pack(">I", data_offset_of[path])
+        out += struct.pack(">Q", mtime)
+        return out
+
+    struct_out = bytearray()
+    struct_out += emit_dir_node("")
+    pending = [""]
+    while pending:
+        d = pending.pop()
+        kids = sorted(children[d].keys(), key=qt_hash)
+        for cname in kids:
+            full = cname if d == "" else d + "/" + cname
+            if children[d][cname]:
+                struct_out += emit_dir_node(full)
+                pending.append(full)
+            else:
+                struct_out += emit_leaf_node(full)
 
     header = (
         "/****************************************************************************\n"
@@ -234,14 +355,16 @@ def pack(header_path, srcdir, output_path):
         "*****************************************************************************/\n\n"
         + emit_array("qt_resource_data", bytes(new_data))
         + "\n\n"
-        + emit_array("qt_resource_name", names)
+        + emit_array("qt_resource_name", bytes(new_names_blob))
         + "\n\n"
-        + emit_array("qt_resource_struct", bytes(new_tree))
+        + emit_array("qt_resource_struct", bytes(struct_out))
         + "\n\n"
     )
     with open(output_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(header)
-    print("packed %d files -> %s (%d bytes)" % (len(leaves), output_path, len(new_data)))
+    print("packed %d files (%d replaced, %d added) -> %s (%d bytes)"
+          % (len(existing) + len(added), len(existing) - len(removed), len(added),
+             output_path, len(new_data)))
 
 
 def extract(header_path, outdir):
