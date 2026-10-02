@@ -8,13 +8,14 @@
 
 #include "common/Event.h"
 
+#include <QByteArray>
 #include <QCoreApplication>
-#include <QDebug>
-#include <QDir>
 #include <QFile>
 #include <QImage>
 #include <QImageWriter>
+#include <QQmlContext>
 #include <QScopeGuard>
+#include <QStringList>
 #include <QThread>
 
 namespace mod {
@@ -49,7 +50,9 @@ ScreenGrabber::ScreenGrabber() {
 QString ScreenGrabber::grabNow() {
 
     mBusy = true;
-    auto guard = qScopeGuard([this] { mBusy = false; });
+    // maybe_unused：guard 的作用在**析构时**执行（每个 return 分支都会释放 mBusy），
+    // 变量本身读不到，编译器会报 unused-variable。
+    [[maybe_unused]] auto guard = qScopeGuard([this] { mBusy = false; });
 
     auto logLine = [](const QString& s) {
         QFile f(QString::fromUtf8(kLog));
