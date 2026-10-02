@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: GPL-3.0-only
+/*
+ * Copyright (C) 2022-present, PenUniverse.
+ * This file is part of the PenMods open source project.
+ */
+
+#include "system/input/ScreenGrabber.h"
+
+#include "common/Event.h"
+
+#include <QCoreApplication>
+#include <QDebug>
+#include <QDir>
+#include <QFile>
+#include <QImage>
+#include <QImageWriter>
+#include <QScopeGuard>
+#include <QThread>
+
+namespace mod {
+
+static const char* kReq  = "/tmp/penmods_shot";
+static const char* kLog  = "/tmp/penmods_shot.log";
+static const char* kDir  = "/tmp";
+
+ScreenGrabber::ScreenGrabber() {
+
+    connect(&Event::getInstance(), &Event::beforeUiInitialization,
+            [this](QQuickView& view, QQmlContext*) {
+                mView = &view;
+                spdlog::info("ScreenGrabber: 宿主窗口已就绪 {}x{}", view.width(), view.height());
+            });
+
+    // 1 秒一次，代价只是两次 stat。不用 QtFileSystemWatcher 是因为设备上
+    // inotify 对 /tmp（tmpfs）不一定可靠，而这个轮询足够省。
+    mTimer.setInterval(1000);
+    connect(&mTimer, &QTimer::timeout, this, [this]() {
+        if (mBusy || !mView) return;
+        if (!QFile::exists(kReq)) return;
+
+        // 先删哨兵再抓：grabWindow + save 是同步的，但删早了怕丢请求，
+        // 删晚了会在这一帧里重复触发 —— 先删，失败也只丢一次请求，可接受。
+        QFile::remove(QString::fromUtf8(kReq));
+        grabNow();
+    });
+    mTimer.start();
+}
+
+QString ScreenGrabber::grabNow() {
+
+    mBusy = true;
+    auto guard = qScopeGuard([this] { mBusy = false; });
+
+    auto logLine = [](const QString& s) {
+        QFile f(QString::fromUtf8(kLog));
+        if (f.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+            f.write((s + "\n").toUtf8());
+    };
+
+    if (!mView) {
+        logLine(QStringLiteral("err no-view"));
+        return QStringLiteral("no-view");
+    }
+
+    // grabWindow 必须在 GUI 线程。正常情况下 QTimer 就在 GUI 线程，
+    // 但显式校验一次 —— 万一将来从别的线程调进来，静默失败会很难查。
+    if (QThread::currentThread() != mView->thread()) {
+        logLine(QStringLiteral("err wrong-thread %1 vs %2")
+                    .arg(quintptr(QThread::currentThread()), 0, 16)
+                    .arg(quintptr(mView->thread()), 0, 16));
+        return QStringLiteral("wrong-thread");
+    }
+
+    QImage img = mView->grabWindow();
+    if (img.isNull()) {
+        logLine(QStringLiteral("err grab-null"));
+        return QStringLiteral("grab-null");
+    }
+
+    // 设备上没有 webp 解码器这件事跟这里无关，但 PNG 编码器必须确认存在
+    // —— 缺了会写出 0 字节文件，症状和"抓图失败"一模一样，极易误判。
+    if (!QImageWriter::supportedImageFormats().contains(QByteArrayLiteral("png"))) {
+        logLine(QStringLiteral("err no-png-enc fmt=%1")
+                    .arg(QString::fromLatin1(QImageWriter::supportedImageFormats().join(','))));
+        return QStringLiteral("no-png-enc");
+    }
+
+    const QString path = QString::fromUtf8(kDir) + QStringLiteral("/penmods_shot-%1.png").arg(mSeq++);
+    if (!img.save(path, "PNG")) {
+        logLine(QStringLiteral("err save-fail %1").arg(path));
+        return QStringLiteral("save-fail");
+    }
+
+    logLine(QStringLiteral("ok %1 %2x%3 exposed=%4")
+                .arg(path)
+                .arg(img.width())
+                .arg(img.height())
+                .arg(mView->isExposed() ? 1 : 0));
+    spdlog::info("ScreenGrabber: 已抓取 {}", path.toStdString());
+    return path;
+}
+
+} // namespace mod
