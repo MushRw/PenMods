@@ -44,7 +44,14 @@ private:
     friend Singleton<ScreenGrabber>;
     explicit ScreenGrabber();
 
-    QTimer  mTimer;
+    void tick();
+
+    // ⚠️ mTimer 必须是 **指针**且带 this 作 parent。
+    // 原先是值成员 `QTimer mTimer`：它在 ScreenGrabber 基类构造之后才构造，
+    // 且没有 parent ⇒ 在某些启动顺序下 QTimer 没被挂进 GUI 线程的事件循环，
+    // 表现为 mView 已就绪（日志有 "宿主窗口已就绪"）但哨兵永远不被消费、
+    // log 一行不写。指针 + setParent(this) 由 QObject 的 child 机制保证线程与生命周期。
+    QTimer* mTimer = nullptr;
     QQuickView* mView = nullptr;
     int  mSeq = 0;
     bool mBusy = false;

@@ -34,17 +34,25 @@ ScreenGrabber::ScreenGrabber() {
 
     // 1 秒一次，代价只是两次 stat。不用 QtFileSystemWatcher 是因为设备上
     // inotify 对 /tmp（tmpfs）不一定可靠，而这个轮询足够省。
-    mTimer.setInterval(1000);
-    connect(&mTimer, &QTimer::timeout, this, [this]() {
-        if (mBusy || !mView) return;
-        if (!QFile::exists(kReq)) return;
+    mTimer = new QTimer(this);
+    mTimer->setInterval(1000);
+    connect(mTimer, &QTimer::timeout, this, &ScreenGrabber::tick);
+    mTimer->start();
+    // 启动即打一行：下次若又出现"哨兵不被消费"，能立刻区分
+    // 「Timer 压根没跑」（tick 里那条 debug 一行都不出现）vs「跑了但条件不满足」。
+    spdlog::info("ScreenGrabber: 轮询已启动 {}ms", mTimer->interval());
+}
 
-        // 先删哨兵再抓：grabWindow + save 是同步的，但删早了怕丢请求，
-        // 删晚了会在这一帧里重复触发 —— 先删，失败也只丢一次请求，可接受。
-        QFile::remove(QString::fromUtf8(kReq));
-        grabNow();
-    });
-    mTimer.start();
+void ScreenGrabber::tick() {
+    if (mBusy || !mView) return;
+    if (!QFile::exists(kReq)) return;
+
+    // 命中过一次就打一行：哨兵不被消费时，这条日志的有无直接指认 Timer 是否在跑。
+    spdlog::info("ScreenGrabber: 命中哨兵，抓一帧");
+    // 先删哨兵再抓：grabWindow + save 是同步的，但删早了怕丢请求，
+    // 删晚了会在这一帧里重复触发 —— 先删，失败也只丢一次请求，可接受。
+    QFile::remove(QString::fromUtf8(kReq));
+    grabNow();
 }
 
 QString ScreenGrabber::grabNow() {
