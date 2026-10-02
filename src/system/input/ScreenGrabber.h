@@ -54,6 +54,7 @@ private:
     QTimer* mTimer = nullptr;
     QQuickView* mView = nullptr;
     int  mSeq = 0;
+    int  mTick = 0;
     bool mBusy = false;
 };
 

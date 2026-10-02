@@ -32,22 +32,39 @@ ScreenGrabber::ScreenGrabber() {
                 spdlog::info("ScreenGrabber: 宿主窗口已就绪 {}x{}", view.width(), view.height());
             });
 
+    // ⚠️ Timer **必须等 uiCompleted 才 start**。
+    // 构造函数（Mod::load 阶段）跑的时候宿主 QML 的事件循环还没转起来，
+    // 此时 mTimer->start() 只是把事件排进一个还不存在的循环 ⇒ timeout 永不触发。
+    // 现象极具迷惑性：日志有「轮询已启动」也有「宿主窗口已就绪」，
+    // 但 touch 哨兵后它**一直不被消费**、log 一行不写 —— 看起来像"条件不满足"，
+    // 实际是 Timer 从未收到过事件循环的 tick。
+    //
+    // uiCompleted 由 PEN_HOOK 在 GUI 线程里 emit（见 common/Event.cpp），
+    // 正是 Event 这套钩子存在的意义：ScreenManager 也靠它把工作挪到 GUI 线程。
+    connect(&Event::getInstance(), &Event::uiCompleted, this, [this]() {
+        if (!mTimer) return;
+        mTimer->start();
+        spdlog::info("ScreenGrabber: 轮询已启动 {}ms thread=0x{:x}",
+                     mTimer->interval(),
+                     quintptr(QThread::currentThread()));
+    });
+
     // 1 秒一次，代价只是两次 stat。不用 QtFileSystemWatcher 是因为设备上
     // inotify 对 /tmp（tmpfs）不一定可靠，而这个轮询足够省。
     mTimer = new QTimer(this);
     mTimer->setInterval(1000);
     connect(mTimer, &QTimer::timeout, this, &ScreenGrabber::tick);
-    mTimer->start();
-    // 启动即打一行：下次若又出现"哨兵不被消费"，能立刻区分
-    // 「Timer 压根没跑」（tick 里那条 debug 一行都不出现）vs「跑了但条件不满足」。
-    spdlog::info("ScreenGrabber: 轮询已启动 {}ms", mTimer->interval());
 }
 
 void ScreenGrabber::tick() {
+    // 心跳放在最前面：**无论后面哪个条件不满足，这条都能证明 Timer 真的在跑**。
+    // 之前把日志放在"命中哨兵"之后，一旦条件不满足就一个字都不打，
+    // 让人误以为 Timer 没跑 —— 排查时白白绕了一圈。
+    if (++mTick % 30 == 0)
+        spdlog::info("ScreenGrabber: 心跳 tick={} view={}", mTick, mView ? "yes" : "no");
     if (mBusy || !mView) return;
     if (!QFile::exists(kReq)) return;
 
-    // 命中过一次就打一行：哨兵不被消费时，这条日志的有无直接指认 Timer 是否在跑。
     spdlog::info("ScreenGrabber: 命中哨兵，抓一帧");
     // 先删哨兵再抓：grabWindow + save 是同步的，但删早了怕丢请求，
     // 删晚了会在这一帧里重复触发 —— 先删，失败也只丢一次请求，可接受。
