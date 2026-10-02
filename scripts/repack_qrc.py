@@ -67,6 +67,22 @@ NODE_SIZE = 22
 FLAG_COMPRESSED = 0x01
 FLAG_DIRECTORY = 0x02
 
+# --- 文件叶子节点的 locale 字段（务必与 rcc 一致，否则资源「查不到」）---
+#
+# Qt 的 QResourceRoot::findNode 在命中名字后，对**非目录**节点还要过一道 locale 判定：
+#     if (country == locale.country() && language == locale.language()) return node;
+#     else if ((country == AnyCountry && language == locale.language()) || ...) node = ...;
+# QResource 查询时用的 locale 是 QLocale::c()，即 (AnyCountry = 0, C = 1)。
+#
+# 因此非本地化资源必须写 (country=0, language=1)。若 language 写成 0（= AnyLanguage），
+# 上面的 if 与两个回退分支全都不满足 ⇒ continue ⇒ findNode 返回 -1 ⇒
+# 该资源被判定为「不存在」。实测症状：
+#     Qt.createComponent("qrc:/qml/Xxx.qml") -> status=Error
+#     errorString = "qrc:/qml/Xxx.qml:-1 No such file or directory"
+# 而同一个包里的老资源（rcc 原本写的 (0, 1)）全部正常 —— 极易被误判成「树没重建对」。
+LOCALE_ANY_COUNTRY = 0  # QLocale::AnyCountry
+LOCALE_C_LANGUAGE = 1   # QLocale::C
+
 
 def parse_tree(tree):
     """Return (nodes, root) where nodes is a list of dicts."""
@@ -199,12 +215,14 @@ def pack(header_path, srcdir, output_path):
 
     # build path -> new_content from the source tree
     overlay = {}
+    overlay_mtime = {}
     for root, _, files in os.walk(srcdir):
         for fn in files:
             full = os.path.join(root, fn)
             rel = os.path.relpath(full, srcdir).replace("\\", "/")
             raw = normalize_text_bytes(rel, open(full, "rb").read())
             overlay[rel] = raw
+            overlay_mtime[rel] = int(os.path.getmtime(full) * 1000)
 
     nodes = parse_tree(tree)
     name_of = parse_names(names)
@@ -315,9 +333,16 @@ def pack(header_path, srcdir, output_path):
     def emit_leaf_node(path):
         if path in leaf_meta:
             node_flags, country, language, mtime = leaf_meta[path]
+            # 自愈：早期版本给新增文件写成了 (0, 0)，见 LOCALE_* 的注释。
+            # 打包一份旧产物时顺手把它修回 (0, 1)，不需要重新从干净基线打一遍。
+            if country == 0 and language == 0:
+                language = LOCALE_C_LANGUAGE
         else:
-            # newly added file: locale C, no timestamp
-            node_flags, country, language, mtime = 0, 0, 0, 0
+            # 新增文件：locale 与 rcc 一致取 (AnyCountry, C)，时间戳取源文件 mtime
+            node_flags = 0
+            country = LOCALE_ANY_COUNTRY
+            language = LOCALE_C_LANGUAGE
+            mtime = overlay_mtime.get(path, 0)
         flags = node_flags & ~FLAG_DIRECTORY
         if path in overlay:
             payload, compressed = encode_payload(overlay[path])
@@ -344,6 +369,19 @@ def pack(header_path, srcdir, output_path):
                 pending.append(full)
             else:
                 struct_out += emit_leaf_node(full)
+
+    # --- 自检：文件叶子的 locale 必须是 (AnyCountry, C)，否则 Qt 会把资源判成「不存在」---
+    for i in range(len(struct_out) // NODE_SIZE):
+        b = i * NODE_SIZE
+        if struct.unpack_from(">H", struct_out, b + 4)[0] & FLAG_DIRECTORY:
+            continue
+        cc = struct.unpack_from(">H", struct_out, b + 6)[0]
+        ll = struct.unpack_from(">H", struct_out, b + 8)[0]
+        if cc == 0 and ll == 0:
+            raise SystemExit(
+                "pack 自检失败：struct 第 %d 个节点（文件叶子）locale=(0,0)，"
+                "Qt 的 QResourceRoot::findNode 会判定该文件不存在" % i
+            )
 
     header = (
         "/****************************************************************************\n"
