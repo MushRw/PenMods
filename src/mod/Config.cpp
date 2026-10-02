@@ -220,7 +220,16 @@ json Config::read(const std::string& name) {
 
 bool Config::write(const std::string& name, json content, bool saveImmediately) {
     if (mData.find(name) == mData.end()) {
-        return false;
+        // 该 section 不在**磁盘上的** config.json 里（旧版本写过的配置很常见，例如
+        // keyboard / layout 是后加的键）。原实现直接 return false，调用方却以为写成功了，
+        // 于是出现「设置界面上改完生效、一重启就变回去」这种查不到原因的丢配置。
+        // 白名单（mDefaults）内的 section 允许就地补建，白名单外的仍然拒绝。
+        if (!mDefaults.is_object() || mDefaults.find(name) == mDefaults.end()) {
+            warn("拒绝写入白名单外的配置段: {}", name);
+            return false;
+        }
+        info("配置段 {} 缺失，就地补建后写入.", name);
+        mData[name] = json::object();
     }
     mData[name] = std::move(content);
     if (saveImmediately) {
