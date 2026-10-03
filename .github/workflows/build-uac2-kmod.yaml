@@ -332,7 +332,42 @@ jobs:
           # 关掉 MSI(−24) 之后，CONFIG_TIMER_STATS(+32) 正好把 sizeof(struct device)
           # 重新顶回 792，class/groups/release 回到 752/760/768 ⇒ **device.h 的
           # 8 字节占位补丁可以整个删掉**（见下面 "ABI 补丁已删除" 那一段）。
-          ./scripts/config --disable GENERIC_MSI_IRQ --disable GENERIC_MSI_IRQ_DOMAIN || true
+          #
+          # ★ 2026-10-03 第四次修正：MSI 的关闭必须**溯源到 select 者** ★
+          #
+          # 上一版写的是
+          #     ./scripts/config --disable GENERIC_MSI_IRQ --disable GENERIC_MSI_IRQ_DOMAIN
+          # CI run 37097119107 证明它是**两行空操作**：
+          #     CONFIG_GENERIC_MSI_IRQ=y
+          #     CONFIG_GENERIC_MSI_IRQ_DOMAIN=y
+          # 原因：这两个符号在 kernel/irq/Kconfig:68 / :72 里都是
+          #     config GENERIC_MSI_IRQ
+          #         bool                      ← 只有类型，**没有 prompt 提示串**
+          # ⇒ 它们对用户不可见，只能被 select，`scripts/config --disable` 改不动。
+          #
+          # select 链（4.4 原文，已逐行核对）：
+          #   arch/arm64/Kconfig:190  config PCI    bool "PCI support"（**无 default**）
+          #   drivers/pci/Kconfig:8   config PCI_MSI             depends on PCI
+          #                                                     select GENERIC_MSI_IRQ
+          #   drivers/pci/Kconfig:24  config PCI_MSI_IRQ_DOMAIN  depends on PCI_MSI
+          #                                                     select GENERIC_MSI_IRQ_DOMAIN
+          #   kernel/irq/Kconfig:75   GENERIC_MSI_IRQ_DOMAIN     select GENERIC_MSI_IRQ
+          #   arch/arm64/Kconfig:20   select ARM_GIC_V2M     if PCI_MSI
+          #   arch/arm64/Kconfig:22   select ARM_GIC_V3_ITS  if PCI_MSI
+          # 全树 `select GENERIC_MSI_IRQ` 只有上面那两处、`select GENERIC_MSI_IRQ_DOMAIN`
+          # 只有一处（已对 kernel/irq、drivers/pci、drivers/irqchip、arch/arm64 四个
+          # Kconfig 逐条 grep 确认），**没有别的 select 路径**；而 `config PCI` 无 default、
+          # 也没有任何 `select PCI` ⇒ 显式关掉 PCI 之后：
+          #     PCI_MSI（depends on PCI）            → 关
+          #     PCI_MSI_IRQ_DOMAIN（depends on PCI_MSI）→ 关
+          #     ARM_GIC_V2M / ARM_GIC_V3_ITS（if PCI_MSI）→ 关
+          #     GENERIC_MSI_IRQ(_DOMAIN)             → 不再被任何人 select ⇒ 关
+          # 设备侧判据：`/sys/bus/pci` 不存在、`/sys/devices/platform/*/msi_irqs` 内容为空
+          # ⇒ 设备内核 MSI=n。关掉后 struct device 少 msi_list(16)+msi_domain(8)=24 字节。
+          # ⚠️ 不要直接写 --disable GENERIC_MSI_IRQ*（空操作），必须走 PCI 这条路。
+          ./scripts/config --disable PCI || true
+          ./scripts/config --disable PCI_MSI || true
+          ./scripts/config --disable PCI_MSI_IRQ_DOMAIN || true
           # ⚠️ NUMA 必须显式关掉（原来这里写的是 --enable NUMA，那是个**静默 no-op**：
           #    arm64 4.4 的 `config NUMA` 依赖 OF_NUMA，enable 了也不会生效，
           #    于是"按 Kconfig 逐项折算凑出 class=752"的错觉正是被它骗出来的）。
@@ -367,9 +402,17 @@ jobs:
           #   `int numa_node` 由 CONFIG_NUMA 把关。
           #   `struct list_head msi_list` / `struct irq_domain *msi_domain`
           #     分别由 GENERIC_MSI_IRQ / GENERIC_MSI_IRQ_DOMAIN 把关（2026-10-03 修正）。
+          # ⚠️ 这两个是隐藏符号（无 prompt），断言只认最终生效值 —— 如果这里报 ❌，
+          #    修法**不是**去 --disable 它们，而是往上面找 select 者（PCI / PCI_MSI）。
           for c in DMA_CMA NUMA GENERIC_MSI_IRQ GENERIC_MSI_IRQ_DOMAIN; do
             if grep -q "^CONFIG_${c}=y" .config; then
               echo "  ❌ CONFIG_${c}=y —— 设备内核没有该成员，会让 struct device 在 of_node 之前整体错位"
+              case "${c}" in
+                GENERIC_MSI_IRQ|GENERIC_MSI_IRQ_DOMAIN)
+                  echo "     ↳ 注意：它是**无 prompt 的隐藏符号**，--disable 无效。"
+                  echo "       请确认 --disable PCI / --disable PCI_MSI 是否被别处 select 顶回来了。"
+                  ;;
+              esac
               die=1
             else
               echo "  ✅ CONFIG_${c} 已关闭"
