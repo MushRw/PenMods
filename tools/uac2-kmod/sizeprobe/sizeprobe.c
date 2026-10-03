@@ -38,6 +38,10 @@
 #include <linux/rwsem.h>
 #include <linux/semaphore.h>
 #include <linux/completion.h>
+#include <linux/workqueue.h>
+#include <linux/timer.h>
+#include <linux/pm.h>
+#include <linux/pm_qos.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 
@@ -84,6 +88,63 @@
 #endif
 #ifdef CONFIG_SND_DEBUG
 #error "CONFIG_SND_DEBUG 必须为 n —— 它会让 SND_PCM_XRUN_DEBUG 自动变 y（default y），从而改变 struct snd_pcm_str"
+#endif
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 第七处 ABI：CONFIG_TIMER_STATS（2026-10-03 第二次真机 oops 的真根因）
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ * 判据（设备侧四方独立证据，全部只读）：
+ *   A) `/proc/timer_stats` 存在，内容为
+ *        Timer Stats Version: v0.3
+ *        Sample period: 0.000 s
+ *        Collection: inactive
+ *   B) /proc/kallsyms 里 tstats_open / tstats_show / tstats_write /
+ *      init_tstats_procfs 四个**静态**符号都在
+ *   C) kernel/time/Makefile:12  obj-$(CONFIG_TIMER_STATS) += timer_stats.o
+ *   D) lib/Kconfig.debug:896 `config TIMER_STATS` 的 help 原文写着
+ *        "The statistics can be read from /proc/timer_stats"  ← 与 A) 逐字吻合
+ *   ⇒ 设备内核 CONFIG_TIMER_STATS = y
+ *
+ * 后果链（这是本项目第二次被 TIMER_STATS 咬）：
+ *     struct timer_list 尾部 +32
+ *         #ifdef CONFIG_TIMER_STATS
+ *             int  start_pid; void *start_site; char start_comm[16];
+ *         #endif
+ *       → struct delayed_work  +32
+ *       → struct pm_qos_request 144 → 176
+ *       → offsetof(struct snd_pcm_substream, runtime) 280 → 312
+ *   内核在 snd_pcm_attach_substream 里按**它的** 312 写 substream->runtime，
+ *   我们在 uac2_pcm_open 里按**我们的** 280 去读 ⇒ 读到 kzalloc 出来的 0
+ *   ⇒ uac2_pcm_open+0x40 的 `stp x4,x5,[x21,#0x180]`（runtime->hw）解引用
+ *     NULL（fault 地址正好 0x180）⇒ panic_on_oops=1 ⇒ 设备重启。
+ *
+ * ⚠️ 它**同时**改变 struct device：`struct device` 里内嵌
+ *    `struct dev_pm_info power`，而 dev_pm_info 在 `#ifdef CONFIG_PM` 里有
+ *    `struct timer_list suspend_timer;` ⇒ +32。
+ *    所以打开 TIMER_STATS 之后**必须同时把 MSI 关掉（−24）**，
+ *    sizeof(struct device) 才会回到设备实测的 792（两条断言的耦合见下）。
+ */
+#ifndef CONFIG_TIMER_STATS
+#error "CONFIG_TIMER_STATS 必须为 y（设备 /proc/timer_stats 存在）—— 否则 struct timer_list 少 32 字节：snd_pcm_substream.runtime 会算成 280（内核是 312），aplay 必 oops"
+#endif
+
+/* ── 同时必须把 MSI 关掉（2026-10-03 修正；原来写的是 --enable，方向反了）──
+ * 设备侧判据：
+ *     /sys/devices/platform/*/msi_irqs  一个都没有（count = 0）
+ *     /sys/bus/pci 不存在                ⇒ CONFIG_PCI = n
+ *     kallsyms 里 msi_domain_alloc_irqs / msi_create_irq_domain 全无
+ *   ⇒ 没有 PCIe 的 SoC 不会开 MSI。
+ * （`of_msi_configure` 在 kallsyms 里确实有，但那是**假证据**：
+ *   drivers/of/irq.c 里该函数没有任何 MSI 守卫，它调用的 dev_set_msi_domain()
+ *   是 device.h 里的 static inline，MSI 关掉时退化成空操作 ⇒ 符号恒存在。）
+ * 开着的话 struct device 会多 msi_list(16) + msi_domain(8) = 24 字节，
+ * 而这 24 字节正是当年被误判成"厂商私有 +8"的那笔账的另一半。 */
+#if IS_ENABLED(CONFIG_GENERIC_MSI_IRQ)
+#error "CONFIG_GENERIC_MSI_IRQ 必须为 n（设备 /sys/devices/platform/*/msi_irqs count=0）—— 否则 struct device 多 16 字节（msi_list）"
+#endif
+#if IS_ENABLED(CONFIG_GENERIC_MSI_IRQ_DOMAIN)
+#error "CONFIG_GENERIC_MSI_IRQ_DOMAIN 必须为 n（设备无 PCIe、无 msi_domain）—— 否则 struct device 多 8 字节（msi_domain）"
 #endif
 
 #define SZT(n, t) char penmods_sz_##n[sizeof(t)] __attribute__((used))
@@ -159,10 +220,11 @@ SZT(atomic_long, atomic_long_t);
  *
  * 两条容易踩的坑（我第一次就都踩了）：
  *   ① `chmap_kctl` 和 `dev` 是**无条件**成员，不是指针，`dev` 是**一整个
- *      struct device`（我们的占位补丁之后是 792 字节）——
+ *      struct device**（设备实测 792 字节，靠 TIMER_STATS=y + MSI=n 得到，
+ *      不再有任何占位补丁）——
  *      所以 `sizeof(snd_pcm_str) = 56 + sizeof(struct device) = 848`。
  *      这还意味着 **`struct device` 的大小会直接决定 `struct snd_pcm` 的布局**，
- *      第五处 ABI（device 占位补丁）和第六处是**耦合**的。
+ *      第五处 ABI（struct device 的成员偏移）和第六处是**耦合**的。
  *   ② `CONFIG_SND_PCM_XRUN_DEBUG`（`default y`，但 `depends on SND_DEBUG`，
  *      而 SND_DEBUG 无 default ⇒ 实际为 n）会再插 16 字节。
  *
@@ -195,6 +257,54 @@ SZO(snd_pcm_str_proc_info_entry,    struct snd_pcm_str, proc_info_entry);
  * 在 -Wall -Werror 的既有风格下是噪音），而且它本来就是第一个成员，没有信息量。 */
 SZO(snd_pcm_substream_pstr,         struct snd_pcm_substream, pstr);
 SZO(snd_pcm_substream_private_data, struct snd_pcm_substream, private_data);
+
+/* ── 第七处 ABI（CONFIG_TIMER_STATS）在本侧的镜像 ──
+ *
+ * TIMER_STATS=y ⇒ timer_list 80（否则 48）
+ *             ⇒ delayed_work 128（否则 96）
+ *             ⇒ pm_qos_request 176（否则 144）
+ * 这三个数字是"配置真的生效了"最直接的证据 —— 只要有一个是括号里的旧值，
+ * 说明 --enable TIMER_STATS 又被 olddefconfig 静默撤掉了。 */
+SZT(timer_list,     struct timer_list);
+SZT(delayed_work,   struct delayed_work);
+SZT(work_struct,    struct work_struct);
+SZT(pm_qos_request, struct pm_qos_request);
+SZT(dev_pm_info,    struct dev_pm_info);
+
+/* ── 第七处 ABI 的**核心偏移**：runtime ──
+ *
+ * 内核在 snd_pcm_attach_substream 里按**它的**偏移写 substream->runtime
+ *     993:  substream->runtime = runtime;
+ * 我们在 uac2_pcm_open 里按**我们的**偏移读
+ *     364:  struct snd_pcm_runtime *runtime = substream->runtime;
+ * 两边只要差 1 字节，读到的就是 kzalloc 的 0（真机 oops 的现场）。
+ * 期望值：runtime = 312 = 136 + sizeof(pm_qos_request)=176
+ *         （64 latency_pm_qos_req @64 → +176 = 240；buffer_bytes_max 248；
+ *           dma_buffer 48 → 296；dma_max 304；ops 312 ⇒ runtime 312）
+ */
+SZO(snd_pcm_substream_runtime,            struct snd_pcm_substream, runtime);
+SZO(snd_pcm_substream_latency_pm_qos_req, struct snd_pcm_substream, latency_pm_qos_req);
+SZO(snd_pcm_substream_buffer_bytes_max,   struct snd_pcm_substream, buffer_bytes_max);
+SZO(snd_pcm_substream_dma_buffer,         struct snd_pcm_substream, dma_buffer);
+SZO(snd_pcm_substream_ops,                struct snd_pcm_substream, ops);
+SZO(snd_pcm_substream_pid,                struct snd_pcm_substream, pid);
+SZO(snd_pcm_substream_proc_root,          struct snd_pcm_substream, proc_root);
+
+/* ── 第五处 ABI 的锚点：struct device 的四个成员 ──
+ *
+ * 设备内核 device_add() 自己的机器码实测（x19 = dev）：type=88 / class=752 /
+ * groups=760 / release=768。当年就是因为 class/groups/release 偏了 8，
+ * 才引出"厂商私有 +8"的误判。现在占位补丁已删，改用配置（TIMER_STATS=y /
+ * MSI=n）自然得到同样的值 —— 这四条断言就是"删占位之后没有回退"的回归网。 */
+SZO(device_type,    struct device, type);
+SZO(device_class,   struct device, class);
+SZO(device_groups,  struct device, groups);
+SZO(device_release, struct device, release);
+#ifdef CONFIG_PM
+/* dev_pm_info.suspend_timer 就是 TIMER_STATS 通过 struct device 影响布局的那一处。 */
+SZO(dev_pm_info_suspend_timer, struct dev_pm_info, suspend_timer);
+SZO(dev_pm_info_work,          struct dev_pm_info, work);
+#endif
 
 static int __init sizeprobe_init(void)
 {

@@ -203,7 +203,57 @@ jobs:
           #   snd_card / snd_pcm_runtime / snd_pcm_substream / usb_gadget 这些
           #   结构体内部都有 spinlock_t / struct mutex。偏移一错，usb_uac2.ko 就会
           #   读写内核结构体的错误字段 —— 那是真的会搞坏内核，而不是"加载失败而已"。
+          # ★★★ 必须打开 CONFIG_TIMER_STATS —— 厂商内核就是开的 ★★★
+          #
+          # 这是**第七处 ABI 差异**（2026-10-03 定位，第二次真机 oops 的真根因）。
+          #
+          # 四方互相独立的实测证据（全部来自设备，只读）：
+          #   A) `/proc/timer_stats` 存在，内容为
+          #        Timer Stats Version: v0.3
+          #        Sample period: 0.000 s
+          #        Collection: inactive
+          #   B) /proc/kallsyms 里这四个**静态**符号都在：
+          #        tstats_open / tstats_show / tstats_write / init_tstats_procfs
+          #   C) 它们只可能来自 kernel/time/timer_stats.c，而
+          #        kernel/time/Makefile:12  obj-$(CONFIG_TIMER_STATS) += timer_stats.o
+          #      ⇒ 该文件被编进内核 ⇒ CONFIG_TIMER_STATS=y
+          #   D) lib/Kconfig.debug:896 `config TIMER_STATS` 的 help 原文：
+          #        "The statistics can be read from /proc/timer_stats"
+          #      —— 与 A) 的实测逐字吻合。
+          #
+          # ★ 为什么这一条对本项目是**安全红线**而不是锦上添花：
+          #   struct timer_list（include/linux/timer.h）尾部挂着
+          #       #ifdef CONFIG_TIMER_STATS
+          #           int  start_pid;      // 4 (+4 pad)
+          #           void *start_site;    // 8
+          #           char start_comm[16]; // 16      ⇒ 共 +32 字节
+          #   而这条 +32 会顺着
+          #       timer_list → delayed_work (+32) → pm_qos_request (+32)
+          #   传下去，`struct snd_pcm_substream` 里正好内嵌一个
+          #       struct pm_qos_request latency_pm_qos_req;   // @64
+          #   于是：
+          #       sizeof(struct pm_qos_request)          144 → 176
+          #       offsetof(snd_pcm_substream, runtime)   280 → 312
+          #   后果：内核按**它的** 312 写 substream->runtime（snd_pcm_attach_substream
+          #   里 `substream->runtime = runtime;`），我们按**我们的** 280 去读 ⇒
+          #   读到的正好落在 latency_pm_qos_req 内部、是 kzalloc 出来的 0。
+          #   真机表现（2026-10-03 12:16，aplay -D hw:1,0）：
+          #       PC is at uac2_pcm_open+0x40/0x190 [usb_uac2]
+          #       Unable to handle kernel NULL pointer dereference at virtual address 00000180
+          #       x21: 0000000000000000      ← runtime
+          #   反汇编我们自己编出来的 .ko 逐条对上（llvm-objdump，函数入口 0x10c0）：
+          #       10e8: f9408c15   ldr x21, [x0, #0x118]      ; 0x118 = 280 ← 我们的偏移
+          #       1100: a91816a4   stp x4, x5, [x21, #0x180] ; runtime->hw = ... ← 崩在这
+          #   （0x1100 - 0x10c0 = 0x40 与 oops 的 PC 偏移一致；fault 地址 0x180 也一致。
+          #     另一半 `ldur x1,[x22,#-16]` 上一轮已修好，这次没再崩。）
+          #
+          # ⚠️ 注意它同时**改变 struct device**：`struct device` 内嵌
+          #    `struct dev_pm_info power`，而 dev_pm_info 在 `#ifdef CONFIG_PM` 里有
+          #    `struct timer_list suspend_timer;`。所以打开 TIMER_STATS 会给
+          #    struct device 也加 32 字节 —— 这正是下一步要同时关掉 MSI 的原因，
+          #    两处的组合详见下一个 ABI 段落（第五处）的注释。
           ./scripts/config --enable DEBUG_KERNEL --enable DEBUG_SPINLOCK || true
+          ./scripts/config --enable TIMER_STATS || true
           make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig
           # ★★★ 第五处 ABI 复刻：struct device 在 of_node 之前的成员要逐项对准 ★★★
           #
@@ -229,12 +279,21 @@ jobs:
           #   DMA_CMA / NUMA / MSI 全关 —— **方向反了**，上机后 class 从 744 掉到 712。
           #   踩的坑：未开 KALLSYMS_ALL 时 kallsyms 只列函数，数据符号缺失是
           #   **假阴性**，不能当作"该功能没编进内核"的证据。
-          # ★ 2026-10-03 第二次修正（现行结论）：把 PINCTRL(+8) 与 DMA_CMA(-8) 一起
-          #   放开后**仍然**差 8，说明这 5 个成员**不是**差值来源；真正多出来的 8 字节
-          #   来自一个拿不到的厂商私有改动 —— 已在下一步用"占位"消掉。
-          #   ⚠️ 但下面这几行配置**仍然是必需的**：占位补丁插在 `of_node` 之前，
-          #   所以 of_node 之前必须逐字节精确，任何一项错都会让占位点跟着偏移，
-          #   class / groups / release 一起错回 oops。下面把它们全部改成硬断言。
+          # ★ 2026-10-03 第三次修正（现行结论）：那个"拿不到的厂商私有 +8 字节"
+          #   **不存在**。第一次修正把 DMA_CMA / NUMA / MSI 全关（方向反了）；
+          #   第二次把 PINCTRL(+8) 与 DMA_CMA(-8) 一起放开后**仍然**差 8，就误判成
+          #   "厂商私有改动"，用 8 字节占位糊了过去。真因是两处错误相抵剩下的零头：
+          #       我们多开 MSI                        = msi_list(16)+msi_domain(8) = +24
+          #       设备多开 TIMER_STATS（dev_pm_info
+          #         里的 struct timer_list）          = −32
+          #       ---------------------------------------------------------------
+          #       净差                                  = −8  ⇒ 占位恰好是 +8
+          #   （两条证据链分别见上面 TIMER_STATS 那一段、下面 MSI 那一段。）
+          #   ⇒ MSI 已改成 --disable，device.h 的 8 字节占位补丁已**整个删除**。
+          #
+          #   ⚠️ 下面这几行配置**仍然必需**：`of_node` 之前必须逐字节精确，
+          #   任何一项错都会让 class / groups / release 一起错回 oops。
+          #   现在不再靠"占位"兜底，而是靠下面那组硬断言 + CI 里的尺寸指纹。
           #
           # 设备侧硬事实（全部为只读探测；"文本符号"只对**函数**有效）：
           #     cma_alloc / dma_alloc_from_contiguous 不存在  ⇒ CONFIG_DMA_CMA = n
@@ -249,7 +308,31 @@ jobs:
           # 复验方法：编出 abiprobe.ko → insmod → 比对它打印的 ours 成员表与内核
           # 机器码表；**只有完全一致才可以去绑 UDC**（设备 panic_on_oops=1）。
           ./scripts/config --enable IOMMU_SUPPORT --enable IOMMU_API || true
-          ./scripts/config --enable GENERIC_MSI_IRQ --enable GENERIC_MSI_IRQ_DOMAIN || true
+          # ★ 2026-10-03 第三次修正：MSI 必须**关**（原来写的是 --enable，方向反了）★
+          #
+          # 之前我们把 GENERIC_MSI_IRQ / GENERIC_MSI_IRQ_DOMAIN 打开，理由是"排不掉"，
+          # 然后在 device.h 里补了 8 字节占位把 class/groups/release 顶回 752/760/768。
+          # 现在真因已经查清 —— **那个"拿不到的厂商私有 +8 字节"根本不存在**，
+          # 它是两处错误相抵剩下的零头：
+          #     我们多开 MSI                        = msi_list(16) + msi_domain(8) = +24
+          #     设备多开 TIMER_STATS（dev_pm_info
+          #       里的 struct timer_list）          = −32
+          #     --------------------------------------------------------------
+          #     净差                                  = −8 ⇒ 所以占位恰好是 +8
+          #
+          # 设备侧判据（2026-10-03 实测，全部只读）：
+          #     /sys/devices/platform/*/msi_irqs  一个都没有（count = 0）
+          #     /sys/bus/pci 不存在                ⇒ CONFIG_PCI = n
+          #     kallsyms 里 msi_domain_alloc_irqs / msi_create_irq_domain 全无
+          #   ⇒ 没有 PCIe 的 SoC 不会开 MSI。（`of_msi_configure` 在 kallsyms 里有，
+          #     但它是**假证据**：drivers/of/irq.c 里该函数没有任何 MSI 守卫，
+          #     它调用的 dev_set_msi_domain() 是 device.h 里的 static inline，
+          #     MSI_DOMAIN=n 时退化成空操作 ⇒ 该符号恒存在。）
+          #
+          # 关掉 MSI(−24) 之后，CONFIG_TIMER_STATS(+32) 正好把 sizeof(struct device)
+          # 重新顶回 792，class/groups/release 回到 752/760/768 ⇒ **device.h 的
+          # 8 字节占位补丁可以整个删掉**（见下面 "ABI 补丁已删除" 那一段）。
+          ./scripts/config --disable GENERIC_MSI_IRQ --disable GENERIC_MSI_IRQ_DOMAIN || true
           # ⚠️ NUMA 必须显式关掉（原来这里写的是 --enable NUMA，那是个**静默 no-op**：
           #    arm64 4.4 的 `config NUMA` 依赖 OF_NUMA，enable 了也不会生效，
           #    于是"按 Kconfig 逐项折算凑出 class=752"的错觉正是被它骗出来的）。
@@ -269,7 +352,7 @@ jobs:
           # 任何一项与设备不一致 ⇒ 占位点跟着偏 ⇒ class/groups/release 全错 ⇒ 绑 UDC 当场 oops
           # （设备 panic_on_oops=1，没有"试试看"的余地）
           die=0
-          for c in PINCTRL GENERIC_MSI_IRQ GENERIC_MSI_IRQ_DOMAIN IOMMU_API; do
+          for c in PINCTRL IOMMU_API; do
             if grep -q "^CONFIG_${c}=y" .config; then
               echo "  ✅ CONFIG_${c}=y"
             else
@@ -277,12 +360,14 @@ jobs:
               die=1
             fi
           done
-          # 必须为 n 的两个成员（注意判据不是同一组符号）：
+          # 必须为 n 的成员（注意判据不是同一组符号）：
           #   struct device 里的 `struct cma *cma_area` 由 CONFIG_DMA_CMA 把关，
           #     而 CONFIG_CMA 本身在这条 arm64 defconfig 上就是 y —— 与 struct device 无关，
           #     不要去关它（关了会连带拆掉 DMA_CMA 依赖，反而看不出差别）。
           #   `int numa_node` 由 CONFIG_NUMA 把关。
-          for c in DMA_CMA NUMA; do
+          #   `struct list_head msi_list` / `struct irq_domain *msi_domain`
+          #     分别由 GENERIC_MSI_IRQ / GENERIC_MSI_IRQ_DOMAIN 把关（2026-10-03 修正）。
+          for c in DMA_CMA NUMA GENERIC_MSI_IRQ GENERIC_MSI_IRQ_DOMAIN; do
             if grep -q "^CONFIG_${c}=y" .config; then
               echo "  ❌ CONFIG_${c}=y —— 设备内核没有该成员，会让 struct device 在 of_node 之前整体错位"
               die=1
@@ -291,7 +376,17 @@ jobs:
             fi
           done
           [ "$die" = 0 ] || exit 1
-          echo "✅ struct device 相关 Kconfig 已按设备实测目标（of_node=648 + 占位 8 = 656 / class=752）设置"
+          echo "✅ struct device 相关 Kconfig 已按设备实测目标（of_node=656 / class=752 / groups=760 / release=768）设置"
+          # 第七处 ABI（TIMER_STATS）—— 它同时影响 struct device（经 dev_pm_info）
+          # 与 struct snd_pcm_substream（经 pm_qos_request），两处都必须为 y。
+          if grep -q "^CONFIG_TIMER_STATS=y" .config; then
+            echo "  ✅ CONFIG_TIMER_STATS=y"
+          else
+            echo "  ❌ CONFIG_TIMER_STATS 不是 y —— struct timer_list 少 32 字节："
+            echo "     · offsetof(snd_pcm_substream, runtime) 会算成 280（内核是 312）⇒ aplay 必 oops"
+            echo "     · sizeof(struct device) 会算成 760 ⇒ 绑 UDC 必 oops"
+            exit 1
+          fi
           # ★★★ 第六处 ABI：struct snd_pcm 里 private_data 的偏移 ★★★
           #
           # 背景（详版见前面 `--enable SOUND` 那一段的注释）：我们原来漏了
@@ -440,71 +535,57 @@ jobs:
           PYPATCH_UAC2FI
           grep -n 'set_inst_name\|free_func_inst\|__penmods_abi_pad' include/linux/usb/composite.h
 
-          # ★★★ 第六处 ABI 复刻：struct device 比上游 arm64 4.4 多 8 字节 ★★★
+          # ★★★ 第五处 ABI：struct device 的成员偏移（占位补丁已于 2026-10-03 删除）★★★
           #
-          # 实测依据 —— 设备内核 device_add() 自己的机器码（x19 = dev）：
+          # 目标值 —— 设备内核 device_add() 自己的机器码（x19 = dev）：
           #     [x19,#88]  = dev->type       —— 一致 ✅
-          #     [x19,#752] = dev->class      —— 我们 744 ⇒ +8
-          #     [x19,#760] = dev->groups     —— 我们 752 ⇒ +8
-          #     [x19,#768] = dev->release    —— 我们 760 ⇒ +8
-          # 即内核 struct device 整体比上游 4.4 arm64 多 8 字节，且差异发生在
-          # `of_node`（我们 648 / 内核 656）**之前**。
+          #     [x19,#752] = dev->class
+          #     [x19,#760] = dev->groups
+          #     [x19,#768] = dev->release
+          # 这三条是**真机实测**，是我们唯一可以当锚点的硬数字（下面 CI 里已加断言）。
           #
-          # 已经逐项排除过的嫌疑（写在这里，避免下次再走一遍）：
-          #   * device.h 里那 5 个 #ifdef 成员（GENERIC_MSI_IRQ_DOMAIN / PINCTRL /
-          #     GENERIC_MSI_IRQ / NUMA / DMA_CMA）全部对齐后，仍然差 8：
-          #     因为 PINCTRL(+8) 与 DMA_CMA(-8) 恰好互相抵消。
+          # 历史轨迹（三轮，写在这里避免下次再走一遍）：
+          #   * 第一轮：按 /proc/kallsyms 反推，把 DMA_CMA / NUMA / MSI 全关
+          #     —— **方向反了**（未开 KALLSYMS_ALL 时 kallsyms 只列函数，数据符号
+          #     缺失是假阴性，不能当"该功能没编进内核"的证据），上机后 class 从 744 掉到 712。
+          #   * 第二轮：把 PINCTRL(+8) 与 DMA_CMA(-8) 放开后**仍然**差 8，
+          #     于是误判成"一个拿不到的厂商私有改动"，在 of_node 前补了 8 字节占位。
+          #     —— 那是**两处错误相抵剩下的零头**，本轮已查清真因（见下）。
+          #   * 第三轮（现行）：真因 = 我们多开 MSI +24、设备多开 TIMER_STATS −32，
+          #     净差 −8。MSI 已改为 --disable、TIMER_STATS 已打开，占位补丁整个删除。
+          #     详见上面「必须打开 CONFIG_TIMER_STATS」与「MSI 必须关」两段注释。
+          #
+          # 已用设备实测固定下来的成员（不要再动）：
           #   * CONFIG_NUMA  —— /sys/devices/system/node 不存在 ⇒ n
           #   * CONFIG_CMA/DMA_CMA —— /proc/kallsyms 里没有 cma_alloc ⇒ n
-          #   * CONFIG_IOMMU_API —— /sys/class/iommu 存在 ⇒ y（archdata=24，已对齐）
-          #   * 厂商头文件：Rockchip develop-4.4 的 arch/arm64/asm/device.h 与
-          #     include/linux/pm.h（dev_pm_info）与上游逐字相同
-          #   ⇒ 多出来的 8 字节来自一个我们拿不到的厂商私有改动。
+          #   * CONFIG_IOMMU_API —— /sys/class/iommu 存在 ⇒ y
+          #   * CONFIG_PINCTRL   —— pinctrl_register / devm_pinctrl_get 都在 ⇒ y
+          #   * CONFIG_GENERIC_MSI_IRQ / _DOMAIN —— /sys/devices/platform/*/msi_irqs
+          #     count = 0、/sys/bus/pci 不存在 ⇒ n
           #
-          # 与其继续「猜它藏在哪」，直接在 `of_node` 之前补 8 字节占位：
-          # **补丁点必然 >= 真实差异点**，于是内核在本设备上访问的每一个
-          # offset（type/kobj/bus/driver_data/of_node/class/groups/release…）
-          # 都会落回正确位置，与差异究竟来自 dev_archdata 还是 dev_pm_info 无关。
+          # 不修好的后果（真机 oops，已复现一次，panic_on_oops=1 ⇒ 当场重启）：
+          # f_uac2 按我们的偏移写 dev.release（错位时是 760），而那正是内核的
+          # groups，device_add() 于是把这个函数指针当 attribute_group 数组遍历 ⇒ 崩。
+          # ★★★ 2026-10-03 – 占位补丁已**整个删除** ★★★
           #
-          # 为什么这样补是安全的：内核只会按「它自己的偏移」读写这个对象，
-          # 双方唯一会打架的是**我们主动写进去的字段**。4.4 的 f_uac2 只写
-          # dev.release 这一处 ⇒ 补 8 字节后它也落在内核的 768 上。
+          # 这一版**故意不再往 device.h 里插任何东西**。理由见上面两段配置注释：
+          # 那个"厂商私有的 +8 字节"并不存在，它是
+          #     我们多开 GENERIC_MSI_IRQ/_DOMAIN (+24)  与
+          #     设备多开 CONFIG_TIMER_STATS (−32，经 dev_pm_info 里的 timer_list)
+          # 相抵剩下的 −8；把 MSI 关掉、把 TIMER_STATS 打开之后，
+          #     sizeof(struct device)  = 792（与内核一致）
+          #     dev->type=88 / class=752 / groups=760 / release=768（与内核机器码一致）
+          # 全部由**配置**自然得到，不再需要任何占位。
           #
-          # 不补的后果（真机 oops，已复现一次，panic_on_oops=1 ⇒ 当场重启）：
-          # f_uac2 按我们的偏移把 release 写在 760，而那正是内核的 groups，
-          # device_add() 于是把这个函数指针当 attribute_group 数组遍历 ⇒ 崩。
-          python3 - <<'PYPATCH_DEV'
-          import io, sys, re
-          p = 'include/linux/device.h'
-          s = io.open(p, encoding='utf-8').read()
-          pat = re.compile(r'^([ \t]*)struct device_node[ \t]*\*of_node;', re.M)
-          hits = pat.findall(s)
-          print('struct device.of_node 锚点命中数 =', len(hits))
-          if len(hits) != 1:
-              sys.exit('❌ 锚点不是恰好 1 处，终止（不允许静默产出错布局的 .ko）')
-          pad = (
-              "\t/*\n"
-              "\t * [PenMods ABI 复刻] 设备内核（ydp02x 4.4.159）的 struct device\n"
-              "\t * 比上游 arm64 4.4 多 8 字节。实测（内核 device_add 自己的机器码，\n"
-              "\t * x19 = dev）：type=88 一致，class=752 / groups=760 / release=768，\n"
-              "\t * 而上游布局依次是 744 / 752 / 760 ⇒ 整体 +8，且差异发生在\n"
-              "\t * of_node（上游 648）之前。\n"
-              "\t *\n"
-              "\t * 不猜厂商多出来的是哪个字段（那 5 个 #ifdef 成员、NUMA、\n"
-              "\t * DMA_CMA、IOMMU 都已排除），只在此处补 8 字节占位：补丁点必然\n"
-              "\t * >= 真实差异点，因此内核访问的每一个偏移都会落回正确位置。\n"
-              "\t *\n"
-              "\t * 不补的后果（真机 oops）：f_uac2 写 dev.release（我们算出的 760）\n"
-              "\t * 恰好落在内核的 groups 上，device_add() 把这个函数指针当\n"
-              "\t * attribute_group 数组遍历 ⇒ panic_on_oops=1 ⇒ 设备当场重启。\n"
-              "\t */\n"
-              "\tvoid *__penmods_dev_abi_pad;\n"
-          )
-          s = pat.sub(lambda m: pad + m.group(0), s, count=1)
-          io.open(p, 'w', encoding='utf-8', newline='').write(s)
-          print('device.h ABI 补丁已应用（+8 字节占位，位于 of_node 之前）')
-          PYPATCH_DEV
-          grep -n '__penmods_dev_abi_pad' include/linux/device.h
+          # ⚠️ 这一步是"减代码"，但**没有任何安全垫被减掉**：原来真正兜底的是
+          #    CI 里的尺寸指纹断言（sizeof(struct device)=792 等）和真机上的
+          #    abiprobe 机器码对账，这两道现在都在，而且这一版还新增了
+          #    offsetof(device,class/groups/release) 三条硬断言。
+          #
+          # 删掉它还有一个好处：占位是"补丁点 >= 真实差异点"的糊法，它只保证
+          # `of_node` **之后**的偏移对得上，dev_pm_info **内部**仍然是错的
+          # （内核写 dev->power.usage_count 等会落在我们以为的别的字段上）。
+          # 现在 TIMER_STATS 一开，dev_pm_info 的内部布局也逐字节对上了。
 
           # ★★★ 关于 struct module 的 init/exit 偏移 ★★★
           #
@@ -966,7 +1047,7 @@ jobs:
           echo "  sizeof(struct device)                = $(get_sz penmods_sz_device)  （期望 792）"
           echo "  sizeof(struct snd_pcm_str)           = $(get_sz penmods_sz_snd_pcm_str)  （期望 848 = 56 + 792）"
           echo "  sizeof(struct snd_pcm)               = $(get_sz penmods_sz_snd_pcm)  （期望 2008）"
-          echo "  sizeof(struct snd_pcm_substream)     = $(get_sz penmods_sz_snd_pcm_substream)  （期望 552）"
+          echo "  sizeof(struct snd_pcm_substream)     = $(get_sz penmods_sz_snd_pcm_substream)  （期望 584）"
           echo "  offsetof(snd_pcm, streams)           = $(get_sz penmods_off_snd_pcm_streams)  （期望 184）"
           echo "  offsetof(snd_pcm, open_mutex)        = $(get_sz penmods_off_snd_pcm_open_mutex)  （期望 1880）"
           echo "  offsetof(snd_pcm, open_wait)         = $(get_sz penmods_off_snd_pcm_open_wait)  （期望 1944）"
@@ -974,6 +1055,24 @@ jobs:
           echo "  offsetof(snd_pcm, private_free)      = $(get_sz penmods_off_snd_pcm_private_free)  （期望 1992）"
           echo "  offsetof(snd_pcm_str, proc_root)     = $(get_sz penmods_off_snd_pcm_str_proc_root)  （期望 32）"
           echo "  offsetof(snd_pcm_substream, private_data) = $(get_sz penmods_off_snd_pcm_substream_private_data)  （期望 16）"
+          echo "=========== 第七处 ABI：CONFIG_TIMER_STATS 链（2026-10-03 第二次 oops）==========="
+          echo "  sizeof(struct timer_list)            = $(get_sz penmods_sz_timer_list)  （期望 80 = 48 + TIMER_STATS 的 32）"
+          echo "  sizeof(struct delayed_work)          = $(get_sz penmods_sz_delayed_work)  （期望 128）"
+          echo "  sizeof(struct work_struct)           = $(get_sz penmods_sz_work_struct)  （期望 32，LOCKDEP 必须为 n）"
+          echo "  sizeof(struct pm_qos_request)        = $(get_sz penmods_sz_pm_qos_request)  （期望 176 = 40 + 8 + 128）"
+          echo "  sizeof(struct dev_pm_info)           = $(get_sz penmods_sz_dev_pm_info)  （仅供参考）"
+          echo "  offsetof(snd_pcm_substream, runtime) = $(get_sz penmods_off_snd_pcm_substream_runtime)  （期望 312）★★ oops 的字段"
+          echo "  offsetof(snd_pcm_substream, latency_pm_qos_req) = $(get_sz penmods_off_snd_pcm_substream_latency_pm_qos_req)  （期望 64）"
+          echo "  offsetof(snd_pcm_substream, dma_buffer)  = $(get_sz penmods_off_snd_pcm_substream_dma_buffer)  （期望 248）"
+          echo "  offsetof(snd_pcm_substream, ops)     = $(get_sz penmods_off_snd_pcm_substream_ops)  （期望 304）"
+          echo "  offsetof(snd_pcm_substream, pid)     = $(get_sz penmods_off_snd_pcm_substream_pid)  （期望 512）"
+          echo "  offsetof(snd_pcm_substream, proc_root) = $(get_sz penmods_off_snd_pcm_substream_proc_root)  （期望 520）"
+          echo "  offsetof(dev_pm_info, suspend_timer) = $(get_sz penmods_off_dev_pm_info_suspend_timer)  （dev_pm_info 内部）"
+          echo "=========== 第五处 ABI：struct device 的四个锚点（设备 device_add 机器码实测）==========="
+          echo "  offsetof(device, type)               = $(get_sz penmods_off_device_type)  （期望 88）"
+          echo "  offsetof(device, class)              = $(get_sz penmods_off_device_class)  （期望 752）★"
+          echo "  offsetof(device, groups)             = $(get_sz penmods_off_device_groups)  （期望 760）★"
+          echo "  offsetof(device, release)            = $(get_sz penmods_off_device_release)  （期望 768）★"
           die=0
           _ck() { # _ck <符号> <期望值> <说明>
             local got; got=$(get_sz "$1")
@@ -994,5 +1093,21 @@ jobs:
           _ck penmods_off_snd_pcm_private_data     1984  "offsetof(snd_pcm, private_data)  ★ oops 的字段"
           _ck penmods_off_snd_pcm_private_free     1992  "offsetof(snd_pcm, private_free)"
           _ck penmods_off_snd_pcm_substream_private_data 16 "offsetof(snd_pcm_substream, private_data)"
+          # ── 第七处 ABI（CONFIG_TIMER_STATS）──
+          #    前三条任意一条不对 ⇒ --enable TIMER_STATS 没生效（olddefconfig 静默撤销）
+          #    后两条不对       ⇒ snd_pcm_substream 布局与设备内核不一致 ⇒ aplay 必 oops
+          _ck penmods_sz_timer_list                  80  "sizeof(struct timer_list)（TIMER_STATS=y ⇒ 48+32）"
+          _ck penmods_sz_delayed_work               128  "sizeof(struct delayed_work)"
+          _ck penmods_sz_pm_qos_request             176  "sizeof(struct pm_qos_request)"
+          _ck penmods_off_snd_pcm_substream_latency_pm_qos_req 64 "offsetof(snd_pcm_substream, latency_pm_qos_req)"
+          _ck penmods_off_snd_pcm_substream_runtime  312  "offsetof(snd_pcm_substream, runtime)  ★★ 第二次 oops 的字段"
+          _ck penmods_sz_snd_pcm_substream          584  "sizeof(struct snd_pcm_substream)（runtime@312 + 尾部）"
+          # ── 第五处 ABI（struct device 的四个锚点，device_add 机器码实测值）──
+          #    这四条同时守住两件事：TIMER_STATS=y(+32) 与 MSI=n(−24) 必须**成对**，
+          #    以及"占位补丁已删"之后没有回退。
+          _ck penmods_off_device_type                88  "offsetof(device, type)"
+          _ck penmods_off_device_class              752  "offsetof(device, class)  ★ 设备 device_add 机器码实测"
+          _ck penmods_off_device_groups             760  "offsetof(device, groups)  ★ 同上"
+          _ck penmods_off_device_release            768  "offsetof(device, release)  ★ 同上"
           [ "$die" = 0 ] || exit 1
-          echo "  ✅ struct snd_pcm 布局与设备内核一致（private_data @1984）—— 可以安全绑 UDC"
+          echo "  ✅ 三处 ABI 全部与设备内核一致（snd_pcm.private_data @1984 / snd_pcm_substream.runtime @312 / device.class @752）—— 可以安全绑 UDC"

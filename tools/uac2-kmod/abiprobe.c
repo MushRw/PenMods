@@ -31,6 +31,10 @@
 #include <linux/usb/composite.h>
 #include <linux/device.h>
 #include <linux/platform_device.h>	/* sizeof(struct platform_device) 需要完整类型 */
+#include <linux/timer.h>		/* struct timer_list（CONFIG_TIMER_STATS 会 +32） */
+#include <linux/workqueue.h>		/* struct delayed_work / work_struct */
+#include <linux/pm.h>			/* struct dev_pm_info（内含 timer_list suspend_timer） */
+#include <linux/pm_qos.h>		/* struct pm_qos_request（内嵌在 snd_pcm_substream 里） */
 #include <sound/core.h>			/* struct snd_pcm 布局（2026-10-03 aplay oops） */
 #include <sound/pcm.h>
 
@@ -627,8 +631,218 @@ static void abiprobe_check_snd_pcm(void)
 	}
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * ★★★ 第七处 ABI：CONFIG_TIMER_STATS —— 2026-10-03 第二次真机 oops 的字段 ★★★
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ * 要测的量：**内核自己**认为的 offsetof(struct snd_pcm_substream, runtime)。
+ *
+ * 为什么这一个偏移特别难、也特别关键：它是一条**穿过三层嵌套**的偏移
+ *     struct timer_list  ──(+32 if CONFIG_TIMER_STATS)──▶  struct delayed_work
+ *                        ─────────────────────────────▶  struct pm_qos_request
+ *                        ─────────────────────────────▶  struct snd_pcm_substream
+ * 而 pm_qos_request 就嵌在 snd_pcm_substream 的 `latency_pm_qos_req`（@64）上，
+ * runtime 紧跟在它后面（+ buffer_bytes_max + dma_buffer + dma_max + ops）。
+ * 所以 timer_list 少算 32 字节 ⇒ runtime 就算成 280（内核是 312）。
+ *
+ * 后果：内核在 pcm.c:993 按**它的**偏移写 substream->runtime，
+ * 我们在 f_uac2.c:364 按**我们的**偏移读 ⇒ 读到 kzalloc 出来的 0
+ * ⇒ uac2_pcm_open+0x40 的 `stp x4,x5,[x21,#0x180]`（runtime->hw）解引用 NULL
+ * ⇒ 真机 oops（fault 地址正好 0x180，PC 偏移正好 +0x40，两者都已逐字节复现）。
+ *
+ * ── 手法（沿用本项目已验证的"读内核机器码"）──────────────────────────────
+ * 1) 先定位 substream 的基址寄存器：找 `str xN, [xM, #16]`。它对应 pcm.c:994
+ *        substream->private_data = pcm->private_data;
+ *    （上一轮实测：该指令在 +0x1e8/+0x1ec，x20 = substream、x19 = pcm）
+ * 2) **关键技巧 —— 用源码顺序定位 runtime，而不是碰运气撞偏移**：
+ *        pcm.c 里这两句是**紧挨着**的，且 runtime 在前：
+ *            993:  substream->runtime      = runtime;              ← 64-bit str
+ *            994:  substream->private_data = pcm->private_data;    ← 上面那条 #16
+ *        而 995/996 是 32-bit 字段（`int ref_count` / `unsigned int f_flags`），
+ *        它们编出来是 `str wN, ...`（0xB9000000 家族），**不是** 64-bit str；
+ *        997（`substream->pid = get_pid(...)`）在 994 **之后**。
+ *        ⇒ 「i_pd 之前最后一条 `str xN, [Rsub, #imm]`」的 imm 就是 runtime，
+ *          这是**唯一解**，不依赖"猜哪个 imm 看起来像"。
+ * 3) 再加一份**互相独立**的旁证：snd_pcm_detach_substream 里 pcm.c:1018
+ *        substream->runtime = NULL;
+ *    那是 `str xzr, [xM, #imm]`（Rt = 31），imm 必须与 ② 得到的一致。
+ *
+ * 全程只读内核 .text，不写、不注册、不碰 USB/UDC/ALSA ⇒ 可以在**绑 UDC 之前**
+ * 放心 insmod（设备 panic_on_oops=1，这一步就是最后一道闸门）。
+ */
+#define ABIPROBE_SUBSCAN        180	/* snd_pcm_attach_substream 长 0x294=660B */
+#define ABIPROBE_IMM_LO         200	/* 只看 runtime 量级的 store，避开 @0/@8/@16… */
+#define ABIPROBE_IMM_HI         800
+
+static void abiprobe_check_snd_pcm_substream(void)
+{
+	const u32 *p;
+	unsigned long addr;
+	int i, rsub = -1, i_pd = -1;
+	int k_rt = -1;			/* ② 按源码顺序推出的 runtime */
+	int k_rt2 = -1;			/* ③ detach 里 str xzr 推出的 runtime（旁证） */
+	int ours = (int)offsetof(struct snd_pcm_substream, runtime);
+
+	pr_info("penmods-abiprobe: ====== struct snd_pcm_substream 布局探测（第七处 ABI）======\n");
+	pr_info("penmods-abiprobe: [sub] ours: sizeof(snd_pcm_substream)=%d sizeof(snd_pcm_runtime)=%d\n",
+		(int)sizeof(struct snd_pcm_substream), (int)sizeof(struct snd_pcm_runtime));
+	pr_info("penmods-abiprobe: [sub] ours: pcm=%d pstr=%d private_data=%d latency_pm_qos_req=%d number=%d\n",
+		(int)offsetof(struct snd_pcm_substream, pcm),
+		(int)offsetof(struct snd_pcm_substream, pstr),
+		(int)offsetof(struct snd_pcm_substream, private_data),
+		(int)offsetof(struct snd_pcm_substream, latency_pm_qos_req),
+		(int)offsetof(struct snd_pcm_substream, number));
+	pr_info("penmods-abiprobe: [sub] ours: buffer_bytes_max=%d dma_buffer=%d dma_max=%d ops=%d\n",
+		(int)offsetof(struct snd_pcm_substream, buffer_bytes_max),
+		(int)offsetof(struct snd_pcm_substream, dma_buffer),
+		(int)offsetof(struct snd_pcm_substream, dma_max),
+		(int)offsetof(struct snd_pcm_substream, ops));
+	pr_info("penmods-abiprobe: [sub] ours: ★runtime=%d timer=%d next=%d link_list=%d\n",
+		ours,
+		(int)offsetof(struct snd_pcm_substream, timer),
+		(int)offsetof(struct snd_pcm_substream, next),
+		(int)offsetof(struct snd_pcm_substream, link_list));
+	pr_info("penmods-abiprobe: [sub] ours: ref_count=%d file=%d pid=%d proc_root=%d\n",
+		(int)offsetof(struct snd_pcm_substream, ref_count),
+		(int)offsetof(struct snd_pcm_substream, file),
+		(int)offsetof(struct snd_pcm_substream, pid),
+		(int)offsetof(struct snd_pcm_substream, proc_root));
+	pr_info("penmods-abiprobe: [sub] ours: sizeof(timer_list)=%d sizeof(delayed_work)=%d "
+		"sizeof(work_struct)=%d sizeof(pm_qos_request)=%d\n",
+		(int)sizeof(struct timer_list), (int)sizeof(struct delayed_work),
+		(int)sizeof(struct work_struct), (int)sizeof(struct pm_qos_request));
+#ifdef CONFIG_PM
+	pr_info("penmods-abiprobe: [sub] ours: sizeof(dev_pm_info)=%d sizeof(device)=%d "
+		"offsetof(dev_pm_info,suspend_timer)=%d\n",
+		(int)sizeof(struct dev_pm_info), (int)sizeof(struct device),
+		(int)offsetof(struct dev_pm_info, suspend_timer));
+#else
+	pr_info("penmods-abiprobe: [sub] ours: sizeof(dev_pm_info)=%d sizeof(device)=%d （CONFIG_PM=n）\n",
+		(int)sizeof(struct dev_pm_info), (int)sizeof(struct device));
+#endif
+
+	if (!kallsyms_lookup_name) {
+		pr_info("penmods-abiprobe: [sub] kallsyms_lookup_name 不可用，跳过\n");
+		return;
+	}
+
+	/* ① 定位 substream 基址寄存器 */
+	addr = kallsyms_lookup_name("snd_pcm_attach_substream");
+	if (!addr) {
+		pr_info("penmods-abiprobe: [sub] 找不到 snd_pcm_attach_substream\n");
+		return;
+	}
+	p = (const u32 *)addr;
+	pr_info("penmods-abiprobe: [sub] snd_pcm_attach_substream @ 0x%lx —— 扫 %d 条指令\n",
+		addr, ABIPROBE_SUBSCAN);
+
+	for (i = 0; i < ABIPROBE_SUBSCAN; i++) {
+		u32 w = p[i];
+
+		if ((w & 0xFFC00000) != 0xF9000000)	/* 只要 str xN,[xM,#imm] */
+			continue;
+		if (((w >> 10) & 0xFFF) * 8 != 16)	/* imm 恒为 16（private_data） */
+			continue;
+		rsub = (int)((w >> 5) & 0x1F);
+		i_pd = i;
+		break;
+	}
+	if (rsub < 0) {
+		pr_info("penmods-abiprobe: [sub] 没找到 private_data(@16) 的写入，无法定位 substream 寄存器\n");
+		return;
+	}
+	pr_info("penmods-abiprobe: [sub] substream 寄存器 = x%d"
+		"（由 +0x%03x 的 `str ..., [x%d, #16]` 推出 = pcm.c:994）\n",
+		rsub, i_pd * 4, rsub);
+
+	/* ② 取 i_pd 之前最后一条 `str xN, [Rsub, #imm]` ⇒ 那就是 pcm.c:993 的 runtime */
+	for (i = i_pd - 1; i >= 0; i--) {
+		u32 w = p[i];
+		unsigned imm;
+
+		if ((w & 0xFFC00000) != 0xF9000000)
+			continue;
+		if ((int)((w >> 5) & 0x1F) != rsub)
+			continue;
+		imm = ((w >> 10) & 0xFFF) * 8;
+		if (imm < ABIPROBE_IMM_LO || imm > ABIPROBE_IMM_HI)
+			continue;
+		k_rt = (int)imm;
+		pr_info("penmods-abiprobe: [sub] ★ 内核 runtime = %d"
+			"（+0x%03x: str x%u, [x%d, #%u]，紧邻 private_data 之前）\n",
+			k_rt, i * 4, w & 0x1F, rsub, imm);
+		break;
+	}
+
+	/* 另外把该函数里所有以 substream 为基址、imm 在 runtime 量级的 store 都列出来，
+	 * 便于在手法 ② 失效时人工判断（正常情况下会有 4~6 条：runtime/timer/next/...）。 */
+	pr_info("penmods-abiprobe: [sub] 该函数里以 x%d 为基址的 64-bit store（imm %d~%d）：\n",
+		rsub, ABIPROBE_IMM_LO, ABIPROBE_IMM_HI);
+	for (i = 0; i < ABIPROBE_SUBSCAN; i++) {
+		u32 w = p[i];
+		unsigned imm;
+
+		if ((w & 0xFFC00000) != 0xF9000000)
+			continue;
+		if ((int)((w >> 5) & 0x1F) != rsub)
+			continue;
+		imm = ((w >> 10) & 0xFFF) * 8;
+		if (imm < ABIPROBE_IMM_LO || imm > ABIPROBE_IMM_HI)
+			continue;
+		pr_info("penmods-abiprobe: [sub]   +0x%03x: str x%u, [x%d, #%u]%s\n",
+			i * 4, w & 0x1F, rsub, imm,
+			(imm == (unsigned)ours) ? "   ← ★ 与 ours 的 runtime 一致" : "");
+	}
+
+	/* ③ 独立旁证：snd_pcm_detach_substream 里 `substream->runtime = NULL;`
+	 *    （pcm.c:1018）—— 一条 `str xzr, [xM, #imm]`（Rt = 31）。 */
+	addr = kallsyms_lookup_name("snd_pcm_detach_substream");
+	if (addr) {
+		p = (const u32 *)addr;
+		pr_info("penmods-abiprobe: [sub] snd_pcm_detach_substream @ 0x%lx"
+			" —— 找 `str xzr, [xM, #imm]`（= runtime 置 NULL）\n", addr);
+		for (i = 0; i < ABIPROBE_SUBSCAN; i++) {
+			u32 w = p[i];
+			unsigned imm;
+
+			if ((w & 0xFFC00000) != 0xF9000000)
+				continue;
+			if ((w & 0x1F) != 0x1F)		/* Rt = 31 = xzr */
+				continue;
+			imm = ((w >> 10) & 0xFFF) * 8;
+			if (imm < ABIPROBE_IMM_LO || imm > ABIPROBE_IMM_HI)
+				continue;
+			if (k_rt2 < 0)
+				k_rt2 = (int)imm;
+			pr_info("penmods-abiprobe: [sub]   +0x%03x: str xzr, [x%u, #%u]%s\n",
+				i * 4, (w >> 5) & 0x1F, imm,
+				(imm == (unsigned)ours) ? "   ← ★ 与 ours 的 runtime 一致" : "");
+		}
+	} else {
+		pr_info("penmods-abiprobe: [sub] 找不到 snd_pcm_detach_substream，跳过旁证\n");
+	}
+
+	/* ── 结论 ── */
+	if (k_rt < 0) {
+		pr_info("penmods-abiprobe: [sub] ⚠️ 没能从源码顺序推出 runtime（手法失效）"
+			"—— 请人工看上面的 store 列表，**不要绑 UDC**\n");
+	} else if (k_rt == ours) {
+		pr_info("penmods-abiprobe: [sub] ✅ 内核 runtime = %d = ours ⇒ 一致\n", k_rt);
+		if (k_rt2 > 0)
+			pr_info("penmods-abiprobe: [sub] ✅ 旁证（detach 的 str xzr）= %d，两处自洽 ⇒ "
+				"**可以安全绑 UDC**\n", k_rt2);
+		else
+			pr_info("penmods-abiprobe: [sub] ✅ 旁证未取到（不影响主线结论）⇒ 可以安全绑 UDC\n");
+	} else {
+		pr_info("penmods-abiprobe: [sub] ❌ **不一致**！内核 runtime = %d，ours = %d"
+			"（差 %d 字节）—— 绝对不要绑 UDC，会和 2026-10-03 一样 aplay oops\n",
+			k_rt, ours, k_rt - ours);
+	}
+}
+
 static void abiprobe_ours(void)
-{	pr_info("penmods-abiprobe: ================= 我们编译时的偏移 (ours) =================\n");
+{
+	pr_info("penmods-abiprobe: ================= 我们编译时的偏移 (ours) =================\n");
 	pr_info("penmods-abiprobe: ours: CONFIGFS_ITEM_NAME_LEN = %d\n",
 		(int)CONFIGFS_ITEM_NAME_LEN);
 	pr_info("penmods-abiprobe: ours: sizeof(config_item)=%d sizeof(config_group)=%d\n",
@@ -681,6 +895,21 @@ static int __init abiprobe_init(void)
 	BUILD_BUG_ON(offsetof(struct usb_function_instance, set_inst_name) != 136);
 	BUILD_BUG_ON(offsetof(struct usb_function_instance, free_func_inst) != 152);
 
+	/* ★ 第七处 ABI（CONFIG_TIMER_STATS）—— 与 sizeprobe 的 #error 门禁互为双保险。
+	 * 这三个数字任意一个不对，说明 --enable TIMER_STATS 没生效，
+	 * 绑 UDC 之后 aplay 一定会 oops（详见 abiprobe_check_snd_pcm_substream 的注释）。 */
+	BUILD_BUG_ON(sizeof(struct timer_list) != 80);
+	BUILD_BUG_ON(sizeof(struct pm_qos_request) != 176);
+	BUILD_BUG_ON(offsetof(struct snd_pcm_substream, runtime) != 312);
+	/* 同时保证 MSI 是关的（设备 /sys/devices/platform/*/msi_irqs count = 0）；
+	 * 开着的话 struct device 会多 24 字节，class/groups/release 全错。 */
+#ifdef CONFIG_GENERIC_MSI_IRQ
+#error "CONFIG_GENERIC_MSI_IRQ 必须为 n —— 否则 struct device 多 16 字节"
+#endif
+#ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
+#error "CONFIG_GENERIC_MSI_IRQ_DOMAIN 必须为 n —— 否则 struct device 多 8 字节"
+#endif
+
 	abiprobe_ours();
 
 	/* ★ 运行时再验一次：直接解码**内核自己**的 usb_put_function_instance 机器码，
@@ -700,6 +929,13 @@ static int __init abiprobe_init(void)
 	 *   ⚠️ 这一项**必须在绑 UDC 之前跑通过**才能继续 —— 设备 panic_on_oops=1，
 	 *   偏移错了不是"加载失败"，而是当场 oops + 重启。 */
 	abiprobe_check_snd_pcm();
+
+	/* ★ 探 struct snd_pcm_substream 的 runtime 偏移 —— 2026-10-03 12:16
+	 *   `aplay -D hw:1,0` 时崩在 uac2_pcm_open+0x40（runtime = NULL ⇒ 写 0x180）。
+	 *   根因是 CONFIG_TIMER_STATS 没开 ⇒ struct timer_list 少 32 字节 ⇒
+	 *   pm_qos_request 少 32 ⇒ offsetof(runtime) 算成 280（内核 312）。
+	 *   ⚠️ 同样**必须在绑 UDC 之前**跑通过为止。 */
+	abiprobe_check_snd_pcm_substream();
 
 	buf = kzalloc(ABIPROBE_BUFSZ, GFP_KERNEL);
 	if (!buf)
