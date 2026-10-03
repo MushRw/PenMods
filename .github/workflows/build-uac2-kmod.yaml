@@ -138,6 +138,7 @@ jobs:
           ./scripts/config \
             --enable SOUND --enable SND --enable SND_PCM --enable SND_PCM_ELD \
             --disable SND_PCM_OSS --disable SND_SEQUENCER_OSS \
+            --disable SND_DEBUG --disable SND_PCM_XRUN_DEBUG \
             --enable USB_GADGET --enable USB_LIBCOMPOSITE \
             --enable USB_CONFIGFS --enable USB_CONFIGFS_F_UAC2 || true
           # ⚠️ 必须关掉 PREEMPT：上游 arm64 defconfig 开着 CONFIG_PREEMPT，编出来的
@@ -319,9 +320,9 @@ jobs:
               die=1
             fi
           done
-          for c in SND_PCM_OSS SND_SEQUENCER_OSS; do
+          for c in SND_PCM_OSS SND_SEQUENCER_OSS SND_PCM_XRUN_DEBUG SND_DEBUG; do
             if grep -q "^CONFIG_${c}=y" .config; then
-              echo "  ❌ CONFIG_${c}=y —— 设备内核没有 OSS，struct snd_pcm_str 会多一段"
+              echo "  ❌ CONFIG_${c}=y —— 设备内核没有该功能，struct snd_pcm_str 会多一段"
               die=1
             else
               echo "  ✅ CONFIG_${c} 已关闭"
@@ -923,28 +924,54 @@ jobs:
           # panic_on_oops=1，没有"试试看"的余地），而 `alsa_uac2_init()` 里的
           # `pcm->private_data = uac2` 是一次**对内核结构体的写**。偏移错了不是
           # "加载失败"，而是**当场写坏内核结构体**（上次就是 aplay 时 oops + 重启）。
-          # 期望值推导（布局明细见 sizeprobe.c 顶部注释）：
-          #   id[64] 到 36、name[80] 到 180、padding 到 184
-          #   streams[2] = 2 × sizeof(snd_pcm_str)
-          #     sizeof(snd_pcm_str) = 32(不变量) + 2×8(VERBOSE_PROCFS 的两个指针) = 48
-          #   open_mutex = sizeof(struct mutex) = 64   (DEBUG_SPINLOCK=y)
-          #   open_wait  = sizeof(wait_queue_head_t) = 24+16 = 40
-          #   ⇒ private_data = 184 + 96 + 64 + 40 = 384 = 0x180
-          # 这些数字是用「设备内核的 Kconfig 实测值」推出来的，若 CI 报出别的值，
-          # 说明我们的 .config 还没对准 —— 那就必须停下，不要上机。
+          # 期望值推导（布局明细见 sizeprobe.c 顶部注释，已逐条核对上游 v4.4 的
+          # include/sound/pcm.h 原文 —— 第一次算的时候**漏了两个无条件成员**，
+          # 把 848 算成 48，结果 CI 报 848 我还以为是布局错了）：
+          #
+          #   ★ 关键：struct snd_pcm_str 里除 OSS / PROCFS 的条件成员外，还有两个
+          #     **无条件**成员：
+          #         struct snd_kcontrol *chmap_kctl;   // 8 字节指针
+          #         struct device dev;                 // ★ 不是指针，是**内嵌的整个
+          #                                            //   struct device**（占位补丁
+          #                                            //   之后 = 792 字节）
+          #     ⇒ sizeof(snd_pcm_str) = 56 + sizeof(struct device) = 56 + 792 = 848
+          #
+          #   id[64] 到 36、name[80] 到 180、对齐 8 ⇒ streams @ 184
+          #   open_mutex   = 184 + 2×848 = 1880   (+64  = sizeof(struct mutex))
+          #   open_wait    = 1880 + 64   = 1944   (+40  = sizeof(wait_queue_head_t))
+          #   private_data = 1944 + 40   = 1984  ★ aplay oops 的那个字段
+          #
+          # ⚠️ **第五处 ABI（struct device 占位补丁）与这一处是耦合的**：
+          #    device 的大小每变 1 字节，private_data 就跟着变 2 字节
+          #    （streams[2] 里各嵌一个 dev）。所以下面也把 sizeof(struct device)
+          #    一起锁进断言 —— 否则改坏 device 时这一节会以一种很难懂的方式红。
+          #
+          # ⚠️ 还有第三层嵌套：`CONFIG_SND_PCM_XRUN_DEBUG`（`default y`，但
+          #    `depends on SND_DEBUG`，而 SND_DEBUG 没有 default ⇒ 实际为 n）
+          #    会在 PROCFS 块里再插 16 字节。已实测确认为 n。
+          #
+          # 设备侧判据（全部为真机实测）：
+          #   VERBOSE_PROCFS=y ⇒ /proc/asound/card0/pcm0p/sub0/ 里有
+          #                      hw_params / info / prealloc / prealloc_max /
+          #                      status / sw_params 这六个文件
+          #   XRUN_DEBUG=n     ⇒ 同一目录里**没有** xrun_debug
+          #   SND_PCM_OSS=n    ⇒ /proc/asound 下没有 oss 目录
+          # 这些数字全部由「设备内核的 Kconfig 实测值」推出；CI 报出别的值 = 我们的
+          # .config 还没对准 ⇒ **必须停下，不要上机**（设备 panic_on_oops=1）。
           echo "=========== 第六处 ABI：struct snd_pcm 布局 ==========="
           NP="tools/uac2-kmod/sizeprobe/sizeprobe.ko"
           nmv() { aarch64-linux-gnu-nm -S --defined-only "$NP" | awk -v n="$1" '$4==n{print $2}'; }
           get_sz() { local v; v=$(nmv "$1"); if [ -n "$v" ]; then echo $((16#$v)); else echo "MISSING"; fi; }
           echo "  sizeof(struct mutex)                 = $(get_sz penmods_sz_mutex)  （期望 64）"
-          echo "  sizeof(struct snd_pcm_str)           = $(get_sz penmods_sz_snd_pcm_str)  （期望 48）"
-          echo "  sizeof(struct snd_pcm)               = $(get_sz penmods_sz_snd_pcm)  （期望 408）"
-          echo "  sizeof(struct snd_pcm_substream)     = $(get_sz penmods_sz_snd_pcm_substream)"
+          echo "  sizeof(struct device)                = $(get_sz penmods_sz_device)  （期望 792）"
+          echo "  sizeof(struct snd_pcm_str)           = $(get_sz penmods_sz_snd_pcm_str)  （期望 848 = 56 + 792）"
+          echo "  sizeof(struct snd_pcm)               = $(get_sz penmods_sz_snd_pcm)  （期望 2008）"
+          echo "  sizeof(struct snd_pcm_substream)     = $(get_sz penmods_sz_snd_pcm_substream)  （期望 552）"
           echo "  offsetof(snd_pcm, streams)           = $(get_sz penmods_off_snd_pcm_streams)  （期望 184）"
-          echo "  offsetof(snd_pcm, open_mutex)        = $(get_sz penmods_off_snd_pcm_open_mutex)  （期望 280）"
-          echo "  offsetof(snd_pcm, open_wait)         = $(get_sz penmods_off_snd_pcm_open_wait)  （期望 344）"
-          echo "  offsetof(snd_pcm, private_data)      = $(get_sz penmods_off_snd_pcm_private_data)  （期望 384）★"
-          echo "  offsetof(snd_pcm, private_free)      = $(get_sz penmods_off_snd_pcm_private_free)  （期望 392）"
+          echo "  offsetof(snd_pcm, open_mutex)        = $(get_sz penmods_off_snd_pcm_open_mutex)  （期望 1880）"
+          echo "  offsetof(snd_pcm, open_wait)         = $(get_sz penmods_off_snd_pcm_open_wait)  （期望 1944）"
+          echo "  offsetof(snd_pcm, private_data)      = $(get_sz penmods_off_snd_pcm_private_data)  （期望 1984）★"
+          echo "  offsetof(snd_pcm, private_free)      = $(get_sz penmods_off_snd_pcm_private_free)  （期望 1992）"
           echo "  offsetof(snd_pcm_str, proc_root)     = $(get_sz penmods_off_snd_pcm_str_proc_root)  （期望 32）"
           echo "  offsetof(snd_pcm_substream, private_data) = $(get_sz penmods_off_snd_pcm_substream_private_data)  （期望 16）"
           die=0
@@ -958,11 +985,14 @@ jobs:
             fi
           }
           _ck penmods_sz_mutex                       64  "sizeof(struct mutex)"
-          _ck penmods_sz_snd_pcm_str                 48  "sizeof(struct snd_pcm_str)"
+          _ck penmods_sz_device                     792  "sizeof(struct device)（snd_pcm_str 的直接输入）"
+          _ck penmods_sz_snd_pcm_str                848  "sizeof(struct snd_pcm_str)"
+          _ck penmods_sz_snd_pcm                   2008  "sizeof(struct snd_pcm)"
           _ck penmods_off_snd_pcm_streams           184  "offsetof(snd_pcm, streams)"
-          _ck penmods_off_snd_pcm_open_mutex        280  "offsetof(snd_pcm, open_mutex)"
-          _ck penmods_off_snd_pcm_open_wait         344  "offsetof(snd_pcm, open_wait)"
-          _ck penmods_off_snd_pcm_private_data      384  "offsetof(snd_pcm, private_data)  ★ oops 的字段"
+          _ck penmods_off_snd_pcm_open_mutex       1880  "offsetof(snd_pcm, open_mutex)"
+          _ck penmods_off_snd_pcm_open_wait        1944  "offsetof(snd_pcm, open_wait)"
+          _ck penmods_off_snd_pcm_private_data     1984  "offsetof(snd_pcm, private_data)  ★ oops 的字段"
+          _ck penmods_off_snd_pcm_private_free     1992  "offsetof(snd_pcm, private_free)"
           _ck penmods_off_snd_pcm_substream_private_data 16 "offsetof(snd_pcm_substream, private_data)"
           [ "$die" = 0 ] || exit 1
-          echo "  ✅ struct snd_pcm 布局与设备内核一致（private_data @384）—— 可以安全绑 UDC"
+          echo "  ✅ struct snd_pcm 布局与设备内核一致（private_data @1984）—— 可以安全绑 UDC"

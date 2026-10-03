@@ -32,6 +32,7 @@
 #include <linux/rmap.h>
 #include <linux/wait.h>
 #include <linux/kobject.h>
+#include <linux/device.h>
 #include <linux/spinlock.h>
 #include <linux/mutex.h>
 #include <linux/rwsem.h>
@@ -69,6 +70,20 @@
 #endif
 #if IS_ENABLED(CONFIG_SND_PCM_OSS)
 #error "CONFIG_SND_PCM_OSS 必须为 n（设备 /proc/asound 下无 oss）—— 否则 struct snd_pcm_str 多一段 oss"
+#endif
+#ifdef CONFIG_SND_PCM_OSS_MODULE
+#error "CONFIG_SND_PCM_OSS_MODULE（=m 形态）也必须不定义 —— 它的判断和 y 走同一个 #if"
+#endif
+/* CONFIG_SND_PCM_XRUN_DEBUG 在 PROCFS 块内**再嵌一层**，会插 16 字节：
+ *     unsigned int xrun_debug;                // 4 (+4 对齐)
+ *     struct snd_info_entry *proc_xrun_debug_entry;  // 8
+ * 它是 `default y`，但 `depends on SND_DEBUG`，而 SND_DEBUG 没有 default ⇒
+ * 实际为 n。设备侧实测：/proc/asound/card0/pcm0p/sub0/ 下没有 xrun_debug。 */
+#if IS_ENABLED(CONFIG_SND_PCM_XRUN_DEBUG)
+#error "CONFIG_SND_PCM_XRUN_DEBUG 必须为 n（设备 sub0 下无 xrun_debug）—— 否则 struct snd_pcm_str 多 16 字节"
+#endif
+#ifdef CONFIG_SND_DEBUG
+#error "CONFIG_SND_DEBUG 必须为 n —— 它会让 SND_PCM_XRUN_DEBUG 自动变 y（default y），从而改变 struct snd_pcm_str"
 #endif
 
 #define SZT(n, t) char penmods_sz_##n[sizeof(t)] __attribute__((used))
@@ -118,11 +133,53 @@ SZT(atomic_long, atomic_long_t);
  *
  * `usb_uac2.ko` 会写 `pcm->private_data = uac2`（alsa_uac2_init），
  * 内核会读同一个字段拷进 substream->private_data，我们的 uac2_pcm_open 再读它。
- * 这两个偏移完全由 `struct snd_pcm_str` 的长度决定：
- *     streams[2] 尾部 + CONFIG_SND_VERBOSE_PROCFS 的 2 个指针（各 16B × 2）
- *     streams[2] 尾部 + CONFIG_SND_PCM_OSS 的 struct snd_pcm_oss_stream（× 2）
- * 所以下面这几个数字就是「我们的布局 vs 设备内核布局」是否一致的读数。
+ * 这个偏移完全由 `struct snd_pcm_str` 的长度决定，而 4.4 的定义是
+ * （include/sound/pcm.h，已核对上游 v4.4 原文）：
+ *
+ *     struct snd_pcm_str {
+ *         int stream;                          // 0
+ *         struct snd_pcm *pcm;                 // 8
+ *         unsigned int substream_count;        // 16
+ *         unsigned int substream_opened;       // 20
+ *         struct snd_pcm_substream *substream; // 24
+ *     #if defined(CONFIG_SND_PCM_OSS) || defined(CONFIG_SND_PCM_OSS_MODULE)
+ *         struct snd_pcm_oss_stream oss;       // ← OSS 开关（设备 = n）
+ *     #endif
+ *     #ifdef CONFIG_SND_VERBOSE_PROCFS
+ *         struct snd_info_entry *proc_root;        // 32
+ *         struct snd_info_entry *proc_info_entry;  // 40
+ *     #ifdef CONFIG_SND_PCM_XRUN_DEBUG
+ *         unsigned int xrun_debug;                 // ← 再一层嵌套（设备 = n）
+ *         struct snd_info_entry *proc_xrun_debug_entry;
+ *     #endif
+ *     #endif
+ *         struct snd_kcontrol *chmap_kctl;     // 48
+ *         struct device dev;                   // 56 ★ 无条件，**内嵌整个 struct device**
+ *     };
+ *
+ * 两条容易踩的坑（我第一次就都踩了）：
+ *   ① `chmap_kctl` 和 `dev` 是**无条件**成员，不是指针，`dev` 是**一整个
+ *      struct device`（我们的占位补丁之后是 792 字节）——
+ *      所以 `sizeof(snd_pcm_str) = 56 + sizeof(struct device) = 848`。
+ *      这还意味着 **`struct device` 的大小会直接决定 `struct snd_pcm` 的布局**，
+ *      第五处 ABI（device 占位补丁）和第六处是**耦合**的。
+ *   ② `CONFIG_SND_PCM_XRUN_DEBUG`（`default y`，但 `depends on SND_DEBUG`，
+ *      而 SND_DEBUG 无 default ⇒ 实际为 n）会再插 16 字节。
+ *
+ * 推导（设备实测：VERBOSE_PROCFS=y、OSS=n、XRUN_DEBUG=n、mutex=64、device=792）：
+ *     streams      = 184            （id[64] 到 36、name[80] 到 180，对齐 8）
+ *     snd_pcm_str  = 848            = 56 + 792
+ *     open_mutex   = 1880           = 184 + 2×848
+ *     open_wait    = 1944           = 1880 + 64
+ *     private_data = 1984 ★         = 1944 + 40(wait_queue_head_t)
+ *     private_free = 1992
+ *     sizeof(pcm)  = 2008           = 2000 + bool + bool，对齐 8
+ *
+ * 反过来算当时（CONFIG_SND 没开）的错位：VERBOSE_PROCFS 宏未定义 ⇒ 少两个
+ * 指针 ⇒ snd_pcm_str = 832 ⇒ private_data = 1952，比内核的 1984 **少 32**
+ * —— 与 oops 现场（内核对、我们偏 32，内核读到 kzalloc 的 0）完全吻合。
  */
+SZT(device, struct device);
 SZT(snd_pcm, struct snd_pcm);
 SZT(snd_pcm_str, struct snd_pcm_str);
 SZT(snd_pcm_substream, struct snd_pcm_substream);
