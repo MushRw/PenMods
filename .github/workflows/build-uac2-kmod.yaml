@@ -200,8 +200,9 @@ jobs:
           #   class / groups / release 一起错回 oops。下面把它们全部改成硬断言。
           #
           # 设备侧硬事实（全部为只读探测；"文本符号"只对**函数**有效）：
-          #     cma_alloc / dma_alloc_from_contiguous 不存在、/sys/devices/system/node
-          #         不存在                        ⇒ CONFIG_CMA / DMA_CMA / NUMA = n
+          #     cma_alloc / dma_alloc_from_contiguous 不存在  ⇒ CONFIG_DMA_CMA = n
+          #         （注意：把关 struct device 里 cma_area 的是 DMA_CMA，不是 CMA）
+          #     /sys/devices/system/node 不存在                ⇒ CONFIG_NUMA = n
           #     pinctrl_register / devm_pinctrl_get 都在      ⇒ CONFIG_PINCTRL = y
           #     /sys/class/iommu 存在                          ⇒ CONFIG_IOMMU_API = y
           #     /sys/bus/pci 不存在                            ⇒ CONFIG_PCI = n
@@ -212,7 +213,11 @@ jobs:
           # 机器码表；**只有完全一致才可以去绑 UDC**（设备 panic_on_oops=1）。
           ./scripts/config --enable IOMMU_SUPPORT --enable IOMMU_API || true
           ./scripts/config --enable GENERIC_MSI_IRQ --enable GENERIC_MSI_IRQ_DOMAIN || true
-          ./scripts/config --enable NUMA || true
+          # ⚠️ NUMA 必须显式关掉（原来这里写的是 --enable NUMA，那是个**静默 no-op**：
+          #    arm64 4.4 的 `config NUMA` 依赖 OF_NUMA，enable 了也不会生效，
+          #    于是"按 Kconfig 逐项折算凑出 class=752"的错觉正是被它骗出来的）。
+          #    设备侧证据：/sys/devices/system/node 不存在 ⇒ 内核 NUMA=n。
+          ./scripts/config --disable NUMA || true
           ./scripts/config --disable DMA_CMA || true
           make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig
           # PINCTRL 没有 prompt（只能被驱动 select）；IOMMU_API 依赖 IOMMU_SUPPORT
@@ -227,7 +232,7 @@ jobs:
           # 任何一项与设备不一致 ⇒ 占位点跟着偏 ⇒ class/groups/release 全错 ⇒ 绑 UDC 当场 oops
           # （设备 panic_on_oops=1，没有"试试看"的余地）
           die=0
-          for c in PINCTRL NUMA GENERIC_MSI_IRQ GENERIC_MSI_IRQ_DOMAIN IOMMU_API; do
+          for c in PINCTRL GENERIC_MSI_IRQ GENERIC_MSI_IRQ_DOMAIN IOMMU_API; do
             if grep -q "^CONFIG_${c}=y" .config; then
               echo "  ✅ CONFIG_${c}=y"
             else
@@ -235,9 +240,14 @@ jobs:
               die=1
             fi
           done
-          for c in DMA_CMA CMA; do
+          # 必须为 n 的两个成员（注意判据不是同一组符号）：
+          #   struct device 里的 `struct cma *cma_area` 由 CONFIG_DMA_CMA 把关，
+          #     而 CONFIG_CMA 本身在这条 arm64 defconfig 上就是 y —— 与 struct device 无关，
+          #     不要去关它（关了会连带拆掉 DMA_CMA 依赖，反而看不出差别）。
+          #   `int numa_node` 由 CONFIG_NUMA 把关。
+          for c in DMA_CMA NUMA; do
             if grep -q "^CONFIG_${c}=y" .config; then
-              echo "  ❌ CONFIG_${c}=y —— 设备内核没有 cma_alloc，多出 cma_area 会让结构体整体错位"
+              echo "  ❌ CONFIG_${c}=y —— 设备内核没有该成员，会让 struct device 在 of_node 之前整体错位"
               die=1
             else
               echo "  ✅ CONFIG_${c} 已关闭"
