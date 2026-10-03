@@ -1,0 +1,92 @@
+# PenMods —— 设备内核 struct module 的 ABI 基准
+# ============================================
+#
+# 这份文件里的数字**不是猜的、也不是从某个 defconfig 推的**，是从设备上现成的
+# 厂商模块里直接读出来的：
+#
+#   内核加载模块时，`.gnu.linkonce.this_module` 这块内存里的字段是**内核按它
+#   自己的偏移**读写的；而 `.init = init_module` / `.exit = cleanup_module`
+#   这类字段指向本模块自己的符号，链接器会在**该字段所在位置**生成一条重定位。
+#   所以那条重定位的 `r_offset` 就是**内核真实的 offsetof(字段)**。
+#
+#   （`r_offset` 是相对被重定位节的偏移，而该节的内容就是一个 `struct module`，
+#     因此 r_offset 直接等于字段偏移；节内没有别的起始填充。）
+#
+# 样本（两份互相印证，结果完全一致）
+# ---------------------------------
+#   /usr/lib/modules/hci_uart.ko     1476064 B   md5 8e08f526fc16c0a7df1fc627248e05bc
+#   /system/lib/modules/8723ds.ko    2264408 B   md5 b88aa90b47504c4cb76200a2d3060cf9
+#
+# 复核方式（本机执行，需要设备在线）
+# ---------------------------------
+#   export MSYS_NO_PATHCONV=1
+#   adb -s 2AB2900000800514 pull /usr/lib/modules/hci_uart.ko
+#   python3 tools/uac2-kmod/kmod-layout.py --fingerprint hci_uart.ko
+#   # ⇒ size=704  init=368  exit=680
+#
+# 对照（上游 linux-4.4.159 + 我们 CI 的那套 config）
+# -------------------------------------------------
+#   init=344  exit=672   ⇒ 差 +24 / +8；那 24 字节来自 struct mutex 里的
+#   spinlock_t（设备 CONFIG_DEBUG_SPINLOCK=y，raw_spinlock_t 24 字节）。
+#
+# 注意：align=64 不是从 .ko 的 this_module 节得到的那两个数字里推出来的，
+# 而是该节的 sh_addralign（`struct module` 以 `} ____cacheline_aligned;` 结尾，
+# 而 704 = 64x11 不是 128 的整数倍 ⇒ L1_CACHE_BYTES=64）。
+#
+size  = 704
+align = 64
+name  = 24
+init  = 368
+exit  = 680
+
+# ---------------------------------------------------------------------------
+# 第二份 ABI 基准：configfs / usb_function_instance（与 struct module 无关）
+# ---------------------------------------------------------------------------
+#
+# 这两组数字的来源**和上面不同**，但同样是硬证据 —— 这次是**内核自己的机器码**：
+#
+#   设备 oops 现场会附带崩溃函数的代码 dump（`LR:` 那一块）。
+#   把 `/proc/kallsyms` 报的 `lr = usb_put_function_instance+0x20/0x38` 反推回去，
+#   得到该函数的起始地址，再解码它的机器码：
+#
+#       0x563c  cbz  x0, ...            ; if (!fi) return;
+#       0x5640  stp  x29,x30,[sp,#-32]!
+#       0x5644  mov  x29, sp
+#       0x5648  str  x19,[sp,#16]
+#       0x564c  ldr  x2, [x0, #128]     ; x2 = fi->fd
+#       0x5650  ldr  x1, [x0, #152]     ; x1 = fi->free_func_inst
+#       0x5654  ldr  x19,[x2, #8]       ; x19 = fd->mod
+#       0x5658  blr  x1                 ; ← 崩在这一条（x1 = 0）
+#       0x565c  mov  x0, x19
+#       0x5660  bl   module_put
+#
+#   与 4.4 源码逐条对上
+#       mod = fi->fd->mod; fi->free_func_inst(fi); module_put(mod);
+#   ⇒ 128 / 152 就是内核认为的这两个字段的偏移，没有别的解释空间。
+#
+# 推论：
+#   * fd @128，而 `struct list_head cfs_list` 占 16 字节
+#       ⇒ cg_size = 128 - 16 = 112   ← **与上游 4.4.159 一致，configfs.h 不用改**
+#   * free_func_inst @152（上游布局里应是 144）
+#       ⇒ 设备内核在 set_inst_name(136) 之后**多了一个 8 字节字段**，
+#         fi_size = 160（上游 152）。该字段保持 0 即可：4.4 的 f_uac2 不设
+#         set_inst_name，内核也不会用到它。
+#
+#   旁证：abiprobe 探到内核写下的自指 list_head **只有 @32(ci_entry) 和
+#   @80(cg_children)**。若 config_group 真是 128，新版 config_group_init() 会
+#   INIT_LIST_HEAD(default_groups)，就该多一个 @104 的自指 list_head —— 没有。
+#
+# 复核方式（设备在线，零风险：只读自己的 kzalloc 内存 + 只读内核 .text）
+#   adb -s 2AB2900000800514 shell \
+#     "insmod /userdata/uac2-kmod/abiprobe.ko; dmesg | grep penmods-abiprobe"
+#   # abiprobe_check_kernel_code() 会自己解码内核机器码并和头文件对账
+#
+# 这些键名**故意不叫 size/init/exit**，避免被 layout-patch.py 的
+# `^(size|align|name|init|exit)\s*=` 正则误读成 struct module 的基准。
+cg_size       = 112
+cg_children   = 80
+cg_default_grp= 104
+fi_size       = 160
+fi_fd         = 128
+fi_set_name   = 136
+fi_free       = 152

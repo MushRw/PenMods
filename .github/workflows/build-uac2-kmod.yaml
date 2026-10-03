@@ -1,0 +1,704 @@
+name: Build UAC2 Kernel Module
+
+# 为什么需要这个 workflow
+# ------------------------
+# 目标：让词典笔通过 USB 被电脑识别成「免驱音频设备」（电脑端零安装）。
+# 电脑端零安装的 USB 音频只有一条标准路径：USB Audio Class（UAC）。
+#
+# 但设备内核实测缺两样东西：
+#   1) configfs 建不出 uac2.0 —— 内核没编 f_uac2 / u_audio
+#      （用原厂脚本的真实实例名 uac1.gs0/uac2.gs0/uac1.0/audio.0 复测，全部 ENOENT）
+#   2) FunctionFS 也写不出 UAC 描述符 —— 4.4 的 f_fs.c 里 ffs_do_single_desc()
+#      对 bDescriptorType 是精确 switch，只认 INTERFACE(0x04)/ENDPOINT(0x05)/
+#      HID_DT_HID(0x21)/OTG(0x09)/IASSOC(0x0B)/SS_EP_COMP(0x30)，其余落 default
+#      直接 -EINVAL。UAC 必需的 CS_INTERFACE(0x24)/CS_ENDPOINT(0x25) 必然被拒。
+#      （实测：0x21 能过不是「透传」，而是它恰好等于 HID_DT_HID）
+#
+# 唯一的出路：自己编 f_uac2.ko + u_audio.ko 加载进内核。实测这三条同时成立：
+#   * CONFIG_MODULES=y      —— /proc/modules 里真跑着 hci_uart / 8723ds
+#   * CONFIG_MODVERSIONS=n  —— 现有 .ko 里 __crc_ 符号数 = 0
+#                              ⇒ 不需要 Module.symvers，**不必编译整个内核**
+#   * 模块未签名、modules_disabled=0
+#   * vermagic = 4.4.159 SMP mod_unload aarch64（精确版本已知）
+#   * f_uac2 依赖的 gadget 核心符号（usb_add_function / usb_ep_autoconfig /
+#     config_ep_by_speed ...）与 ALSA 符号在设备 kallsyms 中全部存在
+#
+# 因为 vermagic 里的版本号必须严格是 4.4.159，而 4.4.159 恰好是上游正式发布版，
+# 直接取 kernel.org 的源码即可拿到天然匹配的 vermagic，无需手工篡改。
+#
+# ⚠️ 本 workflow 只负责「编译 + 静态校验」，**不接触设备**。
+#    加载与验证在本地用 adb 分台阶做（见 tools/uac2-kmod/ 注释）。
+
+on:
+  # 本文件所在的专线是 topic/uac2-kmod（不是默认分支 main），因此
+  # workflow_dispatch 端点不会注册（它只对「默认分支上存在的 workflow」注册，
+  # 直接 dispatch 会 404）。主入口走 push：改动模块源码或本文件即自动重编，
+  # 这样每一轮 ABI 迭代都能自动出产物，不必依赖手工触发。
+  push:
+    paths:
+      - 'tools/uac2-kmod/**'
+      - '.github/workflows/build-uac2-kmod.yaml'
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: '目标内核版本（必须与设备 vermagic 一致，当前 = 4.4.159）'
+        required: true
+        default: '4.4.159'
+
+env:
+  KVER: ${{ github.event.inputs.kernel_version || '4.4.159' }}
+  CROSS: aarch64-linux-gnu-
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: 安装构建依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            build-essential bc flex bison libssl-dev libelf-dev \
+            wget xz-utils gcc-aarch64-linux-gnu
+          # 用系统 GCC 11 编 host 工具（modpost/fixdep）。
+          # 不用 archlinux:latest 是因为它的 GCC 14+ 会把
+          # implicit-function-declaration 升级成 error，编不过 4.4 的老脚本。
+          aarch64-linux-gnu-gcc --version | head -1
+          gcc --version | head -1
+
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 缓存内核源码包
+        id: cache-ksrc
+        uses: actions/cache@v4
+        with:
+          path: linux-${{ env.KVER }}.tar.xz
+          key: linux-src-tar-${{ env.KVER }}
+
+      - name: 下载内核源码
+        if: steps.cache-ksrc.outputs.cache-hit != 'true'
+        run: |
+          wget -q "https://cdn.kernel.org/pub/linux/kernel/v4.x/linux-${KVER}.tar.xz"
+          ls -la "linux-${KVER}.tar.xz"
+
+      - name: 解压内核源码
+        run: |
+          tar xf "linux-${KVER}.tar.xz"
+          ls -d "linux-${KVER}"
+          head -5 "linux-${KVER}/Makefile"
+
+      - name: 配置内核并准备模块头文件
+        run: |
+          cd "linux-${KVER}"
+          make ARCH=arm64 CROSS_COMPILE="${CROSS}" defconfig
+          # 关掉会引入 libssl 3.x 不兼容的签名相关项（省掉 extract-cert 编译坑）
+          ./scripts/config \
+            --disable MODULE_SIG --disable MODULE_SIG_ALL \
+            --disable SYSTEM_TRUSTED_KEYRING --disable SYSTEM_REVOCATION_KEYS \
+            --disable MODULE_SIG_FORCE || true
+          # 打开 UAC2 / ALSA 依赖，让 f_uac2.c 能拿到完整的 sound / gadget 头文件
+          # （4.4 的实际开关名是 USB_F_UAC2，由 USB_CONFIGFS_F_UAC2 select）
+          ./scripts/config \
+            --enable SND --enable SND_PCM --enable SND_PCM_ELD \
+            --enable USB_GADGET --enable USB_LIBCOMPOSITE \
+            --enable USB_CONFIGFS --enable USB_CONFIGFS_F_UAC2 || true
+          # ⚠️ 必须关掉 PREEMPT：上游 arm64 defconfig 开着 CONFIG_PREEMPT，编出来的
+          #    vermagic 是 "4.4.159 SMP preempt mod_unload aarch64"，而设备实测是
+          #    "4.4.159 SMP mod_unload aarch64"（无 preempt）。差一个词就 insmod 不了
+          #    （invalid module format），而且 PREEMPT 本身也会影响部分结构体布局。
+          ./scripts/config \
+            --disable PREEMPT --disable PREEMPT_VOLUNTARY \
+            --enable PREEMPT_NONE --disable PREEMPT_COUNT || true
+          # ★★ 关掉 tracing 家族
+          #
+          # 实测证据：原厂 hci_uart.ko / 8723ds.ko 的 .gnu.linkonce.this_module
+          # 节大小都是 704，而用上游 arm64 defconfig 编出来的是 768 —— 差 64 字节。
+          # 后果：内核按**它自己的**偏移往这块内存里读写字段，我们读的是**我们的**
+          # 偏移 ⇒ /proc/modules 里 refcount 打出 9400318 这种垃圾值（其实是
+          # module_core 基址 0x8F7000 附近），rmmod 报 EAGAIN
+          # ("Resource temporarily unavailable")。
+          #
+          # 判据是设备 /proc/kallsyms 里的函数符号（数据符号列不全，但够用）：
+          #   | 判据（kallsyms 里的符号）        | 设备 | 结论                        |
+          #   | static_key*/jump_label* 计数     |  0   | CONFIG_JUMP_LABEL=n         |
+          #   | *ftrace* 计数 / /sys/kernel/tracing | 0 / 无 | FTRACE/TRACING/TRACEPOINTS |
+          #   |                                  |      | /EVENT_TRACING 全 = n       |
+          #   | klp_enable_patch                 |  无  | CONFIG_LIVEPATCH=n          |
+          #   | mod_verify_sig                   |  无  | CONFIG_MODULE_SIG=n         |
+          #   | module_refcount/try_module_get   | 有   | CONFIG_MODULE_UNLOAD=y      |
+          #   | kallsyms_lookup_name             | 有   | CONFIG_KALLSYMS=y（ALL=n）  |
+          # ⇒ 设备把整个 tracing 子系统砍了，而那正好是 struct module 里
+          #   TRACEPOINTS / HAVE_JUMP_LABEL / TRACING / EVENT_TRACING /
+          #   FTRACE_MCOUNT_RECORD 这 5 个 #ifdef 块。
+          # 另外用户栈顶 0x7ff4039000 紧贴 0x8000000000 ⇒ VA_BITS=39（上游是 48），
+          # 一并还原以求配置忠实（这一项不改变 struct module 大小）。
+          ./scripts/config \
+            --disable FTRACE --disable FUNCTION_TRACER --disable DYNAMIC_FTRACE \
+            --disable FTRACE_MCOUNT_RECORD --disable STACK_TRACER \
+            --disable FUNCTION_GRAPH_TRACER --disable TRACING \
+            --disable TRACEPOINTS --disable EVENT_TRACING \
+            --disable TRACEPOINT_BENCHMARK --disable TRACER_SNAPSHOT \
+            --disable LIVEPATCH --disable JUMP_LABEL \
+            --disable KALLSYMS_ALL --disable DEBUG_INFO --disable DEBUG_INFO_DWARF4 \
+            --disable ARM64_VA_BITS_48 --enable ARM64_VA_BITS_39 \
+            || true
+          # ★★ 必须打开 CONFIG_DEBUG_SPINLOCK —— 厂商内核就是开的 ★★
+          #
+          # raw_spinlock_t 在 DEBUG_SPINLOCK=y 时从 4 字节变 24 字节
+          # （多 magic / owner_cpu / owner），于是：
+          #     spinlock_t          4 → 24
+          #     struct mutex       40 → 64
+          #     struct semaphore   24 → 48
+          # 这不是"猜"：三份互相独立的实测证据全部指向同一个结论 ——
+          #   A) 厂商 8723ds.ko 的 .bss 里
+          #        GLBtcBtMpOperLock（realtek 的 `_lock` = struct mutex）size = 64
+          #        wifi_control_sem / GLBtcBtMpRptSema（`_sema` = struct semaphore）size = 48
+          #      —— DEBUG_SPINLOCK=n 时这两个只可能是 40 / 24。
+          #   B) 厂商 .ko 的 struct module offsetof(init) = 368；本工作流的配置矩阵
+          #      实测只有 `+DEBUG_SPINLOCK` 能把我们的 344 顶到 368（因为 struct
+          #      module 里正好有 `#ifdef CONFIG_SYSFS struct mutex param_lock;`）。
+          #   C) 上面两个尺寸与 A) 完全自洽（mutex 64 - semaphore 48 = 16，两种
+          #      配置下差值都是 16，所以 64/48 这一对只能来自 DEBUG_SPINLOCK）。
+          #
+          # ⚠️ 为什么这条对本项目是**安全红线**而不是锦上添花：
+          #   snd_card / snd_pcm_runtime / snd_pcm_substream / usb_gadget 这些
+          #   结构体内部都有 spinlock_t / struct mutex。偏移一错，usb_uac2.ko 就会
+          #   读写内核结构体的错误字段 —— 那是真的会搞坏内核，而不是"加载失败而已"。
+          ./scripts/config --enable DEBUG_KERNEL --enable DEBUG_SPINLOCK || true
+          make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig
+          # ★★★ 第五处 ABI 复刻：struct device 的 #ifdef 成员 ★★★
+          #
+          # 实测（2026-09-27 真机 oops + abiprobe 读内核机器码）：
+          #   afunc_bind → platform_device_register → device_add → sysfs_create_groups
+          #   → internal_create_group 处 "Unable to handle kernel paging request"
+          # 即 offsetof(struct device, groups) 两边不一致。abiprobe 从内核自己的
+          # device_add 机器码里读出（x19 = dev）：
+          #     [x19,#88]  = dev->type    （我们 88  ✅ 一致）
+          #     [x19,#752] = dev->class   （我们 744 ❌ 差 8）
+          #     [x19,#760] = dev->groups  （我们 752 ❌ 差 8）
+          # ⇒ 内核的 struct device 比我们**多 8 字节**，差异落在 type(88)~class 之间。
+          #
+          # struct device 里受 Kconfig 影响的成员一共只有 5 个：
+          #     CONFIG_GENERIC_MSI_IRQ_DOMAIN  struct irq_domain *msi_domain  +8
+          #     CONFIG_PINCTRL                 struct dev_pin_info *pins     +8
+          #     CONFIG_GENERIC_MSI_IRQ         struct list_head msi_list     +16
+          #     CONFIG_NUMA                    int numa_node                 +4
+          #     CONFIG_DMA_CMA                 struct cma *cma_area          +8
+          #
+          # ★ 2026-09-27 修正（上一版按 kallsyms 反推，方向搞反了，已作废）
+          #
+          # 已确认的硬事实（设备文本符号 = 函数；未开 KALLSYMS_ALL 时数据符号本就不列，
+          # 所以只有**函数**的缺失才能当证据）：
+          #     cma_alloc / dma_alloc_from_contiguous 计数 = 0
+          #         ⇒ CONFIG_CMA = n ⇒ CONFIG_DMA_CMA = n  ✅ 硬
+          #     pinctrl_register / devm_pinctrl_get 都在     ⇒ CONFIG_PINCTRL = y  ✅ 硬
+          #     /sys/class/iommu 存在（iommu class 已注册）  ⇒ CONFIG_IOMMU_API = y ✅ 硬
+          #     /sys/bus/pci 不存在                          ⇒ CONFIG_PCI = n
+          #
+          # 目标不是"猜 Kconfig"，而是让 sizeof(struct device) 与内核逐字节相等。
+          # 真机 abiprobe 从内核 device_add 机器码读出的目标值：
+          #     dev->type = 88（与我们一致）、dev->class = 752、dev->groups = 760
+          # 我们（PINCTRL=n、IOMMU_API=n、MSI 全 y、DMA_CMA=y）是 class=744 ⇒ 只差 8。
+          # 逐项折算（以"5 个 #ifdef 成员全关 + archdata=16"为基准 704）：
+          #     +8  PINCTRL      → pins
+          #     +8  IOMMU_API    → struct dev_archdata 从 16 变 24（多一个 void *iommu）
+          #     +8  GENERIC_MSI_IRQ_DOMAIN → msi_domain
+          #     +16 GENERIC_MSI_IRQ        → msi_list
+          #     +8  NUMA         → numa_node（4 + 4 对齐填充）
+          #     = 752 ✅ 与内核实测一致
+          #     DMA_CMA 必须保持 n（内核没有 cma_alloc）
+          # ⇒ 目标：sizeof(struct device) = 792，class=752 groups=760 release=768
+          #
+          # ⚠️ 这一版仍是"待上机复验的假设"。复验方法：编出 abiprobe.ko → insmod →
+          #    比对它打印的 ours 成员表与内核机器码表；**只有完全一致才能去绑 UDC**。
+          ./scripts/config --enable IOMMU_SUPPORT --enable IOMMU_API || true
+          ./scripts/config --enable GENERIC_MSI_IRQ --enable GENERIC_MSI_IRQ_DOMAIN || true
+          ./scripts/config --enable NUMA || true
+          ./scripts/config --disable DMA_CMA || true
+          make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig
+          # PINCTRL 没有 prompt（只能被驱动 select）；IOMMU_API 依赖 IOMMU_SUPPORT
+          # 与 ARCH_HAS_DMA_SET_COHERENT_MASK 之类，所以要在 olddefconfig 之后再补一轮。
+          ./scripts/config --enable PINCTRL || true
+          ./scripts/config --enable IOMMU_API || true
+          make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig
+          echo "=== struct device 相关 Kconfig（实际值） ==="
+          grep -E '^CONFIG_(PINCTRL|PINMUX|PINCONF|GENERIC_PINCONF|DMA_CMA|CMA|IOMMU_SUPPORT|IOMMU_API|GENERIC_MSI_IRQ|GENERIC_MSI_IRQ_DOMAIN|PCI_MSI|PCI|NUMA|PM|PM_SLEEP|PM_GENERIC_DOMAINS)=' .config \
+            || echo "(无匹配)"
+          # 硬断言：只对**已确证**的两项拍死；其余打印出来供上机复验
+          # （设备 panic_on_oops=1，偏移一错就是当场重启）
+          if grep -q '^# CONFIG_PINCTRL is not set' .config; then
+            echo "❌ CONFIG_PINCTRL 仍为 n ⇒ struct device 少 8 字节（pins），绑 UDC 必 oops"; exit 1
+          fi
+          if grep -q '^CONFIG_DMA_CMA=y' .config; then
+            echo "❌ CONFIG_DMA_CMA=y ⇒ struct device 多出 cma_area（设备无 cma_alloc），绑 UDC 必 oops"; exit 1
+          fi
+          if grep -q '^# CONFIG_IOMMU_API is not set' .config; then
+            echo "⚠️ CONFIG_IOMMU_API 仍为 n ⇒ dev_archdata 少 8 字节（iommu），结构体将比内核小 8"
+          fi
+          echo "✅ struct device 相关 Kconfig 已按设备实测目标（sizeof=792 / class=752）设置"
+          # ★★ L1_CACHE_BYTES = 64（不是 arm64 主线的 128）★★
+          #
+          # `struct module` 以 `} ____cacheline_aligned;` 结尾，所以它的尺寸必然是
+          # 对齐数的整数倍。设备实测（原厂 .ko 直读）：
+          #     .gnu.linkonce.this_module  sh_size = 704，sh_addralign = 64
+          # 而 704 = 64×11 —— **不是 128 的整数倍** ⇒ 厂商内核的
+          # `____cacheline_aligned` = SMP_CACHE_BYTES = L1_CACHE_BYTES = 64。
+          # arm64 主线 arch/arm64/include/asm/cache.h 里是
+          #     #define L1_CACHE_SHIFT		7      → 128
+          # 厂商改成了 6 → 64（Cortex-A35 的 L1 行本来就是 64 字节）。
+          # 上一步 `set_cache_shift 7` 的实测对照：
+          #     SHIFT=7 → size=768    SHIFT=6 → size=704   ← 与设备一致
+          # 只改这一个宏：它只影响 `____cacheline_aligned` 的使用者，而我们的
+          # 模块里几乎没有；不碰任何 Kconfig。
+          CACHEH=arch/arm64/include/asm/cache.h
+          echo "--- 原样 ---"; grep -n '^#define L1_CACHE_SHIFT' "$CACHEH"
+          sed -i 's/^#define L1_CACHE_SHIFT.*/#define L1_CACHE_SHIFT\t\t6/' "$CACHEH"
+          echo "--- 修正后 ---"; grep -n '^#define L1_CACHE_SHIFT' "$CACHEH"
+          if ! grep -qE '^#define L1_CACHE_SHIFT[[:space:]]+6$' "$CACHEH"; then
+            echo "❌ L1_CACHE_SHIFT 补丁没打上（锚点不匹配？）；直接失败，避免静默产出错布局"
+            exit 1
+          fi
+          # ★★★ 第二处 ABI 复刻：usb_function_instance 尾部多一个 8 字节字段 ★★★
+          #
+          # 结论先写：**设备内核的 `struct config_group` 是 112 字节，与上游 4.4.159
+          # 完全一样。configfs.h 不需要任何改动。** 前两轮把 +16 / +8 加在 configfs.h
+          # 上，都是**推断错了**（把 free_func_inst 的偏移当成了 set_inst_name）。
+          #
+          # 这次不再推理 —— 证据是**内核自己的机器码**：
+          #   oops 现场自带 `usb_put_function_instance` 的代码 dump（LR 指向它）；
+          #   kallsyms 报 lr = usb_put_function_instance+0x20/0x38，把它反汇编：
+          #       0x563c  cbz  x0, ...            ; if (!fi) return;
+          #       0x5640  stp  x29,x30,[sp,#-32]!
+          #       0x5644  mov  x29, sp
+          #       0x5648  str  x19,[sp,#16]
+          #       0x564c  ldr  x2, [x0, #128]     ; x2 = fi->fd
+          #       0x5650  ldr  x1, [x0, #152]     ; x1 = fi->free_func_inst
+          #       0x5654  ldr  x19,[x2, #8]       ; x19 = fd->mod
+          #       0x5658  blr  x1                 ; ← 崩在这一条
+          #       0x565c  mov  x0, x19
+          #       0x5660  bl   module_put
+          #   与 4.4 源码 `mod = fi->fd->mod; fi->free_func_inst(fi); module_put(mod);`
+          #   逐条对上 ⇒ 这两条 ldr 就是这两个字段的偏移，没有别的解释空间。
+          #
+          # 由此推：
+          #   fd @128，且 `struct list_head cfs_list` 占 16 字节
+          #     ⇒ sizeof(config_group) = 128 - 16 = 112   ← 与上游一致
+          #   free_func_inst @152，而上游布局里它应在 144
+          #     ⇒ 设备内核在 set_inst_name(136) 之后**多了一个 8 字节字段**，
+          #       sizeof(usb_function_instance) = 160（上游 152）
+          #
+          # 两条旁证：
+          #   * abiprobe 探到内核写下的自指 list_head **只在 @32(ci_entry) 和
+          #     @80(cg_children)**。若 config_group 真是 128（尾部长 16），新版
+          #     config_group_init() 会 INIT_LIST_HEAD(default_groups)，
+          #     就该多冒出一个 @104 的自指 list_head —— **没有**。
+          #   * config_item 的字段（ci_namebuf@8 / ci_entry@32 / 名字在 8）完全对上。
+          #
+          # ⚠️ 前两轮为什么会被骗（这一段值得记住）：
+          #   两次 oops 是同一个 bug 的两面 —— 内核去 `free_func_inst` 的位置取函数指针：
+          #     · 补丁前：我们的 func_inst 只有 152 字节 ⇒ 152 处是 p_chmask=3 /
+          #       p_srate=48000 ⇒ 调到 0x0000bb8000000003（第一次 oops 的 pc 就是它）
+          #     · 加 +16 后：我们的 free_func_inst 落到 160，内核仍读 152
+          #       ⇒ 152 处是我们的 set_inst_name = 0 ⇒ blr NULL（第二次 oops）
+          #     · 加 +8 那一版**碰巧**把 free_func_inst 顶到 152，于是 mkdir/rmdir
+          #       都能过 —— 但它是"凑对的"：cfs_list 被顶到 120，内核以为在 112，
+          #       于是内核的 list_add_tail(&fi->cfs_list, ...) 写进了我们
+          #       config_group 的尾部。功能上无害（那些字段我们不用），语义是错的。
+          #   ⇒ 现在改成"每一项都落在内核期望的位置"。
+          #
+          # 🔴 还有个关键坑：为什么补错了 mkdir 却能成功、只有 rmdir 才崩？
+          #   因为 4.4 的 `afunc_alloc_inst()` **从不设 set_inst_name**
+          #   （f_uac2.c 里压根没有这个函数），而 function_make() 写的是
+          #       if (fi->set_inst_name) { ret = fi->set_inst_name(fi, instance_name); }
+          #   —— NULL 就跳过。所以 136~151 这一段"赌"什么都看不出来，
+          #   只有 rmdir 走 usb_put_function_instance() 时才暴露。
+          #   ⇒ **判据必须是 mkdir 和 rmdir 都过。**
+          python3 - <<'PYPATCH_UAC2FI'
+          import io, sys, re
+          p = 'include/linux/usb/composite.h'
+          s = io.open(p, encoding='utf-8').read()
+          pat = re.compile(r'^[ \t]*void \(\*free_func_inst\)\(struct usb_function_instance \*inst\);[ \t]*$', re.M)
+          hits = pat.findall(s)
+          print('usb_function_instance.free_func_inst 锚点命中数 =', len(hits))
+          if len(hits) != 1:
+              sys.exit('❌ 锚点不是恰好 1 处，终止（不允许静默产出错布局）')
+          new = (
+              "\t/*\n"
+              "\t * [PenMods ABI 复刻] 设备内核（rk3326 4.4.159）在这个位置多一个\n"
+              "\t * 8 字节字段。依据是内核自己的 usb_put_function_instance() 机器码：\n"
+              "\t *     ldr x2,[x0,#128]   ; fi->fd           ⇒ config_group 是 112\n"
+              "\t *     ldr x1,[x0,#152]   ; fi->free_func_inst（上游应在 144）\n"
+              "\t * 即 set_inst_name 仍在 136，free_func_inst 落在 152，中间 144 处\n"
+              "\t * 必然还有一个 8 字节字段。\n"
+              "\t * 保持 0 即可：4.4 的 f_uac2 根本不设 set_inst_name，内核也不会用到\n"
+              "\t * 这个额外字段。\n"
+              "\t * 不对齐的后果（真机 oops）：rmdir functions/uac2.0 时\n"
+              "\t * usb_put_function_instance() 按 152 读到的不是我们的函数指针\n"
+              "\t * （是 0，或 p_chmask/p_srate 之类的垃圾）⇒ blr 到 NULL/垃圾 ⇒\n"
+              "\t * panic_on_oops=1 ⇒ 设备立刻重启。\n"
+              "\t */\n"
+              "\tvoid *__penmods_abi_pad;\n"
+              "\tvoid (*free_func_inst)(struct usb_function_instance *inst);"
+          )
+          s = pat.sub(lambda _m: new, s, count=1)
+          io.open(p, 'w', encoding='utf-8', newline='').write(s)
+          print('composite.h ABI 补丁已应用（+8 字节占位）')
+          PYPATCH_UAC2FI
+          grep -n 'set_inst_name\|free_func_inst\|__penmods_abi_pad' include/linux/usb/composite.h
+
+          # ★★★ 第六处 ABI 复刻：struct device 比上游 arm64 4.4 多 8 字节 ★★★
+          #
+          # 实测依据 —— 设备内核 device_add() 自己的机器码（x19 = dev）：
+          #     [x19,#88]  = dev->type       —— 一致 ✅
+          #     [x19,#752] = dev->class      —— 我们 744 ⇒ +8
+          #     [x19,#760] = dev->groups     —— 我们 752 ⇒ +8
+          #     [x19,#768] = dev->release    —— 我们 760 ⇒ +8
+          # 即内核 struct device 整体比上游 4.4 arm64 多 8 字节，且差异发生在
+          # `of_node`（我们 648 / 内核 656）**之前**。
+          #
+          # 已经逐项排除过的嫌疑（写在这里，避免下次再走一遍）：
+          #   * device.h 里那 5 个 #ifdef 成员（GENERIC_MSI_IRQ_DOMAIN / PINCTRL /
+          #     GENERIC_MSI_IRQ / NUMA / DMA_CMA）全部对齐后，仍然差 8：
+          #     因为 PINCTRL(+8) 与 DMA_CMA(-8) 恰好互相抵消。
+          #   * CONFIG_NUMA  —— /sys/devices/system/node 不存在 ⇒ n
+          #   * CONFIG_CMA/DMA_CMA —— /proc/kallsyms 里没有 cma_alloc ⇒ n
+          #   * CONFIG_IOMMU_API —— /sys/class/iommu 存在 ⇒ y（archdata=24，已对齐）
+          #   * 厂商头文件：Rockchip develop-4.4 的 arch/arm64/asm/device.h 与
+          #     include/linux/pm.h（dev_pm_info）与上游逐字相同
+          #   ⇒ 多出来的 8 字节来自一个我们拿不到的厂商私有改动。
+          #
+          # 与其继续「猜它藏在哪」，直接在 `of_node` 之前补 8 字节占位：
+          # **补丁点必然 >= 真实差异点**，于是内核在本设备上访问的每一个
+          # offset（type/kobj/bus/driver_data/of_node/class/groups/release…）
+          # 都会落回正确位置，与差异究竟来自 dev_archdata 还是 dev_pm_info 无关。
+          #
+          # 为什么这样补是安全的：内核只会按「它自己的偏移」读写这个对象，
+          # 双方唯一会打架的是**我们主动写进去的字段**。4.4 的 f_uac2 只写
+          # dev.release 这一处 ⇒ 补 8 字节后它也落在内核的 768 上。
+          #
+          # 不补的后果（真机 oops，已复现一次，panic_on_oops=1 ⇒ 当场重启）：
+          # f_uac2 按我们的偏移把 release 写在 760，而那正是内核的 groups，
+          # device_add() 于是把这个函数指针当 attribute_group 数组遍历 ⇒ 崩。
+          python3 - <<'PYPATCH_DEV'
+          import io, sys, re
+          p = 'include/linux/device.h'
+          s = io.open(p, encoding='utf-8').read()
+          pat = re.compile(r'^([ \t]*)struct device_node[ \t]*\*of_node;', re.M)
+          hits = pat.findall(s)
+          print('struct device.of_node 锚点命中数 =', len(hits))
+          if len(hits) != 1:
+              sys.exit('❌ 锚点不是恰好 1 处，终止（不允许静默产出错布局的 .ko）')
+          pad = (
+              "\t/*\n"
+              "\t * [PenMods ABI 复刻] 设备内核（ydp02x 4.4.159）的 struct device\n"
+              "\t * 比上游 arm64 4.4 多 8 字节。实测（内核 device_add 自己的机器码，\n"
+              "\t * x19 = dev）：type=88 一致，class=752 / groups=760 / release=768，\n"
+              "\t * 而上游布局依次是 744 / 752 / 760 ⇒ 整体 +8，且差异发生在\n"
+              "\t * of_node（上游 648）之前。\n"
+              "\t *\n"
+              "\t * 不猜厂商多出来的是哪个字段（那 5 个 #ifdef 成员、NUMA、\n"
+              "\t * DMA_CMA、IOMMU 都已排除），只在此处补 8 字节占位：补丁点必然\n"
+              "\t * >= 真实差异点，因此内核访问的每一个偏移都会落回正确位置。\n"
+              "\t *\n"
+              "\t * 不补的后果（真机 oops）：f_uac2 写 dev.release（我们算出的 760）\n"
+              "\t * 恰好落在内核的 groups 上，device_add() 把这个函数指针当\n"
+              "\t * attribute_group 数组遍历 ⇒ panic_on_oops=1 ⇒ 设备当场重启。\n"
+              "\t */\n"
+              "\tvoid *__penmods_dev_abi_pad;\n"
+          )
+          s = pat.sub(lambda m: pad + m.group(0), s, count=1)
+          io.open(p, 'w', encoding='utf-8', newline='').write(s)
+          print('device.h ABI 补丁已应用（+8 字节占位，位于 of_node 之前）')
+          PYPATCH_DEV
+          grep -n '__penmods_dev_abi_pad' include/linux/device.h
+
+          # ★★★ 关于 struct module 的 init/exit 偏移 ★★★
+          #
+          # 实测（原厂 hci_uart.ko / 8723ds.ko 的重定位表，两份互相印证）：
+          #     sh_size=704   offsetof(name)=24   offsetof(init)=368   offsetof(exit)=680
+          # arm64 4.4.159 在上面这套配置下编出来的是 init=344 / exit=672。
+          #
+          # ⚠️ 曾经在这里用 python 往 include/linux/module.h 里插
+          #    `char __penmods_abi_pad0[24]` / `__penmods_abi_pad1[8]` 来凑偏移，
+          #    但**那段代码从未真正执行过**（CI 日志里整段缺失，诊断步的
+          #    SHIFT=7 BASE 仍然读出 init=344 就是铁证），而 patch 又是"锚点不匹配
+          #    就静默跳过"的写法 —— 于是变成了一个看不见的坑。
+          #    现在改成**链接后确定性改写**：tools/uac2-kmod/layout-patch.py
+          #    直接按原厂 .ko 实测出的偏移搬移那两条重定位，并且改完自校验、
+          #    不达标就 exit 1。见后面的「ABI 修正」步骤。
+          # 记录关键配置项，便于和设备的 vermagic 对照
+          echo "=== 影响 vermagic 的关键项 ==="
+          grep -E '^CONFIG_(SMP|PREEMPT|PREEMPT_VOLUNTARY|PREEMPT_NONE|MODULE_UNLOAD|MODVERSIONS|MODULE_SIG|ARM64_4K_PAGES|ARM64_VA_BITS)' .config | sort
+          # 自检：不要把"配置没生效"变成静默错误（olddefconfig 的依赖解析、
+          # scripts/config 的拼写错误都可能导致静默失败）
+          for c in CONFIG_DEBUG_SPINLOCK CONFIG_DEBUG_KERNEL; do
+            if grep -q "^${c}=y" .config; then
+              echo "  ✅ ${c}=y"
+            else
+              echo "  ❌ ${c} 没打开 —— 含自旋锁/互斥锁的结构体会整体错位，终止"
+              exit 1
+            fi
+          done
+          grep -n '^#define L1_CACHE_SHIFT' arch/arm64/include/asm/cache.h
+          # ⚠️ GCC 10+ 默认 -fno-common，而 4.4 里 flex/bison 预生成的 dtc 老代码
+          #    （dtc-lexer.lex.c 与 dtc-parser.tab.c）**各自定义了一份 `YYLTYPE yylloc;`**，
+          #    于是链接脚本时报 multiple definition of `yylloc`。给 host 工具加回 -fcommon
+          #    即可（这里显式复刻 4.4 的默认 HOSTCFLAGS 再追加，避免命令行覆盖丢 flag）。
+          HOST_FLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
+          make ARCH=arm64 CROSS_COMPILE="${CROSS}" HOSTCFLAGS="$HOST_FLAGS" \
+            modules_prepare -j"$(nproc)"
+
+      - name: 诊断内核源码中的 UAC 文件
+        run: |
+          FN="linux-${KVER}/drivers/usb/gadget/function"
+          echo "=== function 目录里的 uac / audio 相关文件 ==="
+          ls -la "$FN" | grep -iE 'uac|audio' || echo "(无匹配)"
+          echo "=== Makefile 中的 uac2 规则 ==="
+          grep -n -iE 'uac2|u_audio|g_audio' "$FN/Makefile" || true
+          echo "=== 全树搜索 u_audio.h ==="
+          find "linux-${KVER}" -name 'u_audio.h' -o -name 'u_uac2.h' | head
+          echo "=== f_uac2.c / u_audio.c 的本地 #include 依赖 ==="
+          grep -ho '^#include "[^"]*"' "$FN/f_uac2.c" "$FN/u_audio.c" 2>/dev/null | sort -u || true
+
+      - name: 组装 out-of-tree 模块目录
+        run: |
+          FN="linux-${KVER}/drivers/usb/gadget/function"
+          DEST="$GITHUB_WORKSPACE/tools/uac2-kmod"
+          # 复制主源文件。4.4 只有 f_uac2.c（**自包含**，只 include u_uac2.h）；
+          # u_audio.c 是 4.6+ 才从 f_uac2.c 抽出的 ALSA 公共层，4.4 里不存在，
+          # 所以这里用循环试探而非硬列，避免 cp 某个不存在的文件直接崩。
+          for f in f_uac2.c u_audio.c; do
+            if [ -f "$FN/$f" ]; then cp -v "$FN/$f" "$DEST/"; else echo "(skip) $f 在本内核版本中不存在"; fi
+          done
+          # 自动解析并复制本地引号头（含二级依赖），避免手工遗漏
+          for pass in 1 2 3; do
+            for h in $(grep -ho '^#include "[^"]*"' "$DEST"/*.c "$DEST"/*.h 2>/dev/null \
+                       | sed 's/.*"\(.*\)"/\1/' | sort -u); do
+              [ -f "$DEST/$h" ] && continue
+              if   [ -f "$FN/$h" ];                then cp -v "$FN/$h" "$DEST/"
+              elif [ -f "linux-${KVER}/drivers/usb/gadget/$h" ]; then cp -v "linux-${KVER}/drivers/usb/gadget/$h" "$DEST/"
+              fi
+            done
+          done
+          echo "=== 模块目录最终内容 ==="
+          ls -la "$DEST"
+
+      - name: 编译 utest.ko（空模块探针，验证整条工具链）
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          make -C "linux-${KVER}" M="$PWD/tools/uac2-kmod" \
+            ARCH=arm64 CROSS_COMPILE="${CROSS}" modules
+          ls -la tools/uac2-kmod/*.ko
+
+      - name: 编译 usb_uac2.ko（真实 UAC2 gadget 模块）
+        id: build-uac2
+        continue-on-error: true
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          # 依据实际复制到的源文件组装目标文件列表（4.4 只会是 f_uac2.o）
+          OBJS=""
+          for f in f_uac2.c u_audio.c; do
+            [ -f "tools/uac2-kmod/$f" ] && OBJS="$OBJS ${f%.c}.o"
+          done
+          OBJS="${OBJS# }"
+          echo "UAC2_OBJS = [$OBJS]"
+          make -C "linux-${KVER}" M="$PWD/tools/uac2-kmod" \
+            ARCH=arm64 CROSS_COMPILE="${CROSS}" WITH_UAC2=1 UAC2_OBJS="$OBJS" modules
+          ls -la tools/uac2-kmod/*.ko
+
+      - name: ABI 修正 —— 把 this_module 的两条重定位搬到设备内核的字段偏移
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          # 目标偏移的来源分两级，保证「可追溯」同时「CI 里自足」：
+          #
+          #   ① 若本机放有厂商参考模块（PENMODS_ABI_REF 或 kmod-out/vendor/*.ko），
+          #      就**现取**偏移 —— 判据永远和设备一致。这是首选。
+          #   ② 否则读仓库里提交的 tools/uac2-kmod/ref-abi.txt —— 一份只有 5 个
+          #      数字的基准文件，里面写清了这两份厂商模块的路径与 md5，
+          #      任何人都能拿设备上的 .ko 复核。
+          #      ⚠️ 不把 2MB+ 的厂商二进制塞进仓库（体积 + 授权都不合适）。
+          #   两条路都必须与 layout-patch.py 内置的实测默认值**对账**，
+          #   任何一侧漂移就硬失败 —— 不允许静默用错偏移。
+          REF="${PENMODS_ABI_REF:-}"
+          if [ -z "$REF" ]; then
+            for c in kmod-out/vendor/hci_uart.ko kmod-out/vendor/8723ds.ko; do
+              [ -f "$c" ] && REF="$c" && break
+            done
+          fi
+          python3 - "$REF" <<'PYABI'
+          import importlib.util, re, sys
+          ref_ko = sys.argv[1] if len(sys.argv) > 1 else ''
+          spec = importlib.util.spec_from_file_location('lp', 'tools/uac2-kmod/layout-patch.py')
+          lp = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(lp)
+          builtin = {'size': lp.DEF_SIZE, 'name': lp.DEF_NAME_OFF,
+                     'init': lp.DEF_INIT, 'exit': lp.DEF_EXIT}
+
+          if ref_ko:
+              kl = lp.KL
+              d, shs = kl.load(ref_ko)
+              syms = kl.symbols(d, shs)
+              tm = rela = None
+              for sh in shs:
+                  if sh['sname'] == '.gnu.linkonce.this_module':
+                      tm = sh
+                  if sh['sname'] == '.rela.gnu.linkonce.this_module':
+                      rela = sh
+              if tm is None or rela is None:
+                  sys.exit('❌ 参考模块 %s 里没有 this_module 节/重定位' % ref_ko)
+              got = {'size': tm['size']}
+              for r_offset, sidx, _ in kl.relocs(d, shs, rela):
+                  nm = syms[sidx][0]
+                  if nm == 'init_module':
+                      got['init'] = r_offset
+                  elif nm == 'cleanup_module':
+                      got['exit'] = r_offset
+              # 名字偏移直接扫
+              body = kl.section_bytes(d, tm)
+              for i in range(min(len(body), 256)):
+                  j = body.find(b'\0', i)
+                  if j < 0:
+                      break
+                  seg = body[i:j]
+                  if 2 <= len(seg) <= 56 and all(32 <= c < 127 for c in seg):
+                      got['name'] = i
+                      break
+              src = '厂商参考模块 %s' % ref_ko
+          else:
+              txt = open('tools/uac2-kmod/ref-abi.txt', encoding='utf-8').read()
+              got = {k: int(v) for k, v in
+                     re.findall(r'^(size|align|name|init|exit)\s*=\s*(\d+)', txt, re.M)}
+              src = 'tools/uac2-kmod/ref-abi.txt'
+
+          print('基准来源:', src)
+          print('  基准值  :', got)
+          print('  工具内置:', builtin)
+          bad = [k for k, v in builtin.items() if got.get(k) != v]
+          if bad:
+              sys.exit('❌ 基准漂移: %s —— 基准(%s) 与 layout-patch.py 内置值(%s) 不一致，终止'
+                       % (', '.join(bad), got, builtin))
+          if got.get('align') not in (None, 64):
+              sys.exit('❌ align 基准应为 64（L1_CACHE_BYTES=64），实为 %s' % got.get('align'))
+          print('✅ 基准自洽（size=%d name=%d init=%d exit=%d align=64）'
+                % (got['size'], got['name'], got['init'], got['exit']))
+          PYABI
+
+          rc=0
+          for k in tools/uac2-kmod/*.ko; do
+            [ -e "$k" ] || continue
+            if [ -n "$REF" ]; then
+              python3 tools/uac2-kmod/layout-patch.py "$k" --ref "$REF" || rc=1
+            else
+              python3 tools/uac2-kmod/layout-patch.py "$k" || rc=1
+            fi
+          done
+          if [ "$rc" != 0 ]; then
+            echo "❌ ABI 修正失败 —— 产物不可用，终止（不要让下载到错布局的 .ko）"
+            exit 1
+          fi
+          echo "✅ 全部 .ko 的 this_module 布局已对齐设备内核"
+
+      - name: 静态校验产物（vermagic / 未决符号 / 段信息）
+        run: |
+          cd "$GITHUB_WORKSPACE/tools/uac2-kmod"
+          OUT="$GITHUB_WORKSPACE/kmod-report.txt"
+          : > "$OUT"
+          FAIL=0
+          for k in *.ko; do
+            [ -e "$k" ] || continue
+            {
+              echo "############ $k ############"
+              echo "--- 文件大小 ---"; ls -la "$k"
+              echo "--- vermagic（必须 = 4.4.159 SMP mod_unload aarch64）---"
+              vm=$(strings "$k" | grep -E '^vermagic=' | sort -u | head -1)
+              echo "  $vm"
+              if [ "$vm" != "vermagic=${KVER} SMP mod_unload aarch64" ]; then
+                echo "  ❌ vermagic 必须是 'vermagic=${KVER} SMP mod_unload aarch64'（多一个 preempt 都会 insmod 失败）"
+                FAIL=1
+              else
+                echo "  ✅ vermagic 逐字匹配"
+              fi
+              echo "--- 模块元信息 ---"
+              strings "$k" | grep -E '^(name|license|description|author)=' | sort -u
+              echo "--- this_module 布局（设备实测：size=704 align=64 init=368 exit=680）---"
+              # ⚠️ 不能用 awk 的 strtonum —— ubuntu runner 上的 awk 是 mawk，没有这个函数。
+              #    改成 shell 的 16# 基数算术。
+              line=$(aarch64-linux-gnu-objdump -h "$k" | awk '/gnu.linkonce.this_module/ {print; exit}')
+              hx=$(echo "$line" | awk '{print $3}')
+              alg=$(echo "$line" | awk '{print $NF}')
+              if [ -n "$hx" ]; then
+                dec=$((16#$hx))
+                if [ "$dec" -eq 704 ] && [ "$alg" = "2**6" ]; then
+                  echo "  ✅ size=$dec（=704）align=$alg（=64）—— 与原厂 .ko 逐字一致"
+                else
+                  echo "  ❌ size=$dec（期望 704）align=$alg（期望 2**6）"
+                  echo "     ⇒ L1_CACHE_BYTES 或 struct module 成员没对齐"
+                  FAIL=1
+                fi
+              else
+                echo "  ❌ 未找到 .gnu.linkonce.this_module 节"
+                FAIL=1
+              fi
+              echo "--- ABI 指纹（设备实测：init=368 exit=680，必须一致）---"
+              fpout=$(python3 "$GITHUB_WORKSPACE/tools/uac2-kmod/kmod-layout.py" --fingerprint "$k" 2>/dev/null)
+              echo "  $fpout"
+              finit=$(echo "$fpout" | sed -n 's/.*init=\([0-9]*\).*/\1/p')
+              fexit=$(echo "$fpout" | sed -n 's/.*exit=\([0-9]*\).*/\1/p')
+              if [ "$finit" = "368" ] && [ "$fexit" = "680" ]; then
+                echo "  ✅ init/exit 偏移与设备内核一致"
+              else
+                echo "  ❌ init=$finit exit=$fexit —— 设备要求 init=368 exit=680，模块无法被正确 init/exit"
+                FAIL=1
+              fi
+              echo "--- 未决符号（需由内核提供，应与设备 kallsyms 对得上）---"
+              aarch64-linux-gnu-nm -u "$k" | awk '{print $NF}' | sort -u
+              echo "--- 本模块导出的符号 ---"
+              aarch64-linux-gnu-nm --defined-only "$k" | grep -E ' [TtDdBbRr] ' | head -40 || true
+              echo
+            } >> "$OUT"
+            echo "=== $k ==="; strings "$k" | grep -E '^vermagic=' | sort -u
+          done
+          cat "$OUT"
+          if [ "$FAIL" != 0 ]; then
+            echo "❌ 静态校验未通过（见上面的 ❌ 行）"
+            exit 1
+          fi
+          echo "✅ 静态校验全部通过"
+
+      - name: 上传内核模块产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: penmods-uac2-kmod-${{ env.KVER }}-${{ github.sha }}
+          path: |
+            tools/uac2-kmod/*.ko
+            kmod-report.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      # ─────────────────────────────────────────────────────────────────────
+      # 结构体尺寸指纹
+      # ─────────────────────────────────────────────────────────────────────
+      # 为什么需要：`struct module` 只是**一个** ABI。`usb_uac2.ko` 是**真驱动**，
+      # 会碰 ALSA/USB 那一大票**内含 spinlock_t / struct mutex 的内核结构体**
+      # （snd_card、snd_pcm_runtime、usb_gadget…）。这些结构体里任何一个成员
+      # 尺寸不对，整块内存的字段偏移就全错 ⇒ 我们按自己的偏移读写、内核按它的
+      # 偏移管理 = 真会搞坏内核。所以必须把「配置一致性」变成一个可测量的事实，
+      # 而不是"看起来差不多"。
+      #
+      # 判据从哪来：设备 `/proc/slabinfo` 的 objsize 就是内核自己调用
+      # `kmem_cache_create(name, sizeof(struct X), ...)` 的实参 —— ground truth。
+      # 这里把同一批 `sizeof()` 编出来打一份，两边一比即可。
+      - name: 结构体尺寸指纹（与设备 /proc/slabinfo 的 objsize 对照）
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          make -C "linux-${KVER}" M="$PWD/tools/uac2-kmod/sizeprobe" \
+            ARCH=arm64 CROSS_COMPILE="${CROSS}" modules
+          echo "=========== 结构体尺寸指纹（nm -S 的 size 列 = sizeof）==========="
+          aarch64-linux-gnu-nm -S --defined-only \
+            tools/uac2-kmod/sizeprobe/sizeprobe.ko \
+            | awk '$3 ~ /^[BbDdRr]$/ {print $2, $4}' | sort -k2
+          echo "=========== 影响这些尺寸的关键配置 ==========="
+          grep -E '^CONFIG_(DEBUG_KERNEL|DEBUG_SPINLOCK|DEBUG_MUTEXES|DEBUG_LOCK_ALLOC|LOCKDEP|SMP|SYSFS|KALLSYMS|GENERIC_BUG|MODULES_TREE_LOOKUP|MODULE_UNLOAD|TRACEPOINTS|JUMP_LABEL|SND|SND_PCM|USB_GADGET)=' \
+            "linux-${KVER}/.config" | sort
