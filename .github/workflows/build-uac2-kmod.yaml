@@ -168,7 +168,7 @@ jobs:
           #   读写内核结构体的错误字段 —— 那是真的会搞坏内核，而不是"加载失败而已"。
           ./scripts/config --enable DEBUG_KERNEL --enable DEBUG_SPINLOCK || true
           make ARCH=arm64 CROSS_COMPILE="${CROSS}" olddefconfig
-          # ★★★ 第五处 ABI 复刻：struct device 的 #ifdef 成员 ★★★
+          # ★★★ 第五处 ABI 复刻：struct device 在 of_node 之前的成员要逐项对准 ★★★
           #
           # 实测（2026-09-27 真机 oops + abiprobe 读内核机器码）：
           #   afunc_bind → platform_device_register → device_add → sysfs_create_groups
@@ -176,43 +176,40 @@ jobs:
           # 即 offsetof(struct device, groups) 两边不一致。abiprobe 从内核自己的
           # device_add 机器码里读出（x19 = dev）：
           #     [x19,#88]  = dev->type    （我们 88  ✅ 一致）
-          #     [x19,#752] = dev->class   （我们 744 ❌ 差 8）
-          #     [x19,#760] = dev->groups  （我们 752 ❌ 差 8）
-          # ⇒ 内核的 struct device 比我们**多 8 字节**，差异落在 type(88)~class 之间。
+          #     [x19,#752] = dev->class
+          #     [x19,#760] = dev->groups
+          #     [x19,#768] = dev->release
           #
-          # struct device 里受 Kconfig 影响的成员一共只有 5 个：
+          # struct device 里受 Kconfig 影响的成员一共只有 5 个，**全部位于 of_node 之前**：
           #     CONFIG_GENERIC_MSI_IRQ_DOMAIN  struct irq_domain *msi_domain  +8
           #     CONFIG_PINCTRL                 struct dev_pin_info *pins     +8
           #     CONFIG_GENERIC_MSI_IRQ         struct list_head msi_list     +16
           #     CONFIG_NUMA                    int numa_node                 +4
           #     CONFIG_DMA_CMA                 struct cma *cma_area          +8
+          # 另加 dev_archdata（CONFIG_IOMMU_API 决定它是 16 还是 24 字节）。
           #
-          # ★ 2026-09-27 修正（上一版按 kallsyms 反推，方向搞反了，已作废）
+          # ★ 2026-09-27 第一次修正：上一版按 /proc/kallsyms 反推，把
+          #   DMA_CMA / NUMA / MSI 全关 —— **方向反了**，上机后 class 从 744 掉到 712。
+          #   踩的坑：未开 KALLSYMS_ALL 时 kallsyms 只列函数，数据符号缺失是
+          #   **假阴性**，不能当作"该功能没编进内核"的证据。
+          # ★ 2026-10-03 第二次修正（现行结论）：把 PINCTRL(+8) 与 DMA_CMA(-8) 一起
+          #   放开后**仍然**差 8，说明这 5 个成员**不是**差值来源；真正多出来的 8 字节
+          #   来自一个拿不到的厂商私有改动 —— 已在下一步用"占位"消掉。
+          #   ⚠️ 但下面这几行配置**仍然是必需的**：占位补丁插在 `of_node` 之前，
+          #   所以 of_node 之前必须逐字节精确，任何一项错都会让占位点跟着偏移，
+          #   class / groups / release 一起错回 oops。下面把它们全部改成硬断言。
           #
-          # 已确认的硬事实（设备文本符号 = 函数；未开 KALLSYMS_ALL 时数据符号本就不列，
-          # 所以只有**函数**的缺失才能当证据）：
-          #     cma_alloc / dma_alloc_from_contiguous 计数 = 0
-          #         ⇒ CONFIG_CMA = n ⇒ CONFIG_DMA_CMA = n  ✅ 硬
-          #     pinctrl_register / devm_pinctrl_get 都在     ⇒ CONFIG_PINCTRL = y  ✅ 硬
-          #     /sys/class/iommu 存在（iommu class 已注册）  ⇒ CONFIG_IOMMU_API = y ✅ 硬
-          #     /sys/bus/pci 不存在                          ⇒ CONFIG_PCI = n
+          # 设备侧硬事实（全部为只读探测；"文本符号"只对**函数**有效）：
+          #     cma_alloc / dma_alloc_from_contiguous 不存在、/sys/devices/system/node
+          #         不存在                        ⇒ CONFIG_CMA / DMA_CMA / NUMA = n
+          #     pinctrl_register / devm_pinctrl_get 都在      ⇒ CONFIG_PINCTRL = y
+          #     /sys/class/iommu 存在                          ⇒ CONFIG_IOMMU_API = y
+          #     /sys/bus/pci 不存在                            ⇒ CONFIG_PCI = n
           #
-          # 目标不是"猜 Kconfig"，而是让 sizeof(struct device) 与内核逐字节相等。
-          # 真机 abiprobe 从内核 device_add 机器码读出的目标值：
-          #     dev->type = 88（与我们一致）、dev->class = 752、dev->groups = 760
-          # 我们（PINCTRL=n、IOMMU_API=n、MSI 全 y、DMA_CMA=y）是 class=744 ⇒ 只差 8。
-          # 逐项折算（以"5 个 #ifdef 成员全关 + archdata=16"为基准 704）：
-          #     +8  PINCTRL      → pins
-          #     +8  IOMMU_API    → struct dev_archdata 从 16 变 24（多一个 void *iommu）
-          #     +8  GENERIC_MSI_IRQ_DOMAIN → msi_domain
-          #     +16 GENERIC_MSI_IRQ        → msi_list
-          #     +8  NUMA         → numa_node（4 + 4 对齐填充）
-          #     = 752 ✅ 与内核实测一致
-          #     DMA_CMA 必须保持 n（内核没有 cma_alloc）
-          # ⇒ 目标：sizeof(struct device) = 792，class=752 groups=760 release=768
-          #
-          # ⚠️ 这一版仍是"待上机复验的假设"。复验方法：编出 abiprobe.ko → insmod →
-          #    比对它打印的 ours 成员表与内核机器码表；**只有完全一致才能去绑 UDC**。
+          # 目标不是"猜 Kconfig"，而是让 sizeof(struct device) 与内核逐字节相等：
+          #     dev->type=88（一致）、class=752、groups=760、release=768
+          # 复验方法：编出 abiprobe.ko → insmod → 比对它打印的 ours 成员表与内核
+          # 机器码表；**只有完全一致才可以去绑 UDC**（设备 panic_on_oops=1）。
           ./scripts/config --enable IOMMU_SUPPORT --enable IOMMU_API || true
           ./scripts/config --enable GENERIC_MSI_IRQ --enable GENERIC_MSI_IRQ_DOMAIN || true
           ./scripts/config --enable NUMA || true
@@ -226,18 +223,28 @@ jobs:
           echo "=== struct device 相关 Kconfig（实际值） ==="
           grep -E '^CONFIG_(PINCTRL|PINMUX|PINCONF|GENERIC_PINCONF|DMA_CMA|CMA|IOMMU_SUPPORT|IOMMU_API|GENERIC_MSI_IRQ|GENERIC_MSI_IRQ_DOMAIN|PCI_MSI|PCI|NUMA|PM|PM_SLEEP|PM_GENERIC_DOMAINS)=' .config \
             || echo "(无匹配)"
-          # 硬断言：只对**已确证**的两项拍死；其余打印出来供上机复验
-          # （设备 panic_on_oops=1，偏移一错就是当场重启）
-          if grep -q '^# CONFIG_PINCTRL is not set' .config; then
-            echo "❌ CONFIG_PINCTRL 仍为 n ⇒ struct device 少 8 字节（pins），绑 UDC 必 oops"; exit 1
-          fi
-          if grep -q '^CONFIG_DMA_CMA=y' .config; then
-            echo "❌ CONFIG_DMA_CMA=y ⇒ struct device 多出 cma_area（设备无 cma_alloc），绑 UDC 必 oops"; exit 1
-          fi
-          if grep -q '^# CONFIG_IOMMU_API is not set' .config; then
-            echo "⚠️ CONFIG_IOMMU_API 仍为 n ⇒ dev_archdata 少 8 字节（iommu），结构体将比内核小 8"
-          fi
-          echo "✅ struct device 相关 Kconfig 已按设备实测目标（sizeof=792 / class=752）设置"
+          # 硬断言：这 5 个 #ifdef 成员 + dev_archdata 全部位于 of_node 之前，
+          # 任何一项与设备不一致 ⇒ 占位点跟着偏 ⇒ class/groups/release 全错 ⇒ 绑 UDC 当场 oops
+          # （设备 panic_on_oops=1，没有"试试看"的余地）
+          die=0
+          for c in PINCTRL NUMA GENERIC_MSI_IRQ GENERIC_MSI_IRQ_DOMAIN IOMMU_API; do
+            if grep -q "^CONFIG_${c}=y" .config; then
+              echo "  ✅ CONFIG_${c}=y"
+            else
+              echo "  ❌ CONFIG_${c} 不是 y —— struct device 在 of_node 之前会错位，绑 UDC 必 oops"
+              die=1
+            fi
+          done
+          for c in DMA_CMA CMA; do
+            if grep -q "^CONFIG_${c}=y" .config; then
+              echo "  ❌ CONFIG_${c}=y —— 设备内核没有 cma_alloc，多出 cma_area 会让结构体整体错位"
+              die=1
+            else
+              echo "  ✅ CONFIG_${c} 已关闭"
+            fi
+          done
+          [ "$die" = 0 ] || exit 1
+          echo "✅ struct device 相关 Kconfig 已按设备实测目标（of_node=648 + 占位 8 = 656 / class=752）设置"
           # ★★ L1_CACHE_BYTES = 64（不是 arm64 主线的 128）★★
           #
           # `struct module` 以 `} ____cacheline_aligned;` 结尾，所以它的尺寸必然是
@@ -484,6 +491,129 @@ jobs:
           done
           echo "=== 模块目录最终内容 ==="
           ls -la "$DEST"
+
+      - name: 修补 f_uac2.c 描述符 —— 让 Windows usbaudio2.sys 能启动设备
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          # ★★★ 第七处「复刻」：不是 ABI，而是**描述符合规性** ★★★
+          #
+          # 现象（2026-10-03 真机）：设备侧全链路已通（uac2.gs0 绑进 configs/b.1、
+          # UDC state=configured、/proc/asound/cards 出现 UAC2_Gadget、ALSA 出
+          # pcmC1D0{p,c}、无 oops），但 Windows 侧：
+          #     USB\VID_2207&PID_0019&MI_00   MEDIA   Error
+          #     Problem = CM_PROB_FAILED_START (Code 10)
+          #     DEVPKEY_Device_ProblemStatus = 0xC0440025
+          # 同一复合设备的 MI_03(WPD) / MI_04(ADB) 均正常，说明问题只出在音频功能。
+          #
+          # 根因（两条独立证据链指向同一结论）：
+          #   ① Microsoft「USB Audio 2.0 Drivers」文档原文：
+          #      "For the asynchronous OUT case, the driver supports explicit feedback
+          #       only. A feedback endpoint must be implemented in the respective
+          #       alternate setting of the AS interface. The driver doesn't support
+          #       implicit feedback."
+          #   ② wdmaudiodev 邮件列表里同为 UAC2 gadget 的开发者实测：
+          #      "I get 0xC0440025 which ... means that the driver can't find the
+          #       corresponding explicit sync input" —— 错误码**逐位对上**，
+          #      且其后续复盘写着 "problems around 'no feedback endpoint for an
+          #       asynchronous data OUT'"。
+          # 我们 4.4 上游 f_uac2.c 的 4 个数据端点全部写成
+          #     USB_ENDPOINT_XFER_ISOC | USB_ENDPOINT_SYNC_ASYNC   (= 0x05)
+          # 却**完全没有实现 feedback 端点** ⇒ 正是 0xC0440025 的触发条件。
+          #
+          # ③ 第三方独立佐证：Rockchip 工程师 William Wu 的提交
+          #    「usb: gadget: f_uac2: fix some issues for Windows recognized」
+          #    （5e962a03f65f203a8d49aa771b5b7feeaa6fd6f5）对**同一份 4.4 代码**
+          #    给出同样的结论："it's difficult to implement the feedback endpoint
+          #    now. So the patch changes the bmAttributes of OUT-EP to adaptive,
+          #    and changes the bmAttributes of IN-EP to synchronous at the same
+          #    time." —— 本步骤就是照它做。
+          # ④ Rockchip 厂商内核（rockchip-linux/kernel@develop-4.4，同代 rk3326 的
+          #    正式发布内核）里 f_uac2.c 的实际取值，与本补丁**完全一致**：
+          #      fs/hs_epout_desc.bmAttributes = ISOC | SYNC_ADAPTIVE  (0x09)
+          #      fs/hs_epin_desc.bmAttributes  = ISOC | SYNC_SYNC      (0x0d)
+          #      io_in_it_desc.wTerminalType   = UAC_INPUT_TERMINAL_MICROPHONE (0x0201)
+          #      io_out_ot_desc.wTerminalType  = UAC_OUTPUT_TERMINAL_SPEAKER   (0x0301)
+          #
+          # 为什么「终端类型」也必须一起改：
+          #    上游 f_uac2 把 io_in_it_desc / io_out_ot_desc 的 wTerminalType 写成
+          #    UAC_{INPUT,OUTPUT}_TERMINAL_UNDEFINED（0x0200 / 0x0300）。
+          #    raspberrypi/linux#4587 的完整排查记录里，最终**唯一**能让设备起来的
+          #    改动就是这两个字段（"windows seems to be a little picky about the
+          #    wTerminalType ... After I changed these ... it started to work"），
+          #    上游随后以「usb: gadget: f_uac2: Define specific wTerminalType」系列
+          #    补丁正式修掉。
+          #
+          # 第四处（wTotalLength）：UAC2 规范 4.7.2 要求 AC Header 的 wTotalLength
+          #    "includes the combined length of this descriptor header and all Unit
+          #    and Terminal descriptors"，而 4.4 的实现漏掉了自己这 9 字节。
+          #    Rockchip 那个提交把它一并修了（"we also fix the wTotalLength of the
+          #    ac_hdr_desc"），这里照做。
+          #
+          # ⚠️ 为什么选「改成 adaptive/synchronous」而不是「补上 feedback 端点」：
+          #    实现 feedback 端点要新增端点、周期性发送 16.16 定点的反馈包，还得改
+          #    ALSA 侧的回调；那是**在真机上跑的新代码路径**，而本项目的最高红线是
+          #    「别把设备搞崩」。改两个 bmAttributes 是纯描述符常量，内核里没有
+          #    任何代码根据这两个值分支 ⇒ 风险为零。Windows 文档明确支持
+          #    "Adaptive IN and OUT" 与 "Synchronous IN and OUT"。
+          #
+          # ⚠️ 本轮**不动** c_srate 默认值（4.4 的 UAC2_DEF_CSRATE = 64000，非标准
+          #    采样率，设备实测 c_srate=64000 / p_srate=48000）。它是下一个可疑点，
+          #    但本轮的变量只保留「描述符」一个，便于错误码归因；真需要时可以先在
+          #    设备上直接 `echo 48000 > .../uac2.gs0/c_srate` 试，不必重编。
+          python3 - <<'PYPATCH_UAC2_WIN'
+          import io, sys, re
+
+          p = 'tools/uac2-kmod/f_uac2.c'
+          s = io.open(p, encoding='utf-8').read()
+          fails = []
+
+          def sub1(pat, repl, label, flags=0):
+              global s
+              new, n = re.subn(pat, repl, s, count=1, flags=flags)
+              print('  [%-34s] 命中 %d' % (label, n))
+              if n != 1:
+                  fails.append(label)
+              else:
+                  s = new
+
+          # ① 终端类型：Windows usbaudio2.sys 不接受 UNDEFINED 终端
+          sub1(r'UAC_INPUT_TERMINAL_UNDEFINED\b',
+               'UAC_INPUT_TERMINAL_MICROPHONE', 'io_in_it_desc.wTerminalType')
+          sub1(r'UAC_OUTPUT_TERMINAL_UNDEFINED\b',
+               'UAC_OUTPUT_TERMINAL_SPEAKER', 'io_out_ot_desc.wTerminalType')
+
+          # ② 数据端点的同步类型（0xC0440025 的直接元凶）
+          for name, sync in (('fs_epout_desc', 'ADAPTIVE'), ('hs_epout_desc', 'ADAPTIVE'),
+                             ('fs_epin_desc', 'SYNC'),     ('hs_epin_desc', 'SYNC')):
+              sub1(r'(static struct usb_endpoint_descriptor ' + name +
+                   r' = \{.*?\.bmAttributes = USB_ENDPOINT_XFER_ISOC \| USB_ENDPOINT_SYNC_)ASYNC',
+                   r'\g<1>' + sync, name + '.bmAttributes', flags=re.S)
+
+          # ③ AC Header 的 wTotalLength 漏掉了自己
+          sub1(r'\.wTotalLength = sizeof in_clk_src_desc',
+               '.wTotalLength = sizeof ac_hdr_desc + sizeof in_clk_src_desc',
+               'ac_hdr_desc.wTotalLength')
+
+          if fails:
+              sys.exit('❌ 以下锚点没有恰好命中 1 次，终止（绝不允许静默产出 '
+                       'Windows 认不出的描述符）: ' + ', '.join(fails))
+
+          io.open(p, 'w', encoding='utf-8', newline='').write(s)
+          print('f_uac2.c Windows 兼容补丁已应用（终端类型 + 同步类型 + wTotalLength）')
+          PYPATCH_UAC2_WIN
+          echo "=== 修补结果（期望：2 处 TERMINAL_，4 处 SYNC_ADAPTIVE/SYNC_SYNC，1 处 wTotalLength） ==="
+          grep -n 'wTerminalType\|USB_ENDPOINT_SYNC\|wTotalLength' tools/uac2-kmod/f_uac2.c
+          # 硬断言：任何一处漏改都必须让 CI 直接红，不能靠肉眼看日志
+          if grep -q 'TERMINAL_UNDEFINED' tools/uac2-kmod/f_uac2.c; then
+            echo "❌ 仍有 UNDEFINED 终端类型 ⇒ Windows 不会启动该功能"; exit 1
+          fi
+          if grep -q 'USB_ENDPOINT_SYNC_ASYNC' tools/uac2-kmod/f_uac2.c; then
+            echo "❌ 仍有 SYNC_ASYNC 数据端点；Windows 要求其配套 feedback 端点（我们不实现）"; exit 1
+          fi
+          if grep -q 'wTotalLength = sizeof in_clk_src_desc' tools/uac2-kmod/f_uac2.c; then
+            echo "❌ wTotalLength 没补上 ac_hdr_desc 自身长度"; exit 1
+          fi
+          echo "✅ 描述符已满足 Windows usbaudio2.sys 的音频流要求"
 
       - name: 编译 utest.ko（空模块探针，验证整条工具链）
         run: |
