@@ -131,7 +131,7 @@
 
 /* ── 同时必须把 MSI 关掉（2026-10-03 修正；原来写的是 --enable，方向反了）──
  * 设备侧判据：
- *     /sys/devices/platform/*/msi_irqs  一个都没有（count = 0）
+ *     /sys/devices/platform/ 下每个 msi_irqs   一个都没有（count = 0）
  *     /sys/bus/pci 不存在                ⇒ CONFIG_PCI = n
  *     kallsyms 里 msi_domain_alloc_irqs / msi_create_irq_domain 全无
  *   ⇒ 没有 PCIe 的 SoC 不会开 MSI。
@@ -141,7 +141,7 @@
  * 开着的话 struct device 会多 msi_list(16) + msi_domain(8) = 24 字节，
  * 而这 24 字节正是当年被误判成"厂商私有 +8"的那笔账的另一半。 */
 #if IS_ENABLED(CONFIG_GENERIC_MSI_IRQ)
-#error "CONFIG_GENERIC_MSI_IRQ 必须为 n（设备 /sys/devices/platform/*/msi_irqs count=0）—— 否则 struct device 多 16 字节（msi_list）"
+#error "CONFIG_GENERIC_MSI_IRQ 必须为 n（设备 /sys/devices/platform/ 下每个 msi_irqs 均为空）—— 否则 struct device 多 16 字节（msi_list）"
 #endif
 #if IS_ENABLED(CONFIG_GENERIC_MSI_IRQ_DOMAIN)
 #error "CONFIG_GENERIC_MSI_IRQ_DOMAIN 必须为 n（设备无 PCIe、无 msi_domain）—— 否则 struct device 多 8 字节（msi_domain）"

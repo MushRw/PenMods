@@ -901,8 +901,11 @@ static int __init abiprobe_init(void)
 	BUILD_BUG_ON(sizeof(struct timer_list) != 80);
 	BUILD_BUG_ON(sizeof(struct pm_qos_request) != 176);
 	BUILD_BUG_ON(offsetof(struct snd_pcm_substream, runtime) != 312);
-	/* 同时保证 MSI 是关的（设备 /sys/devices/platform/*/msi_irqs count = 0）；
-	 * 开着的话 struct device 会多 24 字节，class/groups/release 全错。 */
+	/* 同时保证 MSI 是关的（设备 /sys/devices/platform/ 下每个 msi_irqs 都是空的）；
+	 * 开着的话 struct device 会多 24 字节，class/groups/release 全错。
+	 * ⚠️ 这里原来写成 `platform` 加斜杠星号加斜杠的路径通配形式，其中的
+	 *    斜杠星号斜杠把本行注释**提前终结**了 ⇒ 后面整段中文被当成 C 代码，
+	 *    编译爆出几十条 "stray \357"。已由 tools/uac2-kmod/c-comment-lint.py 卡住。 */
 #ifdef CONFIG_GENERIC_MSI_IRQ
 #error "CONFIG_GENERIC_MSI_IRQ 必须为 n —— 否则 struct device 多 16 字节"
 #endif
