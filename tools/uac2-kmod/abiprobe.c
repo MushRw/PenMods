@@ -31,6 +31,8 @@
 #include <linux/usb/composite.h>
 #include <linux/device.h>
 #include <linux/platform_device.h>	/* sizeof(struct platform_device) 需要完整类型 */
+#include <sound/core.h>			/* struct snd_pcm 布局（2026-10-03 aplay oops） */
+#include <sound/pcm.h>
 
 #define ABIPROBE_BUFSZ 512
 #define ABIPROBE_NAME  "PMABIPROBE"
@@ -455,6 +457,176 @@ static void abiprobe_check_device_add(void)
 	}
 }
 
+/* ── struct snd_pcm 布局探测（2026-10-03 aplay oops 逼出来的）───────────────
+ *
+ * 事故（真机，aplay -D hw:1,0 打开 UAC2 的 PCM 时）：
+ *     PC is at uac2_pcm_open+0x20/0x190 [usb_uac2]
+ *     30d8  f9400816   ldr  x22, [x0, #16]     ; substream->private_data
+ *     30e0  f85f02c1   ldur x1,  [x22, #-16]   ; ← 崩，x22 = 0
+ * 即 `substream->private_data` 是 0。它在 `snd_pcm_attach_substream()` 里由
+ *     substream->private_data = pcm->private_data;
+ * 拷过来 ⇒ 真正错的是**我们写 `pcm->private_data` 的偏移**。
+ *
+ * 根因：我们的 CI 里 `CONFIG_SND` 从未真正打开（workflow 漏了 `--enable SOUND`，
+ * 而 `config SND depends on SOUND`，arm64 defconfig 又完全没有 sound 配置项）
+ * ⇒ `CONFIG_SND_VERBOSE_PROCFS` = n ⇒ `struct snd_pcm_str` 尾部少了
+ * proc_root / proc_info_entry 两个指针（×2 个 stream = 32 字节）
+ * ⇒ struct snd_pcm 里 private_data 的偏移比内核**小 32** ⇒ 那句
+ * `pcm->private_data = uac2;` 写到了内核结构体的别的字段上，内核在真偏移处
+ * 读到 kzalloc 出来的 0。
+ *
+ * 这里仍然**不靠推理** —— 读内核自己的机器码：
+ *   ① `_snd_pcm_new()` 里有 `pcm = kzalloc(sizeof(*pcm), GFP_KERNEL);`
+ *      展开成 `mov w0, #<size>` … `bl __kmalloc`，那个立即数就是内核的
+ *      sizeof(struct snd_pcm)。
+ *   ② `snd_pcm_attach_substream()` 里有 `substream->private_data =
+ *      pcm->private_data;`，机器码形如 `ldr xN,[xP,#imm]` + `str xN,[xS,#16]`。
+ *      str 的 imm 必然是 16（oops 现场也证实），所以找到那条 str 再回溯
+ *      写同一寄存器的那条 ldr，imm 就是 offsetof(struct snd_pcm, private_data)。
+ * 全程**只读内核 .text**，不碰 ALSA / USB / UDC ⇒ 可放心 insmod。
+ *
+ * ⚠️ 函数名踩过的坑（值得记住）：`kzalloc(sizeof(*pcm))` 那一句在
+ *    **`_snd_pcm_new()`** 里（static，名字带**下划线前缀**），而
+ *    `snd_pcm_new()` / `snd_pcm_new_internal()` 都只是 28 字节的薄 wrapper
+ *    （尾调用 `_snd_pcm_new`）。第一版照 4.4 源码去找 `snd_pcm_new_internal`
+ *    时，kallsyms 报出它和 `snd_pcm_attach_substream` 只差 **0x34 字节**
+ *    —— 一个几百字节的函数不可能只占 52 字节，正是这个"不可能的数字"
+ *    暴露了找错了函数。教训：**kallsyms 的地址是准的，不合理的间距说明
+ *    你找错了符号**。
+ */
+#define ABIPROBE_SNDPCM_SCAN	96	/* _snd_pcm_new 长 0x150=336B ⇒ 84 条，留余量 */
+#define ABIPROBE_ATTACH_SCAN	180	/* snd_pcm_attach_substream 长 0x294=660B ⇒ 165 条 */
+
+static int abiprobe_find_kzalloc_size(const char *fname)
+{
+	const u32 *p;
+	unsigned long addr;
+	int i, j;
+
+	if (!kallsyms_lookup_name)
+		return -1;
+	addr = kallsyms_lookup_name(fname);
+	if (!addr) {
+		pr_info("penmods-abiprobe: [pcm] 找不到 %s\n", fname);
+		return -1;
+	}
+	p = (const u32 *)addr;
+	pr_info("penmods-abiprobe: [pcm] %s @ 0x%lx —— 扫 %d 条指令找 kzalloc 的 size\n",
+		fname, addr, ABIPROBE_SNDPCM_SCAN);
+	for (i = 0; i < ABIPROBE_SNDPCM_SCAN; i++) {
+		u32 w = p[i];
+		int imm;
+
+		/* MOVZ (wide immediate) 32-bit：0x52800000 | (imm16<<5) | Rd
+		 * 只认 Rd = w0（kzalloc 的 size 参数就是 w0） */
+		if ((w & 0xFFE0001F) != 0x52800000)
+			continue;
+		imm = (int)((w >> 5) & 0xFFFF);
+		if (imm < 256 || imm > 16384)
+			continue;
+		/* 往后 10 条内必须有 bl（= kzalloc 展开出来的 __kmalloc） */
+		for (j = i + 1; j <= i + 10 && j < ABIPROBE_SNDPCM_SCAN + 32; j++) {
+			if ((p[j] & 0xFC000000) != 0x94000000)
+				continue;
+			pr_info("penmods-abiprobe: [pcm]   +0x%03x: movz w0, #%d   ...   +0x%03x: bl\n",
+				i * 4, imm, j * 4);
+			return imm;
+		}
+	}
+	pr_info("penmods-abiprobe: [pcm] 没扫到（编译器没把它编成 movz w0, #imm）\n");
+	return -1;
+}
+
+static int abiprobe_find_pcm_privdata_off(void)
+{
+	const u32 *p;
+	unsigned long addr;
+	int i, j, rt;
+
+	if (!kallsyms_lookup_name)
+		return -1;
+	addr = kallsyms_lookup_name("snd_pcm_attach_substream");
+	if (!addr) {
+		pr_info("penmods-abiprobe: [pcm] 找不到 snd_pcm_attach_substream\n");
+		return -1;
+	}
+	p = (const u32 *)addr;
+	for (i = 0; i < ABIPROBE_ATTACH_SCAN; i++) {
+		u32 w = p[i];
+		unsigned imm;
+
+		/* STR (immediate, unsigned offset) 64-bit：
+		 *   0xF9000000 | (imm12 << 10) | (Rn << 5) | Rt
+		 * 我们要的是 `substream->private_data` 那一句：偏移恒为 16
+		 * ⇒ imm12 = 16 / 8 = 2。 */
+		if ((w & 0xFFC00000) != 0xF9000000)
+			continue;
+		imm = ((w >> 10) & 0xFFF) * 8;
+		if (imm != 16)
+			continue;
+		rt = (int)(w & 0x1F);
+		/* 回溯 ≤16 条，找写**同一寄存器**的 LDR —— 那正是 pcm->private_data */
+		for (j = i - 1; j >= 0 && j >= i - 16; j--) {
+			u32 w2 = p[j];
+			unsigned v;
+
+			if ((w2 & 0xFFC00000) != 0xF9400000)
+				continue;
+			if ((int)(w2 & 0x1F) != rt)
+				continue;
+			v = ((w2 >> 10) & 0xFFF) * 8;
+			if (v < 128 || v > 2048)
+				continue;	/* 不是 private_data 那个量级 */
+			pr_info("penmods-abiprobe: [pcm]   +0x%03x: str x%u, [x%u, #16]   ←   "
+				"+0x%03x: ldr x%u, [x%u, #%u]\n",
+				i * 4, rt, (w >> 5) & 0x1F,
+				j * 4, rt, (w2 >> 5) & 0x1F, v);
+			return (int)v;
+		}
+	}
+	pr_info("penmods-abiprobe: [pcm] 没扫到 private_data 的偏移\n");
+	return -1;
+}
+
+static void abiprobe_check_snd_pcm(void)
+{
+	int ksz, koff;
+
+	pr_info("penmods-abiprobe: ============= struct snd_pcm 布局探测 =============\n");
+	pr_info("penmods-abiprobe: [pcm] ours: sizeof(snd_pcm)=%d sizeof(snd_pcm_str)=%d "
+		"sizeof(snd_pcm_substream)=%d\n",
+		(int)sizeof(struct snd_pcm), (int)sizeof(struct snd_pcm_str),
+		(int)sizeof(struct snd_pcm_substream));
+	pr_info("penmods-abiprobe: [pcm] ours: streams=%d open_mutex=%d open_wait=%d "
+		"private_data=%d private_free=%d\n",
+		(int)offsetof(struct snd_pcm, streams),
+		(int)offsetof(struct snd_pcm, open_mutex),
+		(int)offsetof(struct snd_pcm, open_wait),
+		(int)offsetof(struct snd_pcm, private_data),
+		(int)offsetof(struct snd_pcm, private_free));
+	pr_info("penmods-abiprobe: [pcm] ours: snd_pcm_str: proc_root=%d proc_info_entry=%d\n",
+		(int)offsetof(struct snd_pcm_str, proc_root),
+		(int)offsetof(struct snd_pcm_str, proc_info_entry));
+
+	ksz = abiprobe_find_kzalloc_size("_snd_pcm_new");
+	koff = abiprobe_find_pcm_privdata_off();
+
+	if (ksz > 0 && koff > 0) {
+		if (ksz == (int)sizeof(struct snd_pcm) &&
+		    koff == (int)offsetof(struct snd_pcm, private_data))
+			pr_info("penmods-abiprobe: [pcm] ✅ 内核与 OURS **完全一致**"
+				"（sizeof=%d / private_data=%d）⇒ 可以安全绑 UDC\n",
+				ksz, koff);
+		else
+			pr_info("penmods-abiprobe: [pcm] ❌ **不一致**！内核 sizeof=%d / private_data=%d，"
+				"我们 %d / %d ⇒ 绝对不要绑 UDC（会和 2026-10-03 一样 oops）\n",
+				ksz, koff, (int)sizeof(struct snd_pcm),
+				(int)offsetof(struct snd_pcm, private_data));
+	} else {
+		pr_info("penmods-abiprobe: [pcm] ⚠️ 没能同时取到两个 ground truth，不作结论\n");
+	}
+}
+
 static void abiprobe_ours(void)
 {	pr_info("penmods-abiprobe: ================= 我们编译时的偏移 (ours) =================\n");
 	pr_info("penmods-abiprobe: ours: CONFIGFS_ITEM_NAME_LEN = %d\n",
@@ -521,6 +693,13 @@ static int __init abiprobe_init(void)
 	 *   afunc_bind→platform_device_register→device_add→sysfs_create_groups，
 	 *   即 offsetof(struct device, groups) 两边不一致。 */
 	abiprobe_check_device_add();
+
+	/* ★ 探 struct snd_pcm 的布局 —— 2026-10-03 `aplay -D hw:1,0` 时崩在
+	 *   uac2_pcm_open+0x20（解引用 substream->private_data = NULL）。
+	 *   根因是 `pcm->private_data` 的偏移比内核小 32 字节。
+	 *   ⚠️ 这一项**必须在绑 UDC 之前跑通过**才能继续 —— 设备 panic_on_oops=1，
+	 *   偏移错了不是"加载失败"，而是当场 oops + 重启。 */
+	abiprobe_check_snd_pcm();
 
 	buf = kzalloc(ABIPROBE_BUFSZ, GFP_KERNEL);
 	if (!buf)
