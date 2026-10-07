@@ -1,0 +1,77 @@
+name: Build PP-OCR backend
+
+# The experimental PP-OCRv5 backend (tools/ppocr-backend) is NOT part of the
+# xmake build: its shim must be cross-built with a real aarch64-linux-gnu-g++
+# whose sysroot is glibc 2.27 and which ships omp.h/libgomp. zig (what the
+# main PenMods build uses) cannot be used -- it defines _OPENMP but has no
+# OpenMP runtime, so every ncnn layer would run single-threaded (3.8x slower).
+#
+# Produces the single-file installer dist/penmods-ppocr.sh:
+#   adb push penmods-ppocr.sh /userdisk/ && adb shell 'sh /userdisk/penmods-ppocr.sh'
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/ppocr-backend/**'
+      - '.github/workflows/build-ppocr.yaml'
+
+env:
+  GCC_BASE_URL: https://github.com/Redbeanw44602/aarch64-linux-gnu-gcc-6.5.0/releases/download/6.5.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm \
+            base-devel git wget curl python3 ninja cmake nasm libxcrypt
+
+      - name: Install aarch64-linux-gnu toolchain (glibc 2.27 + OpenMP)
+        run: |
+          wget -q "${{ env.GCC_BASE_URL }}/aarch64-linux-gnu-binutils-2.30-1-x86_64.pkg.tar.zst"
+          wget -q "${{ env.GCC_BASE_URL }}/aarch64-linux-gnu-glibc-2.27-1-any.pkg.tar.zst"
+          wget -q "${{ env.GCC_BASE_URL }}/aarch64-linux-gnu-gcc-6.5.0-1-x86_64.pkg.tar.zst"
+          pacman -U --noconfirm \
+            aarch64-linux-gnu-binutils-2.30-1-x86_64.pkg.tar.zst \
+            aarch64-linux-gnu-glibc-2.27-1-any.pkg.tar.zst \
+            aarch64-linux-gnu-gcc-6.5.0-1-x86_64.pkg.tar.zst
+          aarch64-linux-gnu-gcc --version
+          # build.sh hard-fails without omp.h; assert it here for a clear message
+          test -f "$(aarch64-linux-gnu-g++ -print-file-name=include)/omp.h"
+          echo "omp.h OK"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache ncnn + models
+        uses: actions/cache@v4
+        with:
+          path: tools/ppocr-backend/.cache
+          key: ppocr-cache-20240820
+
+      - name: Build the one-file installer
+        working-directory: tools/ppocr-backend
+        run: |
+          chmod +x scripts/*.sh
+          scripts/fetch-deps.sh
+          scripts/build.sh
+          scripts/make-bundle.sh
+
+      - name: Report installer checksum
+        working-directory: tools/ppocr-backend
+        run: |
+          ls -la dist/
+          sha256sum dist/penmods-ppocr.sh
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: penmods-ppocr-${{ github.sha }}
+          path: tools/ppocr-backend/dist/penmods-ppocr.sh
+          retention-days: 30
