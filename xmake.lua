@@ -48,7 +48,7 @@ option_end()
 
 set_license('GPL-3.0-only')
 
-set_version('2.3.2')
+set_version('2.4.1')
 
 set_allowedarchs('linux|arm64-v8a')
 
@@ -133,3 +133,8 @@ target('QrcExporter')
     add_packages(
         'spdlog',
         'dobby')
+
+-- 内嵌 FFmpeg 播放器插件（Haikure/ffmpeg-player，vendored 在 external/ffmpeg-player/）
+-- 独立 target，产物 qml/FFmpegPlayer/{libffmpegplayerplugin.so,qmldir} 需单独部署：
+--   scripts/deploy_ffmpeg_player.sh
+includes('external/ffmpeg-player')

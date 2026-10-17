@@ -91,6 +91,61 @@ regenerate it; do not patch the wrapper by hand.
 - `src/media/MediaSession` — `mediaSession` context property; a plugin that plays its own audio claims it to
   drive the quick settings panel, otherwise the panel reads the host `mediaPlayerManager`. See `### Plugin System`.
 
+### MathJax Formula Rendering Service
+
+`mathjax-server/` is the local service that renders LaTeX to PNG for the AI assistant (Node + MathJax 3 +
+resvg-js); `build.sh` bundles it into a single-file aarch64 executable with esbuild + pkg. It is **not included
+in the OTA package** — the binary has to be shipped to users separately (the client starts it from
+`chatbot.mathServerPath`, launching it when the assistant page opens and no process is detected).
+
+- Output size: always rasterize at the fixed `REF_EM` base size and **only shrink, never enlarge**
+  (`MAX_RENDER_WIDTH` caps the width; height is unlimited and the client scrolls). Scaling a small formula up
+  to a "minimum readable height" made the font size vary several-fold within a single answer.
+- Wrapping: a formula that does not fit is broken into several images at one uniform size instead of being
+  shrunk as a whole — first stacked inside `\boxed{…}` (`\begin{array}{l}`), then split at top-level
+  operators/arrows/full-width punctuation, and finally hard-split inside `\text{…}` with the macros re-closed
+  at the cut. The break tables are `BREAK_BEFORE_COMMANDS` / `BREAK_AFTER_COMMANDS` and the per-formula line
+  budget is `MAX_WRAP_LINES`. If every break attempt fails, rasterization shrinks the single whole formula to
+  the width cap — that is a last resort, not the normal path.
+- **CJK depends on a reachable font; system fonts are the default.** MathJax emits
+  `<text font-family="serif">` for characters its own fonts lack (Chinese and friends); with no CJK-capable face
+  reachable, resvg draws nothing for those runs and the remaining glyphs collapse together. The tested YDP02X
+  ships CJK system fonts — `/usr/share/fonts` is a symlink to `/usr/lib/fonts` and holds `NotoSansSC-*.otf` and
+  `HYQiHei-*.ttf` — and resvg-js 2.6.2 reaches them through fontdb's pure-Rust fontconfig support (it parses
+  `/etc/fonts/fonts.conf` itself, follows the symlink, and needs no fontconfig cache; verified on-device by
+  rendering `\text{中文}` through a server build that did no font work at all). The service therefore renders
+  with `loadSystemFonts: true` and `defaultFontFamily: "Noto Sans SC"` and ships **no** font file. An explicit
+  font is used only when one is actually supplied — `MATHJAX_FONT=<path>`, or a file named `wqy-microhei.ttc` in
+  `/userdata/PenMods` or `/userdisk/PenMods` — for units that genuinely lack CJK fonts; that mode copies the file
+  atomically into a writable dir (`MATHJAX_FONT_DIR` → temp dir → `/userdata/PenMods` → `/userdisk/PenMods`),
+  reads the real family from its name table, rewrites only the `<text>` font-family and sets
+  `loadSystemFonts: false`. Both paths are checked by a startup probe that renders `汉` and counts ink, so
+  `cjkFont` reports a *measured* result instead of an assumption; if neither path inks, only Chinese is lost and
+  every other formula still renders. The probe only counts ink, so a font that lacks CJK but defines `.notdef`
+  renders tofu boxes and still passes. In resvg-js 2.6.2 the `serifFamily` / `sansSerifFamily` / `cursiveFamily` /
+  `fantasyFamily` / `monospaceFamily` options are parsed but never read — only `defaultFontFamily` matters.
+- `/health` returns `renderer` (currently 3), `cjkFont`, `cjkFontPath` (only in explicit-font mode, otherwise
+  null), `cjkFontFamily`, `cjkFontSource` (`system` | `file` | `none`) and `cjkFontError`; `/render` returns only
+  `renderer`, `cjkFont` and `cjkFontFamily`. The client probes `/health`, treats `renderer >= 2` as modern, and
+  warns once each when the renderer is too old or `cjkFont === false`. **Bump `RENDERER_VERSION`** whenever
+  renderer behaviour changes (3 = system fonts by default, no bundled font).
+- The client paces itself at roughly 8 requests/second and de-duplicates concurrent requests for the same
+  formula (`MathCache.js`, which also owns the 1200-entry cache); the 429 exponential backoff lives in
+  `MathBubble.qml`. An old server lets through only 10 requests/second per IP, which used to reject the second
+  half of the formulas in a long answer. Server-side limiting is `RATE_LIMIT_PER_SECOND`.
+- Verify with: `echo '{"latex":"\\boxed{\\text{中文}}","display":true,"screenWidth":320}' | curl -s -X POST
+  http://127.0.0.1:3000/render -H 'Content-Type: application/json' -d @-`, then save the returned base64 as a
+  PNG and check it by eye (the dimensions alone do not tell you whether the Chinese glyphs are missing).
+- Smoke-testing on the dev host needs the x86_64 binding, which this repo does not ship. Install it **without
+  touching the arm64 one**, e.g. `npm install --prefix /tmp/resvgx64 @resvg/resvg-js-linux-x64-gnu@2.6.2` and run
+  with `NODE_PATH=/tmp/resvgx64/node_modules node index.js`. Do **not** run a bare
+  `npm install @resvg/resvg-js-linux-x64-gnu` in `mathjax-server/`: npm treats the arm64 package as
+  platform-incompatible and prunes it, and `build.sh` then produces a ~5 MB smaller binary that dies on the device
+  with `Cannot find module '@resvg/resvg-js-linux-arm64-gnu'`. Restore it with
+  `npm pack @resvg/resvg-js-linux-arm64-gnu@2.6.2` + `tar -xzf … --strip-components=1 -C
+  node_modules/@resvg/resvg-js-linux-arm64-gnu`, and always start the freshly built binary once before pushing it
+  to a device.
+
 ### Host Objects Used from PenMods QML
 
 | QML name | Host class | Notes |
@@ -113,6 +168,7 @@ persisted as `righthandmode` in `/userdata/DictPenData/NeteaseYoudao/YoudaoDictP
 | `src/tweaker/` | Feature flags, DB limit patches, wordbook tweaks, keyboard |
 | `src/dict/` | Custom dictionaries (`customDict`): scans `/userdisk/PenMods/dicts/`, queries user-made `.dat` containers through the vendor reader and injects the hit into the main result page as its own section (see `doc/DICT_FORMAT_ANALYSIS.md`) |
 | `src/filemanager/` | File browser, MusicPlayer, VideoPlayer, TextReader, ImageViewer |
+| `external/ffmpeg-player/` | Vendored upstream QML video player plugin (in-scene-graph rendering, ASS/LRC subtitles, MPP hard decode behind a runtime gate) |
 | `src/helper/` | AntiEmbs, NetworkSettings, DeveloperSettings, ServiceManager |
 | `src/system/` | BatteryInfo, InputDaemon, ScreenManager, AudioDaemon |
 | `src/plugin/` | PluginManager, PluginSDK.h (public C ABI), QmlPluginWrapper |
@@ -214,6 +270,51 @@ around `/userdisk/mpv/bin/mpv` (0.36.0, `vo=wlshm`, config in `/userdisk/mpv/con
 so it never learns about left/right hand mode; the mod passes `--video-rotate=180` in left-hand mode. `--video-rotate`
 rotates the video frame only — subtitles/OSD are composited by the VO afterwards and stay unrotated (add `--vf=sub` to
 render them into the frame before the autorotate post-filter if that ever needs to change).
+
+### Embedded FFmpeg Player (QML plugin)
+
+`external/ffmpeg-player/` vendors [`Haikure/ffmpeg-player`](https://github.com/Haikure/ffmpeg-player) v1.0.1
+(GPL-3.0) — a Qt 5 QML video player that renders **into the host scene graph** (custom `QSGNode`, static FFmpeg
+3.4.8 + libass + OpenSSL 3 + libxml2), so the picture follows `YMainWindow.rotation` and PenMods controls can sit on
+top of it. `xmake build ffmpegplayerplugin` produces `build/<plat>/<arch>/<mode>/qml/FFmpegPlayer/`;
+`scripts/deploy_ffmpeg_player.sh` pushes it to `/userdata/PenMods/qml/FFmpegPlayer/` (tmp + rename, then restarts
+the app). `src/mod/Engine.cpp` adds `/userdata/PenMods/qml` as an import path before the main QML loads, so the page
+`resource/models/YDP02X/qml/audiopages/ExternalPlayer.qml` can `import FFmpegPlayer 1.0`;
+`ExternalPlayer::open()` skips the mpv process while that module exists (mpv stays the fallback). Full analysis and
+device measurements: `doc/FFMPEG_PLAYER_ANALYSIS.md`.
+
+- **Hard-decode gate — do not remove.** The stock device tree disables the VPU (`/proc/device-tree/vpu_combo` =
+  `disabled`), and the vendor MPP userspace still reports `mpp_check_support_format() == 0`; `mpp_init()` then
+  dereferences NULL and **kills the whole process** (measured: `unhandled level 2 translation fault (11) at 0x00000000`,
+  `PC is at 0x0`). `Mod::BeforeMain()` therefore sets `FFPLAYER_HWDEC=0` whenever `/dev/vpu_service` is missing. With a
+  VPU-enabled kernel/DTB the same build uses `h264_rkmpp`/`hevc_rkmpp` and `hardwareDecoding` becomes true. Any process
+  that loads this plugin outside the mod (e.g. `qmlscene` smoke tests) must set `FFPLAYER_HWDEC=0` itself — note the
+  device's `adbd` environment may already carry it (`cat /proc/$(pidof adbd)/environ`).
+- **VPU experimental switch.** `src/tweaker/VpuUnlock.*` (context property `vpuUnlock`, switch under
+  更多设置 → 系统微调 → 实验性功能) turns the VPU patch on and off from the UI: it backs the factory boot image up to
+  `/userdisk/PenMods/boot_stock.img` once, rewrites `vpu_combo/status` **inside the DTB in the boot image**
+  (`/userdisk/PenMods/boot_vpu.img`), flashes the active `boot_<slot>` partition with a read-back md5 check, and
+  reboots; turning it off restores the backup and reboots. Only the property *value* is rewritten, never its length —
+  shortening `disabled\0` to 5 bytes would move the next token and corrupt the blob. Node matching must not assume a
+  depth (`vpu_combo` sits under the root). The player page is `qml/audiopages/ExternalPlayer.qml` (tap reveals the OSD when it is
+  hidden and toggles play/pause when it is shown; long press = 2x boost; horizontal drag = seek with preview;
+  `-10s/+10s`/speed/subtitle chips; auto `.ass`/`.lrc` next to the video; plugin-drawn progress bar). The back button
+  lives inside the OSD so the picture stays clean while the OSD is hidden.
+- Build inputs: the vendored subproject is **skipped unless `PENMODS_WITH_PLAYER=1`** is exported (`xmake build` then
+  builds the mod only, which is what CI does — the player's dependency chain needs ~40 min of from-source FFmpeg/OpenSSL3/
+  libass and a container with `unzip`/`perl`). `PENMODS_FFMPEG_PLAYER_SW=1` additionally builds a software-only variant
+  (or simply remove `external/dictpen/librockchip_mpp.so.1` + `libdrm.so.2`); the upstream-supplied
+  `ffplayer-openssl3` package is pinned to `3.5.6` (xmake-repo has no `3.5.7`) and `network_revision` is bumped
+  to force ffmpeg package rebuilds. `external/dictpen/*.so`
+  are **symlinks** in git (a zip download turns them into text files and breaks `-lrockchip_mpp`). On this dev machine
+  the xmake-repo `python` recipe needed `--enable-optimizations` removed (PGO test flake) because `harfbuzz` builds
+  through `meson`.
+- The vendored `src/` is **not** pristine: `src/VideoRenderNode.hpp` carries a `// PENMODS PATCH` section that replaces
+  the single `GL_LINEAR` fetch with an adaptive N×N downsample when the video is larger than its display rect (upstream
+  minified without mipmaps, so >screen-resolution video aliased into a "sharpened" look; measured 13× excess
+  high-frequency energy at 1080p→302×170, now within the range of mpv/swscale). Keep the patch, and re-apply it when
+  syncing upstream. After any `src/` change, do a **full** plugin rebuild — an incremental build can mix v-old/v-new
+  objects and abort the host at `VideoPlayer` construction (see `external/ffmpeg-player/UPSTREAM.md`).
 
 ### Touch Calibration (udev rule)
 
@@ -382,9 +483,10 @@ Clone `git@github.com:Lyrecoul/penmods-ota.git`. Its layout:
 | Path | Content |
 |---|---|
 | `updates.json` | Manifest served at jsDelivr `@main` (the URL the updater fetches) |
-| `template/_do_update.sh` | On-device installer: remounts `/` rw, copies `libPenMods.so` to `/userdata/PenMods/`, touches `INSTALL_SUCCESSFULLY` |
+| `template/_do_update.sh` | On-device installer: remounts `/` rw, copies `libPenMods.so` to `/userdata/PenMods/`, then `libPenModsResources.so` when the package carries it, touches `INSTALL_SUCCESSFULLY` |
 | `template/libPenMods.so` | Staging copy of the current release `.so` |
-| `update_vX.Y.Z.zip` | The published archive: `_do_update.sh` + `libPenMods.so` at the **archive root** (no top-level dir) |
+| `template/libPenModsResources.so` | Staging copy of the QML resource library (shipped since v2.4.0 — see below) |
+| `update_vX.Y.Z.zip` | The published archive: `_do_update.sh` + the two `.so` files at the **archive root** (no top-level dir) |
 
 The OTA repo tags with a **lowercase** `v` (`v2.0.0`, `v2.3.0`) — distinct from this repo's `VX.Y.Z`.
 
@@ -392,18 +494,24 @@ The OTA repo tags with a **lowercase** `v` (`v2.0.0`, `v2.3.0`) — distinct fro
 
 ```sh
 cp build/linux/arm64-v8a/release/libPenMods.so <ota>/template/libPenMods.so
+cp build/linux/arm64-v8a/release/libPenModsResources.so <ota>/template/libPenModsResources.so
 python3 - <<'PY'
 import zipfile, os, hashlib
 os.chdir('<ota>')
 zp = 'update_vX.Y.Z.zip'
 with zipfile.ZipFile(zp, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-    for name in ('_do_update.sh', 'libPenMods.so'):
+    for name in ('_do_update.sh', 'libPenMods.so', 'libPenModsResources.so'):
         zi = zipfile.ZipInfo(name)
         zi.external_attr = (0o755 if name.endswith('.sh') else 0o644) << 16
         z.writestr(zi, open(os.path.join('template', name), 'rb').read())
 print(os.path.getsize(zp), hashlib.md5(open(zp, 'rb').read()).hexdigest())
 PY
 ```
+
+Since v2.4.0 the package also carries `libPenModsResources.so`: a device that already has that file in
+`/userdata/PenMods/` keeps using it in preference to the copy compiled into `libPenMods.so` (`Engine.cpp`), so updating
+only the main library would pair new C++ with stale QML. `_do_update.sh` copies it when present, which also turns a
+device that never had it into one that loads resources externally — same content either way.
 
 Then add an entry to `updates.json` (`size`/`md5` are those of the **zip**, not the `.so`):
 
