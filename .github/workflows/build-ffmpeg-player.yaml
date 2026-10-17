@@ -1,0 +1,143 @@
+name: Build FFmpeg Player Plugin
+
+# 内嵌 FFmpeg 播放器（external/ffmpeg-player，vendored Haikure/ffmpeg-player v1.0.1）
+# 默认不参与任何构建：external/ffmpeg-player/xmake.lua 第 23 行有
+#   if not os.getenv("PENMODS_WITH_PLAYER") then return
+# 因为它的依赖链要从源码编 FFmpeg 3.4.8 / OpenSSL 3.5.6 / libass / libxml2
+# + freetype/harfbuzz/fribidi（harfbuzz 经 meson 还会拉 python），首次约 40 分钟。
+#
+# 产物：build/linux/arm64-v8a/release/qml/FFmpegPlayer/
+#   ├── libffmpegplayerplugin.so
+#   └── qmldir
+# 部署：scripts/deploy_ffmpeg_player.sh（或手动推 /userdata/PenMods/qml/FFmpegPlayer/）
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'external/ffmpeg-player/**'
+      - '.github/workflows/build-ffmpeg-player.yaml'
+
+env:
+  GCC_BASE_URL: https://github.com/Redbeanw44602/aarch64-linux-gnu-gcc-6.5.0/releases/download/6.5.0
+  QT_DIR: ${{ github.workspace }}/qt-aarch64
+  XMAKE_PACKAGES_DIR: ~/.xmake/packages
+  XMAKE_ROOT: y
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # 依赖链很长，给足时间
+    timeout-minutes: 180
+    container:
+      image: archlinux:latest
+
+    steps:
+      - name: 安装基础依赖
+        run: |
+          pacman -Syu --noconfirm
+          # unzip/perl 是 openssl3 zip 包与 harfbuzz 的 meson 需要
+          pacman -S --noconfirm \
+            base-devel git zig wget curl python3 ninja cmake nasm \
+            libxcrypt lame opencc qt5-tools qt5-base \
+            unzip perl pkgconf yasm
+
+      - name: 安装 aarch64-linux-gnu 工具链
+        run: |
+          wget -q "${{ env.GCC_BASE_URL }}/aarch64-linux-gnu-binutils-2.30-1-x86_64.pkg.tar.zst"
+          wget -q "${{ env.GCC_BASE_URL }}/aarch64-linux-gnu-glibc-2.27-1-any.pkg.tar.zst"
+          wget -q "${{ env.GCC_BASE_URL }}/aarch64-linux-gnu-gcc-6.5.0-1-x86_64.pkg.tar.zst"
+          pacman -U --noconfirm \
+            aarch64-linux-gnu-binutils-2.30-1-x86_64.pkg.tar.zst \
+            aarch64-linux-gnu-glibc-2.27-1-any.pkg.tar.zst \
+            aarch64-linux-gnu-gcc-6.5.0-1-x86_64.pkg.tar.zst
+          aarch64-linux-gnu-gcc --version
+
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: 缓存 Qt 5.15.2
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.QT_DIR }}
+          key: qt-aarch64-5.15.2
+
+      - name: 下载 Qt 5.15.2
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        run: |
+          wget -q \
+            https://github.com/Redbeanw44602/aarch64-linux-qt-5.15.2/releases/latest/download/aarch64-linux-qt-5.15.2.tar.gz \
+            -O /tmp/qt.tar.gz
+          mkdir -p ${{ env.QT_DIR }}
+          tar -xzf /tmp/qt.tar.gz -C ${{ env.QT_DIR }}
+
+      - name: 构建 fake qmake
+        run: |
+          g++ -fmax-errors=1 \
+            -o "${{ env.QT_DIR }}/bin/qmake" \
+            -D"PREFIX=\"${{ env.QT_DIR }}\"" \
+            "${{ env.QT_DIR }}/bin/qmake.cpp"
+          "${{ env.QT_DIR }}/bin/qmake"
+          ${{ env.QT_DIR }}/bin/moc --version
+
+      # 播放器的依赖链（FFmpeg/OpenSSL3/libass/harfbuzz）编一次很贵，单独缓存
+      - name: 缓存 xmake 包（播放器依赖链）
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.XMAKE_PACKAGES_DIR }}
+          key: ffplayer-pkgs-${{ hashFiles('external/ffmpeg-player/xmake.lua', 'external/ffmpeg-player/patches/**') }}
+          restore-keys: |
+            ffplayer-pkgs-
+
+      - name: 缓存 xmake 编译缓存
+        uses: actions/cache@v4
+        with:
+          path: ~/.xmake/cache
+          key: ffplayer-cache-${{ github.sha }}
+          restore-keys: |
+            ffplayer-cache-
+
+      - name: 配置 xmake（启用播放器）
+        run: |
+          pacman -U --noconfirm binary/xmake-git-3.0.3.r259-1-x86_64.pkg.tar.zst
+          xmake repo -u
+          # opencc_dict 路径修正（与主构建一致）
+          sed -i \
+            's|format("COMMAND\\n      %s/bin/opencc_dict", path.unix(package:dep("opencc"):installdir()))|"COMMAND\\n      /bin/opencc_dict"|g' \
+            ~/.xmake/repositories/xmake-repo/packages/o/opencc/xmake.lua
+          PENMODS_WITH_PLAYER=1 xmake f \
+            --qt="${{ env.QT_DIR }}" \
+            --arch=arm64-v8a \
+            --build-platform=YDP02X \
+            --target-channel=dev \
+            --toolchain=zig \
+            -m release \
+            -y \
+            --cross=aarch64-linux-gnu.2.27
+
+      - name: 编译 FFmpeg 播放器插件
+        run: |
+          # UPSTREAM.md 明确要求：同步 src/ 或依赖后必须删对象文件全量重编，
+          # 否则 moc 不重编会产生「混编 .so」，在 QML 创建 VideoPlayer 时
+          # libc++abi: terminating + Aborted 直接带走宿主进程。
+          rm -rf build/.objs/ffmpegplayerplugin build/.gens/ffmpegplayerplugin \
+                 build/linux/arm64-v8a/release/libffmpegplayerplugin.so \
+                 build/linux/arm64-v8a/release/qml/FFmpegPlayer
+          PENMODS_WITH_PLAYER=1 xmake build ffmpegplayerplugin
+
+      - name: 检查产物
+        run: |
+          ls -la build/linux/arm64-v8a/release/qml/FFmpegPlayer/
+          file build/linux/arm64-v8a/release/qml/FFmpegPlayer/libffmpegplayerplugin.so
+          # 确认是 aarch64 ELF
+          readelf -h build/linux/arm64-v8a/release/qml/FFmpegPlayer/libffmpegplayerplugin.so | grep Machine
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpegplayer-${{ github.sha }}
+          path: build/linux/arm64-v8a/release/qml/FFmpegPlayer/
+          retention-days: 30
